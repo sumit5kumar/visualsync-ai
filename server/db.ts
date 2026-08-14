@@ -39,21 +39,31 @@ export async function getUserByOpenId(openId: string) {
 export async function listUserProjects(userId: number) {
   const db = await requireDb();
   const projectRecords = await db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.updatedAt));
-  const assets = await db.select({ projectId: mediaAssets.projectId, assetType: mediaAssets.assetType, byteSize: mediaAssets.byteSize }).from(mediaAssets).where(eq(mediaAssets.userId, userId));
+  const assets = await db.select({ projectId: mediaAssets.projectId, assetType: mediaAssets.assetType, byteSize: mediaAssets.byteSize, analysisState: mediaAssets.analysisState }).from(mediaAssets).where(eq(mediaAssets.userId, userId));
   return projectRecords.map(project => {
     const projectAssets = assets.filter(asset => asset.projectId === project.id);
     const imageAssets = projectAssets.filter(asset => asset.assetType === "image");
     const narrationAsset = projectAssets.find(asset => asset.assetType === "narration");
+    const analyzedImageCount = imageAssets.filter(asset => asset.analysisState === "analyzed").length;
+    const narrationAnalyzed = narrationAsset?.analysisState === "analyzed";
     const sourcesAttached = Boolean(project.narrationStorageKey && project.audioDurationMs && narrationAsset && imageAssets.length > 0);
+    const semanticAnalysisComplete = sourcesAttached && narrationAnalyzed && analyzedImageCount === imageAssets.length;
     return {
       ...project,
       sourceImageCount: imageAssets.length,
       sourceImageBytes: imageAssets.reduce((total, asset) => total + (asset.byteSize ?? 0), 0),
       narrationBytes: narrationAsset?.byteSize ?? null,
       sourcesAttached,
-      analysisBlocker: sourcesAttached && project.status === "ready" && project.workerState === "unconfigured"
-        ? "Sources are attached. Gemini analysis is waiting for available service capacity."
-        : null,
+      analyzedImageCount,
+      narrationAnalyzed,
+      semanticAnalysisComplete,
+      analysisBlocker: project.status === "timeline_ready"
+        ? "A genuine Gemini-selected timeline is ready and has passed continuous coverage validation."
+        : semanticAnalysisComplete && project.status === "analyzing"
+          ? "Narration and all source images are analyzed. Gemini timeline selection is waiting for available service capacity."
+          : sourcesAttached && project.status === "ready" && project.workerState === "unconfigured"
+            ? "Sources are attached. Gemini analysis is waiting for available service capacity."
+            : null,
     };
   });
 }

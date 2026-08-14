@@ -25,11 +25,21 @@
 - [x] Re-run the Timeline route from a fresh console baseline and confirm no new ResizeObserver loop errors are emitted.
 - [x] Inspect and configure the user's existing first project using its saved narration, image-folder, and output-folder settings.
 - [x] Determine that direct Windows-folder access is unavailable in the hosted environment and replace it with the user-provided uploaded source assets.
-- [ ] Surface a clear in-app project progression and local-folder handoff if direct folder access is unavailable.
+- [x] Surface a clear in-app project progression and uploaded-source handoff when direct Windows-folder access is unavailable.
 - [x] Inventory the uploaded `try.wav` narration and 23 supplied images in natural numerical order, including measured audio duration and integrity metadata.
 - [x] Ingest the uploaded media as S3-backed project assets without placing media bytes in the database.
 - [x] Attach the real narration and image sequence to the `Nothing` project, record its audio duration, and expose the next analysis state truthfully.
-- [ ] Retry real Gemini narration analysis, image semantics, and variable-duration timeline generation when the current Gemini service high-demand response clears.
+- [x] Retry real Gemini narration analysis, image semantics, and variable-duration timeline generation when current Gemini service capacity becomes available.
+- [x] Inspect the newly added Gemini keys, then retry the Nothing project analysis with verified available keys and persist only genuine results.
+- [x] Persist the completed real Gemini narration analysis for Nothing and verify its timestamps cover the full 70,091 ms audio duration continuously.
+- [x] Analyze the 23 uploaded Nothing images with the active Gemini keys and save semantic metadata only for genuine responses.
+- [x] Create and validate a real variable-duration Nothing project timeline from the Gemini narration and image analyses.
+- [x] Update project status messaging to distinguish completed narration and image analysis from completed Gemini timeline selection.
+- [x] Use the newly added sixth key, then the seventh key only if needed, to complete genuine Gemini timeline selection for Nothing.
+- [x] Show the genuine Gemini-selected Nothing timeline as ready in the Projects and Timeline interfaces, including the completed validation state.
+- [x] Remove the stale no-timeline wording from Timeline once a genuine validated timeline is available.
+- [x] Persist the complete returned Nothing narration segments, transcript, beats, and visual metadata rather than only its summary.
+- [x] Record and verify the persisted narration continuity from 0 to 70,091 ms with no gaps or overlaps.
 - [x] Replace placeholder image byte sizes with the uploaded files’ real metadata and expose the persisted asset count and audio duration through the project API.
 - [x] Show the Nothing project’s real uploaded-source state and Gemini high-demand analysis blocker in the Projects interface.
 - [x] Show the Nothing project’s uploaded narration duration, image count, and Gemini-capacity blocker in the Timeline interface, then verify both status views.
