@@ -21,3 +21,5 @@
 - [x] Add a regression test or route-level verification for Gemini key mutations and re-run the authenticated UI flow.
 - [x] Inspect the live Interactions API response for a valid supplied key and correct the incomplete-interaction output-budget mismatch.
 - [x] Add regression coverage for the observed response structure and verify the supplied key validates server-side without exposing its value.
+- [x] Identify and mitigate the ResizeObserver feedback loop emitted when the Timeline page renders by replacing the observed popover selector and stabilizing the query input.
+- [x] Re-run the Timeline route from a fresh console baseline and confirm no new ResizeObserver loop errors are emitted.
