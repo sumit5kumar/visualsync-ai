@@ -44,3 +44,14 @@
 - [x] Show the Nothing project’s real uploaded-source state and Gemini high-demand analysis blocker in the Projects interface.
 - [x] Show the Nothing project’s uploaded narration duration, image count, and Gemini-capacity blocker in the Timeline interface, then verify both status views.
 - [x] Automatically select the first project with attached sources in Timeline so its real readiness state is immediately visible.
+- [ ] Add project-level explicit timeline approval state, including approver and approval timestamp metadata.
+- [ ] Add real selected-image thumbnails to each persisted Nothing timeline segment for visual review.
+- [ ] Resolve Timeline thumbnail delivery through verified managed S3 redirect URLs and verify every selected image renders in the review grid.
+- [ ] Confirm the Nothing folder is mounted and writable as the native FFmpeg output location.
+- [ ] Prepare the approved S3 media and variable-duration timeline for the native Nothing-folder FFmpeg worker.
+- [x] Add a native FFmpeg worker script that blocks unapproved handoffs and preserves the validated output contract and timing boundaries.
+- [ ] Add a user-controlled download of the approved native render handoff JSON for the Nothing-folder worker.
+- [ ] Render and validate the approved Nothing project MP4 without changing the validated timeline timings.
+- [ ] Confirm access to `C:\Users\sumit\Downloads\try` as the native source folder and `C:\Users\sumit\Downloads\Nothing` as the native MP4 output folder.
+- [ ] Require explicit approval before exposing a native FFmpeg render-job handoff, and represent the worker’s render status truthfully.
+- [ ] Define the native worker render payload using S3 asset references, the validated timeline, original narration, and fixed 1920 × 1080 output settings.

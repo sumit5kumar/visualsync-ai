@@ -1,4 +1,4 @@
-import { workerJobSchema, workerProgressSchema, workerTimelineSubmissionSchema } from "../shared/workerProtocol";
+import { workerJobSchema, workerProgressSchema, workerRenderHandoffSchema, workerTimelineSubmissionSchema } from "../shared/workerProtocol";
 
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
@@ -17,6 +17,7 @@ export function getWorkerCapabilities() {
       "FAISS is the required local semantic index.",
       "The current Gemini Flash release is used through the Interactions API.",
       "FFmpeg renders only a validated variable-duration timeline.",
+      "A render handoff requires an explicit approved timeline review.",
     ],
   } as const;
 }
@@ -25,4 +26,5 @@ export const workerPayloadSchemas = {
   job: workerJobSchema,
   progress: workerProgressSchema,
   timelineSubmission: workerTimelineSubmissionSchema,
+  renderHandoff: workerRenderHandoffSchema,
 };

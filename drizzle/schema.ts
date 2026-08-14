@@ -80,8 +80,19 @@ export const timelineSegments = mysqlTable("timelineSegments", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => [index("timeline_segments_project_start_idx").on(table.projectId, table.startMs)]);
 
+export const timelineApprovals = mysqlTable("timelineApprovals", {
+  id: int("id").autoincrement().primaryKey(),
+  projectId: int("projectId").notNull().unique(),
+  userId: int("userId").notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "revoked"]).notNull().default("pending"),
+  approvedAt: timestamp("approvedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [index("timeline_approvals_user_idx").on(table.userId)]);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Project = typeof projects.$inferSelect;
 export type GeminiApiKey = typeof geminiApiKeys.$inferSelect;
 export type TimelineSegment = typeof timelineSegments.$inferSelect;
+export type TimelineApproval = typeof timelineApprovals.$inferSelect;

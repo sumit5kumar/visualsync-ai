@@ -1,6 +1,6 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { geminiApiKeys, mediaAssets, projects, timelineSegments, type InsertUser, users } from "../drizzle/schema";
+import { geminiApiKeys, mediaAssets, projects, timelineApprovals, timelineSegments, type InsertUser, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let database: ReturnType<typeof drizzle> | null = null;
@@ -116,4 +116,45 @@ export async function listProjectTimeline(userId: number, projectId: number) {
   if (!project) throw new Error("Project not found.");
   const db = await requireDb();
   return db.select().from(timelineSegments).where(eq(timelineSegments.projectId, projectId)).orderBy(timelineSegments.startMs);
+}
+
+export async function getTimelineReview(userId: number, projectId: number) {
+  const project = await getUserProject(userId, projectId);
+  if (!project) throw new Error("Project not found.");
+  const db = await requireDb();
+  const segments = await db.select().from(timelineSegments).where(eq(timelineSegments.projectId, projectId)).orderBy(timelineSegments.startMs);
+  const imageIds = segments.flatMap(segment => segment.imageAssetId ? [segment.imageAssetId] : []);
+  const imageRecords = imageIds.length ? await db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), inArray(mediaAssets.id, imageIds))) : [];
+  const assetById = new Map(imageRecords.map(asset => [asset.id, asset]));
+  const approval = (await db.select().from(timelineApprovals).where(eq(timelineApprovals.projectId, projectId)).limit(1))[0] ?? null;
+  return {
+    project,
+    approval: approval ? { status: approval.status, approvedAt: approval.approvedAt, approvedByUserId: approval.userId } : { status: "pending" as const, approvedAt: null, approvedByUserId: null },
+    segments: segments.map(segment => {
+      const image = segment.imageAssetId ? assetById.get(segment.imageAssetId) : null;
+      const thumbnailUrl = image ? `/manus-storage/${image.storageKey}` : null;
+      return { ...segment, imageFilename: image?.originalFilename ?? null, thumbnailUrl };
+    }),
+  };
+}
+
+export async function approveTimeline(userId: number, projectId: number) {
+  const project = await getUserProject(userId, projectId);
+  if (!project || project.status !== "timeline_ready") throw new Error("A validated timeline is required before approval.");
+  const db = await requireDb();
+  const segments = await db.select({ id: timelineSegments.id }).from(timelineSegments).where(eq(timelineSegments.projectId, projectId));
+  if (!segments.length) throw new Error("Timeline has no segments to approve.");
+  await db.insert(timelineApprovals).values({ projectId, userId, status: "approved", approvedAt: new Date() }).onDuplicateKeyUpdate({ set: { userId, status: "approved", approvedAt: new Date() } });
+  return { success: true } as const;
+}
+
+export async function getApprovedRenderHandoff(userId: number, projectId: number) {
+  const review = await getTimelineReview(userId, projectId);
+  if (review.approval.status !== "approved" || !review.approval.approvedAt || !review.approval.approvedByUserId) throw new Error("Timeline approval is required before a native render handoff.");
+  const db = await requireDb();
+  const assets = await db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), inArray(mediaAssets.assetType, ["narration", "image"])));
+  const narration = assets.find(asset => asset.assetType === "narration");
+  if (!narration || review.segments.some(segment => !segment.imageAssetId)) throw new Error("Render handoff is missing required media assets.");
+  const asWorkerAsset = (asset: typeof assets[number]) => ({ assetId: asset.id, filename: asset.originalFilename, storageKey: asset.storageKey, mimeType: asset.mimeType ?? "application/octet-stream", sequenceNumber: asset.sequenceNumber, contentHash: asset.contentHash, perceptualHash: asset.perceptualHash });
+  return { projectId, approval: { approvedByUserId: review.approval.approvedByUserId, approvedAtMs: review.approval.approvedAt.getTime() }, output: { width: 1920 as const, height: 1080 as const, aspectRatio: "16:9" as const, container: "mp4" as const }, narration: asWorkerAsset(narration), images: assets.filter(asset => asset.assetType === "image").map(asWorkerAsset), timeline: review.segments.map(segment => ({ imageAssetId: segment.imageAssetId!, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText })) };
 }

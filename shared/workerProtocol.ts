@@ -56,6 +56,16 @@ export const workerTimelineSubmissionSchema = z.object({
   })).min(1),
 });
 
+export const workerRenderHandoffSchema = z.object({
+  projectId: z.number().int().positive(),
+  approval: z.object({ approvedByUserId: z.number().int().positive(), approvedAtMs: z.number().int().positive() }),
+  output: z.object({ width: z.literal(1920), height: z.literal(1080), aspectRatio: z.literal("16:9"), container: z.literal("mp4") }),
+  narration: workerAssetSchema,
+  images: z.array(workerAssetSchema).min(1),
+  timeline: z.array(z.object({ imageAssetId: z.number().int().positive(), startMs: z.number().int().nonnegative(), endMs: z.number().int().positive(), narrationText: z.string().min(1) })).min(1),
+});
+
 export type WorkerJob = z.infer<typeof workerJobSchema>;
 export type WorkerProgress = z.infer<typeof workerProgressSchema>;
 export type WorkerTimelineSubmission = z.infer<typeof workerTimelineSubmissionSchema>;
+export type WorkerRenderHandoff = z.infer<typeof workerRenderHandoffSchema>;

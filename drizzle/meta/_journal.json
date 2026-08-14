@@ -15,6 +15,13 @@
       "when": 1786731490808,
       "tag": "0001_shallow_ezekiel",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1786739581694,
+      "tag": "0002_icy_sir_ram",
+      "breakpoints": true
     }
   ]
 }
