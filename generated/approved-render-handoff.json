@@ -1,0 +1,293 @@
+{
+  "projectId": 30001,
+  "approval": {
+    "approvedByUserId": 1,
+    "approvedAtMs": 1786741026000
+  },
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "aspectRatio": "16:9",
+    "container": "mp4"
+  },
+  "narration": {
+    "assetId": 1,
+    "filename": "try.wav",
+    "storageKey": "try_66615aa4.wav",
+    "mimeType": "audio/wav",
+    "sequenceNumber": null,
+    "contentHash": null,
+    "perceptualHash": null
+  },
+  "images": [
+    {
+      "assetId": 2,
+      "filename": "01_202608150019.jpeg",
+      "storageKey": "01_202608150019_43a57a6f.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 1,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 3,
+      "filename": "02_202608150019.jpeg",
+      "storageKey": "02_202608150019_e13c6f14.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 2,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 4,
+      "filename": "03_202608150019.jpeg",
+      "storageKey": "03_202608150019_2c67cd73.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 3,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 5,
+      "filename": "04_202608150019.jpeg",
+      "storageKey": "04_202608150019_683119ac.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 4,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 6,
+      "filename": "05_202608150019.jpeg",
+      "storageKey": "05_202608150019_6b5be70f.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 5,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 7,
+      "filename": "06_202608150019.jpeg",
+      "storageKey": "06_202608150019_21cd79ce.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 6,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 8,
+      "filename": "07_202608150019.jpeg",
+      "storageKey": "07_202608150019_bf08b0f8.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 7,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 9,
+      "filename": "08_202608150019.jpeg",
+      "storageKey": "08_202608150019_6858f036.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 8,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 10,
+      "filename": "09_202608150019.jpeg",
+      "storageKey": "09_202608150019_08ac74b8.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 9,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 11,
+      "filename": "10_202608150019.jpeg",
+      "storageKey": "10_202608150019_29b88b2c.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 10,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 12,
+      "filename": "11_202608150019.jpeg",
+      "storageKey": "11_202608150019_d55abed9.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 11,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 13,
+      "filename": "12_202608150019.jpeg",
+      "storageKey": "12_202608150019_2895d48c.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 12,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 14,
+      "filename": "13_202608150019.jpeg",
+      "storageKey": "13_202608150019_f3812b35.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 13,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 15,
+      "filename": "14_202608150019.jpeg",
+      "storageKey": "14_202608150019_0de62444.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 14,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 16,
+      "filename": "15_202608150019.jpeg",
+      "storageKey": "15_202608150019_68424931.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 15,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 17,
+      "filename": "16_202608150019.jpeg",
+      "storageKey": "16_202608150019_3b44a825.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 16,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 18,
+      "filename": "17_202608150019.jpeg",
+      "storageKey": "17_202608150019_949525df.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 17,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 19,
+      "filename": "18_202608150019.jpeg",
+      "storageKey": "18_202608150019_259fe1a2.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 18,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 20,
+      "filename": "19_202608150019.jpeg",
+      "storageKey": "19_202608150019_8cbe76a8.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 19,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 21,
+      "filename": "20_202608150019.jpeg",
+      "storageKey": "20_202608150019_0f16048d.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 20,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 22,
+      "filename": "21_202608150019.jpeg",
+      "storageKey": "21_202608150019_6edd6f6d.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 21,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 23,
+      "filename": "22_202608150019.jpeg",
+      "storageKey": "22_202608150019_68a71389.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 22,
+      "contentHash": null,
+      "perceptualHash": null
+    },
+    {
+      "assetId": 24,
+      "filename": "23_202608150019.jpeg",
+      "storageKey": "23_202608150019_6b3b8a98.jpeg",
+      "mimeType": "image/jpeg",
+      "sequenceNumber": 23,
+      "contentHash": null,
+      "perceptualHash": null
+    }
+  ],
+  "timeline": [
+    {
+      "imageAssetId": 2,
+      "startMs": 0,
+      "endMs": 4800,
+      "narrationText": "समय सबसे कीमती चीज़ है, जो एक बार चला जाए तो कभी वापस नहीं आता।"
+    },
+    {
+      "imageAssetId": 3,
+      "startMs": 4800,
+      "endMs": 9000,
+      "narrationText": "हर सुबह सूरज एक नया मौका लेकर आता है, कुछ नया करने का।"
+    },
+    {
+      "imageAssetId": 5,
+      "startMs": 9000,
+      "endMs": 15400,
+      "narrationText": "लेकिन ज्यादातर लोग इस मौके को पहचान नहीं पाते। वो सोचते हैं कल कर लेंगे, और वो कल कभी नहीं आता।"
+    },
+    {
+      "imageAssetId": 6,
+      "startMs": 15400,
+      "endMs": 22400,
+      "narrationText": "एक किसान जो सही समय पर बीज बोता है, वही अच्छी फसल पाता है। देर से बोया गया बीज कमज़ोर पौधा बनता है।"
+    },
+    {
+      "imageAssetId": 4,
+      "startMs": 22400,
+      "endMs": 29900,
+      "narrationText": "यही नियम ज़िंदगी पर भी लागू होता है। जो लोग समय की कदर करते हैं वो आगे निकल जाते हैं, जो टालमटोल करते हैं वो पीछे रह जाते हैं।"
+    },
+    {
+      "imageAssetId": 11,
+      "startMs": 29900,
+      "endMs": 37600,
+      "narrationText": "सफल लोगों की एक ही आदत होती है — वो समय बर्बाद नहीं करते। वो हर पल का इस्तेमाल सीखने और आगे बढ़ने में करते हैं।"
+    },
+    {
+      "imageAssetId": 15,
+      "startMs": 37600,
+      "endMs": 46500,
+      "narrationText": "समय न पैसे से खरीदा जा सकता है, न उधार लिया जा सकता है। इसलिए आज से ही अपने समय की कीमत समझो। छोटे-छोटे लक्ष्य बनाओ और उन्हें समय पर पूरा करो।"
+    },
+    {
+      "imageAssetId": 17,
+      "startMs": 46500,
+      "endMs": 53900,
+      "narrationText": "मोबाइल और सोशल मीडिया में घंटों बर्बाद मत करो। वो समय किसी किताब को पढ़ने में लगाओ, वो समय कोई नया हुनर सीखने में लगाओ।"
+    },
+    {
+      "imageAssetId": 21,
+      "startMs": 53900,
+      "endMs": 61200,
+      "narrationText": "याद रखो, वक्त किसी का इंतज़ार नहीं करता। जो आज तैयार है, कल वही जीतेगा। इसलिए अभी से शुरुआत करो, बाद में मत सोचो।"
+    },
+    {
+      "imageAssetId": 22,
+      "startMs": 61200,
+      "endMs": 70091,
+      "narrationText": "समय का सदुपयोग ही सफलता की असली चाबी है। आज का दिन फिर कभी नहीं आएगा, तो इसे बर्बाद मत करो — इसे जियो, इसे संवारो।"
+    }
+  ]
+}

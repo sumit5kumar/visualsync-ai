@@ -42,8 +42,12 @@ $outputPath = Join-Path $OutputDirectory "Nothing_approved_1920x1080.mp4"
 $audioInputIndex = $index
 $arguments = @($inputs) + @("-i", $narrationPath, "-filter_complex", $filterComplex, "-map", "[vout]", "-map", "$audioInputIndex`:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath)
 
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 & $FFmpegPath @arguments
-if ($LASTEXITCODE -ne 0) { throw "FFmpeg exited with code $LASTEXITCODE" }
+$ffmpegExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorActionPreference
+if ($ffmpegExitCode -ne 0) { throw "FFmpeg exited with code $ffmpegExitCode" }
 if (!(Test-Path $outputPath)) { throw "FFmpeg completed without writing the expected MP4." }
 
 Write-Output "RENDERED=$outputPath"
