@@ -1,20 +1,109 @@
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { geminiApiKeys, projects, timelineSegments, type InsertUser, users } from "../drizzle/schema";
+import { geminiApiKeys, mediaAssets, projects, timelineSegments, type InsertUser, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let database: ReturnType<typeof drizzle> | null = null;
-export async function getDb() { if (!database && process.env.DATABASE_URL) database = drizzle(process.env.DATABASE_URL); return database; }
-async function requireDb() { const db = await getDb(); if (!db) throw new Error("Database storage is not available."); return db; }
-export async function upsertUser(user: InsertUser): Promise<void> { if (!user.openId) throw new Error("User openId is required for upsert."); const db = await getDb(); if (!db) return; const values: InsertUser = { openId: user.openId, lastSignedIn: new Date() }; const updateSet: Record<string, unknown> = { lastSignedIn: new Date() }; for (const field of ["name", "email", "loginMethod"] as const) { if (user[field] !== undefined) { values[field] = user[field] ?? null; updateSet[field] = user[field] ?? null; } } values.role = user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : "user"); updateSet.role = values.role; await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet }); }
-export async function getUserByOpenId(openId: string) { const db = await getDb(); if (!db) return undefined; return (await db.select().from(users).where(eq(users.openId, openId)).limit(1))[0]; }
-export async function listUserProjects(userId: number) { const db = await requireDb(); return db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.updatedAt)); }
-export async function createProjectRecord(userId: number, input: { name: string; narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string }) { const db = await requireDb(); await db.insert(projects).values({ userId, name: input.name, narrationOriginalName: input.narrationOriginalName || null, imageSourcePath: input.imageSourcePath || null, outputPath: input.outputPath || null }); }
-export async function getUserProject(userId: number, projectId: number) { const db = await requireDb(); return (await db.select().from(projects).where(and(eq(projects.userId, userId), eq(projects.id, projectId))).limit(1))[0]; }
-export async function listVisibleGeminiKeys(userId: number) { const db = await requireDb(); return (await db.select().from(geminiApiKeys).where(eq(geminiApiKeys.userId, userId))).map(record => ({ id: record.id, label: record.label, maskedKey: `${record.keyPrefix}••••••••${record.keySuffix}`, isActive: record.isActive, testStatus: record.testStatus, lastTestedAt: record.lastTestedAt, createdAt: record.createdAt })); }
-export async function getStoredGeminiKey(userId: number, keyId: number) { const db = await requireDb(); return (await db.select().from(geminiApiKeys).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId))).limit(1))[0]; }
-export async function saveValidatedGeminiKey(userId: number, input: { label: string; keyPrefix: string; keySuffix: string; keyFingerprint: string; encryptedCiphertext: string; encryptionIv: string; encryptionTag: string }) { const db = await requireDb(); const duplicate = await db.select({ id: geminiApiKeys.id }).from(geminiApiKeys).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.keyFingerprint, input.keyFingerprint))).limit(1); if (duplicate.length > 0) throw new Error("This Gemini API key is already saved in your workspace."); const activeKeys = await db.select({ id: geminiApiKeys.id }).from(geminiApiKeys).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.isActive, true))); await db.insert(geminiApiKeys).values({ ...input, userId, isActive: activeKeys.length === 0, testStatus: "verified", lastTestedAt: new Date() }); }
-export async function recordGeminiKeyTest(userId: number, keyId: number, testStatus: "verified" | "invalid" | "quota_limited" | "unavailable") { const db = await requireDb(); await db.update(geminiApiKeys).set({ testStatus, lastTestedAt: new Date() }).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId))); }
-export async function activateGeminiKey(userId: number, keyId: number) { const db = await requireDb(); await db.transaction(async transaction => { await transaction.update(geminiApiKeys).set({ isActive: false }).where(eq(geminiApiKeys.userId, userId)); await transaction.update(geminiApiKeys).set({ isActive: true }).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId))); }); }
-export async function removeGeminiKey(userId: number, keyId: number) { const db = await requireDb(); await db.delete(geminiApiKeys).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId))); }
-export async function listProjectTimeline(userId: number, projectId: number) { const project = await getUserProject(userId, projectId); if (!project) throw new Error("Project not found."); const db = await requireDb(); return db.select().from(timelineSegments).where(eq(timelineSegments.projectId, projectId)).orderBy(timelineSegments.startMs); }
+
+export async function getDb() {
+  if (!database && process.env.DATABASE_URL) database = drizzle(process.env.DATABASE_URL);
+  return database;
+}
+
+async function requireDb() {
+  const db = await getDb();
+  if (!db) throw new Error("Database storage is not available.");
+  return db;
+}
+
+export async function upsertUser(user: InsertUser): Promise<void> {
+  if (!user.openId) throw new Error("User openId is required for upsert.");
+  const db = await getDb();
+  if (!db) return;
+  const values: InsertUser = { openId: user.openId, lastSignedIn: new Date() };
+  const updateSet: Record<string, unknown> = { lastSignedIn: new Date() };
+  for (const field of ["name", "email", "loginMethod"] as const) {
+    if (user[field] !== undefined) { values[field] = user[field] ?? null; updateSet[field] = user[field] ?? null; }
+  }
+  values.role = user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : "user");
+  updateSet.role = values.role;
+  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+}
+
+export async function getUserByOpenId(openId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return (await db.select().from(users).where(eq(users.openId, openId)).limit(1))[0];
+}
+
+export async function listUserProjects(userId: number) {
+  const db = await requireDb();
+  const projectRecords = await db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.updatedAt));
+  const assets = await db.select({ projectId: mediaAssets.projectId, assetType: mediaAssets.assetType, byteSize: mediaAssets.byteSize }).from(mediaAssets).where(eq(mediaAssets.userId, userId));
+  return projectRecords.map(project => {
+    const projectAssets = assets.filter(asset => asset.projectId === project.id);
+    const imageAssets = projectAssets.filter(asset => asset.assetType === "image");
+    const narrationAsset = projectAssets.find(asset => asset.assetType === "narration");
+    const sourcesAttached = Boolean(project.narrationStorageKey && project.audioDurationMs && narrationAsset && imageAssets.length > 0);
+    return {
+      ...project,
+      sourceImageCount: imageAssets.length,
+      sourceImageBytes: imageAssets.reduce((total, asset) => total + (asset.byteSize ?? 0), 0),
+      narrationBytes: narrationAsset?.byteSize ?? null,
+      sourcesAttached,
+      analysisBlocker: sourcesAttached && project.status === "ready" && project.workerState === "unconfigured"
+        ? "Sources are attached. Gemini analysis is waiting for available service capacity."
+        : null,
+    };
+  });
+}
+
+export async function createProjectRecord(userId: number, input: { name: string; narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string }) {
+  const db = await requireDb();
+  await db.insert(projects).values({ userId, name: input.name, narrationOriginalName: input.narrationOriginalName || null, imageSourcePath: input.imageSourcePath || null, outputPath: input.outputPath || null });
+}
+
+export async function getUserProject(userId: number, projectId: number) {
+  const db = await requireDb();
+  return (await db.select().from(projects).where(and(eq(projects.userId, userId), eq(projects.id, projectId))).limit(1))[0];
+}
+
+export async function listVisibleGeminiKeys(userId: number) {
+  const db = await requireDb();
+  return (await db.select().from(geminiApiKeys).where(eq(geminiApiKeys.userId, userId))).map(record => ({ id: record.id, label: record.label, maskedKey: `${record.keyPrefix}••••••••${record.keySuffix}`, isActive: record.isActive, testStatus: record.testStatus, lastTestedAt: record.lastTestedAt, createdAt: record.createdAt }));
+}
+
+export async function getStoredGeminiKey(userId: number, keyId: number) {
+  const db = await requireDb();
+  return (await db.select().from(geminiApiKeys).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId))).limit(1))[0];
+}
+
+export async function saveValidatedGeminiKey(userId: number, input: { label: string; keyPrefix: string; keySuffix: string; keyFingerprint: string; encryptedCiphertext: string; encryptionIv: string; encryptionTag: string }) {
+  const db = await requireDb();
+  const duplicate = await db.select({ id: geminiApiKeys.id }).from(geminiApiKeys).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.keyFingerprint, input.keyFingerprint))).limit(1);
+  if (duplicate.length > 0) throw new Error("This Gemini API key is already saved in your workspace.");
+  const activeKeys = await db.select({ id: geminiApiKeys.id }).from(geminiApiKeys).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.isActive, true)));
+  await db.insert(geminiApiKeys).values({ ...input, userId, isActive: activeKeys.length === 0, testStatus: "verified", lastTestedAt: new Date() });
+}
+
+export async function recordGeminiKeyTest(userId: number, keyId: number, testStatus: "verified" | "invalid" | "quota_limited" | "unavailable") {
+  const db = await requireDb();
+  await db.update(geminiApiKeys).set({ testStatus, lastTestedAt: new Date() }).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId)));
+}
+
+export async function activateGeminiKey(userId: number, keyId: number) {
+  const db = await requireDb();
+  await db.transaction(async transaction => { await transaction.update(geminiApiKeys).set({ isActive: false }).where(eq(geminiApiKeys.userId, userId)); await transaction.update(geminiApiKeys).set({ isActive: true }).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId))); });
+}
+
+export async function removeGeminiKey(userId: number, keyId: number) {
+  const db = await requireDb();
+  await db.delete(geminiApiKeys).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId)));
+}
+
+export async function listProjectTimeline(userId: number, projectId: number) {
+  const project = await getUserProject(userId, projectId);
+  if (!project) throw new Error("Project not found.");
+  const db = await requireDb();
+  return db.select().from(timelineSegments).where(eq(timelineSegments.projectId, projectId)).orderBy(timelineSegments.startMs);
+}
