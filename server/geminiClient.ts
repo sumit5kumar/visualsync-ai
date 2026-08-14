@@ -23,7 +23,7 @@ type InteractionResponse = {
 
 export type InteractionRequest = {
   model: string;
-  input: InteractionContent[];
+  input: string | InteractionContent[];
   store: false;
   generation_config: { max_output_tokens: number };
   response_format?: {
@@ -63,9 +63,11 @@ export function buildInteractionRequest(
 ): InteractionRequest {
   const request: InteractionRequest = {
     model,
-    input: [{ type: "text", text: prompt }, ...inlineParts.map(toInteractionContent)],
+    input: inlineParts.length > 0 ? [{ type: "text", text: prompt }, ...inlineParts.map(toInteractionContent)] : prompt,
     store: false,
-    generation_config: { max_output_tokens: structured ? 8192 : 8 },
+    // The current Flash model can consume a small budget before emitting a text step.
+    // 1024 tokens was verified against a live key; 8 tokens returned an incomplete interaction.
+    generation_config: { max_output_tokens: structured ? 8192 : 1024 },
   };
 
   if (structured) {
@@ -111,7 +113,11 @@ export class GeminiClient {
       throw classifyGeminiError(response.status, errorPayload?.error?.message ?? "");
     }
 
-    const text = extractInteractionText((await response.json()) as InteractionResponse);
+    const payload = (await response.json()) as InteractionResponse & { status?: string };
+    const text = extractInteractionText(payload);
+    if (!text && payload.status === "incomplete") {
+      throw new GeminiRequestError("Gemini did not complete the interaction before its output budget was exhausted. Please retry.", "unavailable");
+    }
     if (!text) throw new GeminiRequestError("Gemini returned no usable content for this interaction.", "unavailable");
     if (!structured) return text;
 

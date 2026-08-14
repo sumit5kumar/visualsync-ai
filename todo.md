@@ -19,3 +19,5 @@
 - [x] Add regression tests for the configured model and key-test request contract, then verify the application builds cleanly.
 - [x] Fix the Gemini key mutation route so `/api/trpc/gemini.addAndTest` reports a transient non-JSON proxy failure clearly rather than exposing a JSON parse error.
 - [x] Add a regression test or route-level verification for Gemini key mutations and re-run the authenticated UI flow.
+- [x] Inspect the live Interactions API response for a valid supplied key and correct the incomplete-interaction output-budget mismatch.
+- [x] Add regression coverage for the observed response structure and verify the supplied key validates server-side without exposing its value.
