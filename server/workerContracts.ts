@@ -15,7 +15,7 @@ export function getWorkerCapabilities() {
       "Natural numeric ordering is established before image analysis.",
       "Perceptual and content hashes are attached before cache lookup.",
       "FAISS is the required local semantic index.",
-      "Gemini 2.5 Flash is the only analysis model.",
+      "The current Gemini Flash release is used through the Interactions API.",
       "FFmpeg renders only a validated variable-duration timeline.",
     ],
   } as const;

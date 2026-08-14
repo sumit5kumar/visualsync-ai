@@ -10,15 +10,15 @@ The web application provides a desktop-style workspace for private project recor
 | --- | --- |
 | Workspace | Responsive Home, Projects, Gemini AI, Timeline, Preview, and Settings routes with authenticated empty states. |
 | Project records | Creates and lists user-owned projects with narration name, image path, output path, and fixed 1920 × 1080 / 16:9 settings. |
-| Gemini key vault | Adds a key only after a real server-side Gemini 2.5 Flash test, encrypts it with AES-256-GCM, masks it in all responses, supports explicit activation, retesting, and guarded removal. |
-| Gemini client | Centralizes `gemini-2.5-flash` requests for key validation, audio analysis, image analysis, candidate scoring, timeline reasoning, and quality review. |
+| Gemini key vault | Adds a key only after a real server-side Gemini Interactions API test, encrypts it with AES-256-GCM, masks it in all responses, supports explicit activation, retesting, and guarded removal. |
+| Gemini client | Centralizes `gemini-flash-latest` Interactions API requests for key validation, audio analysis, image analysis, candidate scoring, timeline reasoning, and quality review. |
 | Timeline validation | Rejects non-positive segments, non-zero starts, gaps, overlaps, out-of-range confidence, missing metadata, and incomplete audio coverage. It performs no fallback timing calculation. |
 | Worker protocol | Defines typed payloads for ingestion, natural ordering, hashes, cache reuse, FAISS indexing, Gemini analysis, timeline submission, review, and FFmpeg rendering. |
 | Tests | Nine unit tests currently cover key masking, key workflow policy, natural image ordering, worker constraints, and variable-duration timeline validation. |
 
 ## Gemini and media policy
 
-The configured model is exactly `gemini-2.5-flash`. The key-validation call is made from the server and the raw key is never returned to the client. Gemini documents `gemini-2.5-flash` as the model identifier for Gemini 2.5 Flash. [1]
+The configured model is `gemini-flash-latest`, Google's supported alias for the latest Gemini Flash release. The key-validation call is made from the server through the Interactions API, and the raw key is never returned to the client. [1] [3]
 
 Audio and image analysis are represented by centralized Gemini client methods. Gemini supports inline audio for smaller payloads and a Files API workflow for larger files; the production worker should follow that boundary while requesting structured transcript and visual-beat output. [2]
 
@@ -39,3 +39,5 @@ The application passed `pnpm test` with **5 test files and 9 tests**. It also pa
 [1] [Google AI for Developers — Models](https://ai.google.dev/gemini-api/docs/models)
 
 [2] [Google AI for Developers — Audio understanding](https://ai.google.dev/gemini-api/docs/audio)
+
+[3] [Google AI for Developers — Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview)
