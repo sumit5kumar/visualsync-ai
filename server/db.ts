@@ -2,6 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { geminiApiKeys, mediaAssets, projects, timelineApprovals, timelineSegments, type InsertUser, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { planImageSubstitution } from "./timelineEditing";
 
 let database: ReturnType<typeof drizzle> | null = null;
 
@@ -118,6 +119,32 @@ export async function listProjectTimeline(userId: number, projectId: number) {
   return db.select().from(timelineSegments).where(eq(timelineSegments.projectId, projectId)).orderBy(timelineSegments.startMs);
 }
 
+function getSceneDescription(analysisJson: unknown) {
+  if (!analysisJson || typeof analysisJson !== "object") return null;
+  const sceneDescription = (analysisJson as Record<string, unknown>).sceneDescription;
+  return typeof sceneDescription === "string" && sceneDescription.trim() ? sceneDescription.trim() : null;
+}
+
+export async function listTimelineCandidates(userId: number, projectId: number) {
+  const project = await getUserProject(userId, projectId);
+  if (!project) throw new Error("Project not found.");
+  const db = await requireDb();
+  const [segments, images] = await Promise.all([
+    db.select({ imageAssetId: timelineSegments.imageAssetId }).from(timelineSegments).where(eq(timelineSegments.projectId, projectId)),
+    db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.assetType, "image"), eq(mediaAssets.analysisState, "analyzed"))).orderBy(mediaAssets.sequenceNumber),
+  ]);
+  const selectedImageIds = new Set(segments.flatMap(segment => segment.imageAssetId ? [segment.imageAssetId] : []));
+  return images
+    .filter(image => !selectedImageIds.has(image.id))
+    .map(image => ({
+      id: image.id,
+      originalFilename: image.originalFilename,
+      sequenceNumber: image.sequenceNumber,
+      thumbnailUrl: `/manus-storage/${image.storageKey}`,
+      sceneDescription: getSceneDescription(image.analysisJson),
+    }));
+}
+
 export async function getTimelineReview(userId: number, projectId: number) {
   const project = await getUserProject(userId, projectId);
   if (!project) throw new Error("Project not found.");
@@ -146,6 +173,29 @@ export async function approveTimeline(userId: number, projectId: number) {
   if (!segments.length) throw new Error("Timeline has no segments to approve.");
   await db.insert(timelineApprovals).values({ projectId, userId, status: "approved", approvedAt: new Date() }).onDuplicateKeyUpdate({ set: { userId, status: "approved", approvedAt: new Date() } });
   return { success: true } as const;
+}
+
+export async function substituteTimelineImage(userId: number, input: { projectId: number; segmentId: number; newImageAssetId: number }) {
+  const project = await getUserProject(userId, input.projectId);
+  if (!project || project.status !== "timeline_ready") throw new Error("A validated timeline is required before an image can be replaced.");
+  const db = await requireDb();
+  const [segment] = await db.select().from(timelineSegments).where(and(eq(timelineSegments.id, input.segmentId), eq(timelineSegments.projectId, input.projectId))).limit(1);
+  if (!segment) throw new Error("Timeline segment not found.");
+  const [candidate] = await db.select().from(mediaAssets).where(and(eq(mediaAssets.id, input.newImageAssetId), eq(mediaAssets.projectId, input.projectId), eq(mediaAssets.userId, userId), eq(mediaAssets.assetType, "image"), eq(mediaAssets.analysisState, "analyzed"))).limit(1);
+  if (!candidate) throw new Error("Choose an analyzed image from this project’s candidate gallery.");
+  if (segment.imageAssetId === candidate.id) throw new Error("This image is already selected for the segment.");
+  const allSegments = await db.select({ id: timelineSegments.id, imageAssetId: timelineSegments.imageAssetId, startMs: timelineSegments.startMs, endMs: timelineSegments.endMs }).from(timelineSegments).where(eq(timelineSegments.projectId, input.projectId));
+  const planned = planImageSubstitution(allSegments, input.segmentId, candidate.id);
+  const originalReason = segment.selectionReason;
+  await db.transaction(async transaction => {
+    await transaction.update(timelineSegments).set({
+      imageAssetId: candidate.id,
+      decisionType: "CHANGE",
+      selectionReason: `User selected ${candidate.originalFilename} from the analyzed candidate gallery. Original Gemini rationale: ${originalReason}`,
+    }).where(eq(timelineSegments.id, segment.id));
+    await transaction.insert(timelineApprovals).values({ projectId: input.projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
+  });
+  return { ...planned, approvalStatus: "revoked" as const };
 }
 
 export async function getApprovedRenderHandoff(userId: number, projectId: number) {

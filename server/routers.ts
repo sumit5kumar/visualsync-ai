@@ -4,7 +4,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { activateGeminiKey, approveTimeline, createProjectRecord, getApprovedRenderHandoff, getStoredGeminiKey, getTimelineReview, listProjectTimeline, listUserProjects, listVisibleGeminiKeys, recordGeminiKeyTest, removeGeminiKey, saveValidatedGeminiKey } from "./db";
+import { activateGeminiKey, approveTimeline, createProjectRecord, getApprovedRenderHandoff, getStoredGeminiKey, getTimelineReview, listProjectTimeline, listTimelineCandidates, listUserProjects, listVisibleGeminiKeys, recordGeminiKeyTest, removeGeminiKey, saveValidatedGeminiKey, substituteTimelineImage } from "./db";
 import { decryptSecret, describeGeminiKey, encryptSecret, fingerprintSecret } from "./crypto";
 import { GEMINI_MODEL, GeminiClient } from "./geminiClient";
 import { canActivateGeminiKey, canRemoveGeminiKey } from "./keyPolicy";
@@ -26,7 +26,14 @@ export const appRouter = router({
     activate: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const key = await getStoredGeminiKey(ctx.user.id, input.keyId); if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "Gemini key not found." }); if (!canActivateGeminiKey(key.testStatus)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only a successfully verified Gemini key can become active." }); await activateGeminiKey(ctx.user.id, input.keyId); return { success: true } as const; }),
     remove: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const keys = await listVisibleGeminiKeys(ctx.user.id); const target = keys.find(key => key.id === input.keyId); if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Gemini key not found." }); const verifiedAlternatives = keys.filter(key => key.id !== input.keyId && key.testStatus === "verified"); if (!canRemoveGeminiKey(target.isActive, verifiedAlternatives.length)) throw new TRPCError({ code: "BAD_REQUEST", message: "Add and verify another key before removing the active key." }); await removeGeminiKey(ctx.user.id, input.keyId); return { success: true } as const; }),
   }),
-  timeline: router({ list: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).query(({ ctx, input }) => listProjectTimeline(ctx.user.id, input.projectId)), review: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).query(({ ctx, input }) => getTimelineReview(ctx.user.id, input.projectId)), approve: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => approveTimeline(ctx.user.id, input.projectId)), validate: protectedProcedure.input(z.object({ audioDurationMs: z.number().finite().positive(), segments: z.array(proposedSegment).min(1) })).mutation(({ input }) => validateTimeline(input.audioDurationMs, input.segments)) }),
+  timeline: router({
+    list: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).query(({ ctx, input }) => listProjectTimeline(ctx.user.id, input.projectId)),
+    review: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).query(({ ctx, input }) => getTimelineReview(ctx.user.id, input.projectId)),
+    candidates: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).query(({ ctx, input }) => listTimelineCandidates(ctx.user.id, input.projectId)),
+    approve: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => approveTimeline(ctx.user.id, input.projectId)),
+    substituteImage: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), segmentId: z.number().int().positive(), newImageAssetId: z.number().int().positive() })).mutation(({ ctx, input }) => substituteTimelineImage(ctx.user.id, input)),
+    validate: protectedProcedure.input(z.object({ audioDurationMs: z.number().finite().positive(), segments: z.array(proposedSegment).min(1) })).mutation(({ input }) => validateTimeline(input.audioDurationMs, input.segments)),
+  }),
   worker: router({
     status: protectedProcedure.query(() => ({ connected: false, message: "A local VisualSync worker is required for FAISS indexing and FFmpeg rendering." })),
     contract: protectedProcedure.query(() => getWorkerCapabilities()),
