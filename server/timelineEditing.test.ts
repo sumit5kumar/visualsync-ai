@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planImageSubstitution } from "./timelineEditing";
+import { canEditValidatedTimeline, planImageSubstitution } from "./timelineEditing";
 
 const segments = [
   { id: 31, imageAssetId: 7, startMs: 0, endMs: 1360 },
@@ -14,5 +14,14 @@ describe("planImageSubstitution", () => {
   it("rejects selecting the current or another segment's image", () => {
     expect(() => planImageSubstitution(segments, 32, 8)).toThrow("already selected for the segment");
     expect(() => planImageSubstitution(segments, 32, 7)).toThrow("not already used");
+  });
+});
+
+describe("canEditValidatedTimeline", () => {
+  it("allows a completed project to revise its previously validated edit, but rejects unvalidated states", () => {
+    expect(canEditValidatedTimeline("timeline_ready")).toBe(true);
+    expect(canEditValidatedTimeline("completed")).toBe(true);
+    expect(canEditValidatedTimeline("draft")).toBe(false);
+    expect(canEditValidatedTimeline("analyzing")).toBe(false);
   });
 });

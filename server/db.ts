@@ -2,7 +2,8 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { geminiApiKeys, mediaAssets, projects, timelineApprovals, timelineSegments, type InsertUser, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
-import { planImageSubstitution } from "./timelineEditing";
+import { canEditValidatedTimeline, planImageSubstitution } from "./timelineEditing";
+import { validateTimeline } from "./timelineValidation";
 
 let database: ReturnType<typeof drizzle> | null = null;
 
@@ -177,14 +178,16 @@ export async function approveTimeline(userId: number, projectId: number) {
 
 export async function substituteTimelineImage(userId: number, input: { projectId: number; segmentId: number; newImageAssetId: number }) {
   const project = await getUserProject(userId, input.projectId);
-  if (!project || project.status !== "timeline_ready") throw new Error("A validated timeline is required before an image can be replaced.");
+  if (!project || !project.audioDurationMs || !canEditValidatedTimeline(project.status)) throw new Error("A validated timeline is required before an image can be replaced.");
   const db = await requireDb();
   const [segment] = await db.select().from(timelineSegments).where(and(eq(timelineSegments.id, input.segmentId), eq(timelineSegments.projectId, input.projectId))).limit(1);
   if (!segment) throw new Error("Timeline segment not found.");
   const [candidate] = await db.select().from(mediaAssets).where(and(eq(mediaAssets.id, input.newImageAssetId), eq(mediaAssets.projectId, input.projectId), eq(mediaAssets.userId, userId), eq(mediaAssets.assetType, "image"), eq(mediaAssets.analysisState, "analyzed"))).limit(1);
   if (!candidate) throw new Error("Choose an analyzed image from this project’s candidate gallery.");
   if (segment.imageAssetId === candidate.id) throw new Error("This image is already selected for the segment.");
-  const allSegments = await db.select({ id: timelineSegments.id, imageAssetId: timelineSegments.imageAssetId, startMs: timelineSegments.startMs, endMs: timelineSegments.endMs }).from(timelineSegments).where(eq(timelineSegments.projectId, input.projectId));
+  const allSegments = await db.select().from(timelineSegments).where(eq(timelineSegments.projectId, input.projectId));
+  const validation = validateTimeline(project.audioDurationMs, allSegments.map(segment => ({ ...segment, confidence: Number(segment.confidence) })));
+  if (!validation.valid) throw new Error(`Timeline cannot be edited because its validated coverage is no longer intact: ${validation.issues.join(" ")}`);
   const planned = planImageSubstitution(allSegments, input.segmentId, candidate.id);
   const originalReason = segment.selectionReason;
   await db.transaction(async transaction => {
@@ -194,6 +197,7 @@ export async function substituteTimelineImage(userId: number, input: { projectId
       selectionReason: `User selected ${candidate.originalFilename} from the analyzed candidate gallery. Original Gemini rationale: ${originalReason}`,
     }).where(eq(timelineSegments.id, segment.id));
     await transaction.insert(timelineApprovals).values({ projectId: input.projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
+    await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, input.projectId));
   });
   return { ...planned, approvalStatus: "revoked" as const };
 }

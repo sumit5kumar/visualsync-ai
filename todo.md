@@ -62,3 +62,4 @@
 - [x] Add thumbnail load-failure handling so a managed-storage redirect problem cannot silently leave the review grid incomplete.
 - [x] Execute the user-approved Nothing render with the native FFmpeg worker and validate the final MP4 output.
 - [x] Prevent PowerShell from treating normal FFmpeg diagnostic output as a terminating native-worker error.
+- [x] Allow a completed project’s previously validated timeline to accept a candidate-image replacement and return to a re-approval state.
