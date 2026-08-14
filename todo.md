@@ -63,3 +63,4 @@
 - [x] Execute the user-approved Nothing render with the native FFmpeg worker and validate the final MP4 output.
 - [x] Prevent PowerShell from treating normal FFmpeg diagnostic output as a terminating native-worker error.
 - [x] Allow a completed project’s previously validated timeline to accept a candidate-image replacement and return to a re-approval state.
+- [x] Explain the local native-render workflow clearly in Preview when a persistent worker connection is unavailable.
