@@ -17,3 +17,5 @@
 - [x] Replace the retired legacy Generate Content path with a current supported model and official Interactions API contract for key testing and structured analysis.
 - [x] Update all server, UI, worker-protocol, documentation, and test references to the supported Gemini model without exposing API keys to the client.
 - [x] Add regression tests for the configured model and key-test request contract, then verify the application builds cleanly.
+- [x] Fix the Gemini key mutation route so `/api/trpc/gemini.addAndTest` reports a transient non-JSON proxy failure clearly rather than exposing a JSON parse error.
+- [x] Add a regression test or route-level verification for Gemini key mutations and re-run the authenticated UI flow.

@@ -7,6 +7,7 @@ import superjson from "superjson";
 import App from "./App";
 import { startLogin } from "./const";
 import "./index.css";
+import { fetchTrpcResponse } from "./lib/trpcFetch";
 
 const queryClient = new QueryClient();
 
@@ -63,10 +64,7 @@ const trpcClient = trpc.createClient({
         return {};
       },
       fetch(input, init) {
-        return globalThis.fetch(input, {
-          ...(init ?? {}),
-          credentials: "include",
-        });
+        return fetchTrpcResponse(input, init);
       },
     }),
   ],
