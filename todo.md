@@ -105,7 +105,8 @@
 - [x] Verify the repaired project setup flow end to end with actual browser-style WAV/JPEG uploads and persisted secure project-media calls.
 - [x] Verify that choosing an output folder updates the project configuration and prefilled native render command for that project.
 - [x] Verify a live browser-selected media import through persisted project assets and project state updates without altering existing user timelines.
-- [ ] Verify the live output-folder picker persistence path updates the selected project configuration and Preview command.
+- [x] Verify the live output-folder picker persistence path updates the selected project configuration and Preview command.
+- [x] Confirm the live Movie Preview command visibly preloads the saved Nothing output destination for the same project.
 - [x] Fix Groq’s rejected JSON response format in the global project pacing request without changing key rotation or provider selection.
 - [x] Add regression coverage for the compatible pacing-response contract and verify uploaded project processing can continue past Groq analysis.
 - [x] Replace Groq vision analysis JSON mode, which rejected the real Movie image-analysis request, with a compatible generated-JSON parser while preserving the same Groq pool.
