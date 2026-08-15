@@ -58,11 +58,22 @@ export const groqApiKeys = mysqlTable("groqApiKeys", {
   encryptionIv: varchar("encryptionIv", { length: 32 }).notNull(),
   encryptionTag: varchar("encryptionTag", { length: 32 }).notNull(),
   isActive: boolean("isActive").notNull().default(false),
+  rotationOrder: int("rotationOrder").notNull().default(0),
   testStatus: mysqlEnum("testStatus", ["untested", "verified", "invalid", "quota_limited", "unavailable"]).notNull().default("untested"),
   lastTestedAt: timestamp("lastTestedAt"),
+  lastUsedAt: timestamp("lastUsedAt"),
+  lastFailureAt: timestamp("lastFailureAt"),
+  cooldownUntil: timestamp("cooldownUntil"),
+  consecutiveRateLimits: int("consecutiveRateLimits").notNull().default(0),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [index("groq_keys_user_idx").on(table.userId)]);
+
+export const groqKeyRotationStates = mysqlTable("groqKeyRotationStates", {
+  userId: int("userId").primaryKey(),
+  nextRotationOrder: int("nextRotationOrder").notNull().default(0),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
 
 export const mediaAssets = mysqlTable("mediaAssets", {
   id: int("id").autoincrement().primaryKey(),

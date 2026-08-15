@@ -2,15 +2,17 @@ export const GROQ_API_BASE_URL = "https://api.groq.com/openai/v1";
 export const GROQ_TRANSCRIPTION_MODEL = "whisper-large-v3";
 export const GROQ_VISION_MODEL = "qwen/qwen3.6-27b";
 
-export type GroqKeyStatus = "verified" | "invalid" | "quota_limited" | "unavailable";
+export type GroqKeyStatus = "verified" | "invalid" | "quota_limited" | "request_too_large" | "prompt_error" | "unavailable";
 export type GroqKeyTestResult = { status: GroqKeyStatus; message: string };
 
-class GroqRequestError extends Error {
+export class GroqRequestError extends Error {
   constructor(message: string, readonly status: GroqKeyStatus) { super(message); }
 }
 
 function classifyGroqError(statusCode: number, message: string) {
   if (statusCode === 401 || statusCode === 403) return new GroqRequestError("Groq rejected this API key.", "invalid");
+  if (/request too large|requested \d+|reduce your message size|tokens per minute/i.test(message)) return new GroqRequestError("The Groq request is too large for the selected model limit. Reduce the prompt payload and retry with the same eligible key pool.", "request_too_large");
+  if (/failed to validate json|failed_generation|adjust your prompt/i.test(message)) return new GroqRequestError("Groq rejected the requested JSON response format. Adjust the prompt and retry with the same eligible key pool.", "prompt_error");
   if (statusCode === 429) return new GroqRequestError("This Groq API key has reached a quota or rate limit.", "quota_limited");
   return new GroqRequestError(message || "Groq is currently unavailable.", "unavailable");
 }
@@ -75,5 +77,30 @@ export class GroqClient {
     const content = payload.choices?.[0]?.message?.content?.trim();
     if (!content) throw new GroqRequestError("Groq returned no usable vision content.", "unavailable");
     try { return JSON.parse(content) as unknown; } catch { throw new GroqRequestError("Groq returned malformed vision JSON.", "unavailable"); }
+  }
+
+  async completeText(input: { prompt: string }) {
+    const response = await fetch(`${GROQ_API_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: this.headers("application/json"),
+      body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, messages: [{ role: "user", content: input.prompt }] }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      throw classifyGroqError(response.status, payload?.error?.message ?? "");
+    }
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = payload.choices?.[0]?.message?.content?.trim();
+    if (!content) throw new GroqRequestError("Groq returned no usable timeline-selection content.", "unavailable");
+    return content;
+  }
+
+  async completeJson(input: { prompt: string }) {
+    const content = await this.completeText(input);
+    const unfenced = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+    const firstBrace = unfenced.indexOf("{"); const lastBrace = unfenced.lastIndexOf("}");
+    const json = firstBrace >= 0 && lastBrace >= firstBrace ? unfenced.slice(firstBrace, lastBrace + 1) : unfenced;
+    try { return JSON.parse(json) as unknown; } catch { throw new GroqRequestError("Groq returned malformed timeline-selection JSON.", "prompt_error"); }
   }
 }

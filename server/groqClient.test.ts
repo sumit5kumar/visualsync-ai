@@ -27,4 +27,23 @@ describe("GroqClient", () => {
     const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(String(request.body))).toMatchObject({ model: GROQ_VISION_MODEL, response_format: { type: "json_object" } });
   });
+
+  it("returns compact text completion without forcing JSON mode", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "CHOICE=2;CONFIDENCE=0.92" } }] }), { status: 200 }));
+    global.fetch = fetchMock;
+
+    await expect(new GroqClient("gsk_test").completeText({ prompt: "Choose one image." })).resolves.toBe("CHOICE=2;CONFIDENCE=0.92");
+
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.groq.com/openai/v1/chat/completions");
+    expect(JSON.parse(String(request.body))).toMatchObject({ model: GROQ_VISION_MODEL });
+    expect(JSON.parse(String(request.body))).not.toHaveProperty("response_format");
+  });
+
+  it("reports prompt-size rejections without classifying the key as quota limited", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "Request too large for model" } }), { status: 429 }));
+    global.fetch = fetchMock;
+
+    await expect(new GroqClient("gsk_test").completeText({ prompt: "large" })).rejects.toMatchObject({ status: "request_too_large" });
+  });
 });

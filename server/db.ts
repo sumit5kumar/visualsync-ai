@@ -40,8 +40,13 @@ export async function getUserByOpenId(openId: string) {
 
 export async function listUserProjects(userId: number) {
   const db = await requireDb();
-  const projectRecords = await db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.updatedAt));
-  const assets = await db.select({ projectId: mediaAssets.projectId, assetType: mediaAssets.assetType, byteSize: mediaAssets.byteSize, analysisState: mediaAssets.analysisState }).from(mediaAssets).where(eq(mediaAssets.userId, userId));
+  const [projectRecords, assets, activeGroqKeys] = await Promise.all([
+    db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.updatedAt)),
+    db.select({ projectId: mediaAssets.projectId, assetType: mediaAssets.assetType, byteSize: mediaAssets.byteSize, analysisState: mediaAssets.analysisState }).from(mediaAssets).where(eq(mediaAssets.userId, userId)),
+    db.select({ testStatus: groqApiKeys.testStatus, cooldownUntil: groqApiKeys.cooldownUntil }).from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true))),
+  ]);
+  const now = new Date();
+  const hasEligibleGroqKey = activeGroqKeys.some(key => key.testStatus === "verified" || (key.testStatus === "quota_limited" && Boolean(key.cooldownUntil && key.cooldownUntil <= now)));
   return projectRecords.map(project => {
     const projectAssets = assets.filter(asset => asset.projectId === project.id);
     const imageAssets = projectAssets.filter(asset => asset.assetType === "image");
@@ -61,6 +66,8 @@ export async function listUserProjects(userId: number) {
       semanticAnalysisComplete,
       analysisBlocker: project.status === "timeline_ready"
         ? "A genuine Gemini-selected timeline is ready and has passed continuous coverage validation."
+        : sourcesAttached && project.status === "ready" && project.workerState === "error" && !hasEligibleGroqKey
+          ? "The real narration and images are attached, but every active Groq key is currently rate limited or unavailable. Add another verified Groq key, or wait for a cooldown before retrying; no timeline has been created."
         : semanticAnalysisComplete && project.status === "analyzing"
           ? "Narration and all source images are analyzed. Gemini timeline selection is waiting for available service capacity."
           : sourcesAttached && project.status === "ready" && project.workerState === "unconfigured"
@@ -127,7 +134,7 @@ export async function removeGeminiKey(userId: number, keyId: number) {
 
 export async function listVisibleGroqKeys(userId: number) {
   const db = await requireDb();
-  return (await db.select().from(groqApiKeys).where(eq(groqApiKeys.userId, userId))).map(record => ({ id: record.id, label: record.label, maskedKey: `${record.keyPrefix}••••••••${record.keySuffix}`, isActive: record.isActive, testStatus: record.testStatus, lastTestedAt: record.lastTestedAt, createdAt: record.createdAt }));
+  return (await db.select().from(groqApiKeys).where(eq(groqApiKeys.userId, userId)).orderBy(groqApiKeys.rotationOrder, groqApiKeys.id)).map(record => ({ id: record.id, label: record.label, maskedKey: `${record.keyPrefix}••••••••${record.keySuffix}`, isActive: record.isActive, rotationOrder: record.rotationOrder, testStatus: record.testStatus, lastTestedAt: record.lastTestedAt, lastUsedAt: record.lastUsedAt, lastFailureAt: record.lastFailureAt, cooldownUntil: record.cooldownUntil, consecutiveRateLimits: record.consecutiveRateLimits, createdAt: record.createdAt }));
 }
 
 export async function getStoredGroqKey(userId: number, keyId: number) {
@@ -139,18 +146,18 @@ export async function saveValidatedGroqKey(userId: number, input: { label: strin
   const db = await requireDb();
   const duplicate = await db.select({ id: groqApiKeys.id }).from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.keyFingerprint, input.keyFingerprint))).limit(1);
   if (duplicate.length > 0) throw new Error("This Groq API key is already saved in your workspace.");
-  const activeKeys = await db.select({ id: groqApiKeys.id }).from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true)));
-  await db.insert(groqApiKeys).values({ ...input, userId, isActive: activeKeys.length === 0, testStatus: "verified", lastTestedAt: new Date() });
+  const pool = await db.select({ rotationOrder: groqApiKeys.rotationOrder }).from(groqApiKeys).where(eq(groqApiKeys.userId, userId)).orderBy(desc(groqApiKeys.rotationOrder)).limit(1);
+  await db.insert(groqApiKeys).values({ ...input, userId, isActive: true, rotationOrder: (pool[0]?.rotationOrder ?? -1) + 1, testStatus: "verified", lastTestedAt: new Date(), cooldownUntil: null, consecutiveRateLimits: 0 });
 }
 
 export async function recordGroqKeyTest(userId: number, keyId: number, testStatus: "verified" | "invalid" | "quota_limited" | "unavailable") {
   const db = await requireDb();
-  await db.update(groqApiKeys).set({ testStatus, lastTestedAt: new Date() }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, keyId)));
+  await db.update(groqApiKeys).set({ testStatus, lastTestedAt: new Date(), ...(testStatus === "verified" ? { isActive: true, cooldownUntil: null, consecutiveRateLimits: 0 } : {}) }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, keyId)));
 }
 
 export async function activateGroqKey(userId: number, keyId: number) {
   const db = await requireDb();
-  await db.transaction(async transaction => { await transaction.update(groqApiKeys).set({ isActive: false }).where(eq(groqApiKeys.userId, userId)); await transaction.update(groqApiKeys).set({ isActive: true }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, keyId))); });
+  await db.update(groqApiKeys).set({ isActive: true, cooldownUntil: null }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, keyId)));
 }
 
 export async function removeGroqKey(userId: number, keyId: number) {

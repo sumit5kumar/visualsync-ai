@@ -40,7 +40,7 @@ export const appRouter = router({
     test: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const storedKey = await getStoredGroqKey(ctx.user.id, input.keyId); if (!storedKey) throw new TRPCError({ code: "NOT_FOUND", message: "Groq key not found." });
       const testResult = await new GroqClient(decryptSecret({ ciphertext: storedKey.encryptedCiphertext, iv: storedKey.encryptionIv, tag: storedKey.encryptionTag })).testKey();
-      await recordGroqKeyTest(ctx.user.id, input.keyId, testResult.status); return testResult;
+      await recordGroqKeyTest(ctx.user.id, input.keyId, testResult.status === "request_too_large" || testResult.status === "prompt_error" ? "unavailable" : testResult.status); return testResult;
     }),
     activate: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const key = await getStoredGroqKey(ctx.user.id, input.keyId); if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "Groq key not found." });
