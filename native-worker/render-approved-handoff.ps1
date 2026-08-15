@@ -13,7 +13,7 @@ if (!(Test-Path $OutputDirectory)) { throw "Output directory not found: $OutputD
 
 $handoff = Get-Content -Raw $HandoffPath | ConvertFrom-Json
 if (!$handoff.approval.approvedAtMs -or !$handoff.approval.approvedByUserId) { throw "Rendering is blocked because the timeline handoff is not approved." }
-if ($handoff.output.width -ne 1920 -or $handoff.output.height -ne 1080 -or $handoff.output.container -ne "mp4") { throw "The worker accepts only the approved 1920x1080 MP4 contract." }
+if ($handoff.output.width -ne 1920 -or $handoff.output.height -ne 1080 -or $handoff.output.container -ne "mp4" -or !$handoff.output.filename) { throw "The worker accepts only the approved project-specific 1920x1080 MP4 contract." }
 
 $assetNames = @{}
 foreach ($image in $handoff.images) { $assetNames[[string]$image.assetId] = $image.filename }
@@ -38,7 +38,7 @@ foreach ($segment in $handoff.timeline) {
 }
 
 $filterComplex = ($filterParts -join ";") + ";" + (($concatInputs -join "") + "concat=n=$index`:v=1:a=0[vout]")
-$outputPath = Join-Path $OutputDirectory "Nothing_approved_1920x1080.mp4"
+$outputPath = Join-Path $OutputDirectory $handoff.output.filename
 $audioInputIndex = $index
 $arguments = @($inputs) + @("-i", $narrationPath, "-filter_complex", $filterComplex, "-map", "[vout]", "-map", "$audioInputIndex`:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath)
 

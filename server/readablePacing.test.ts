@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { distributeReadableWeightedDurations, MIN_READABLE_IMAGE_DURATION_MS } from "./readablePacing";
+import { buildGlobalReadableImageDurations, distributeReadableWeightedDurations, MIN_READABLE_IMAGE_DURATION_MS, resolveReadableMinimumDuration } from "./readablePacing";
 
 describe("distributeReadableWeightedDurations", () => {
   it("preserves the full narration duration while enforcing a readable minimum and variable Groq-weighted pacing", () => {
@@ -13,5 +13,17 @@ describe("distributeReadableWeightedDurations", () => {
 
   it("rejects a readable-duration request that cannot fit inside the narration", () => {
     expect(() => distributeReadableWeightedDurations(4_000, [1, 1])).toThrow("cannot fit");
+  });
+
+  it("keeps the Finance-quality preferred minimum when narration length supports it", () => {
+    expect(resolveReadableMinimumDuration(67_451, 20)).toBe(MIN_READABLE_IMAGE_DURATION_MS);
+  });
+
+  it("adapts the readable minimum for a shorter real narration without using equal splits", () => {
+    const plan = buildGlobalReadableImageDurations(12_000, [0.8, 1.1, 1.3, 0.9, 1.4, 1.0]);
+
+    expect(plan.minimumDurationMs).toBe(1_600);
+    expect(plan.durations.reduce((sum, duration) => sum + duration, 0)).toBe(12_000);
+    expect(new Set(plan.durations).size).toBeGreaterThan(1);
   });
 });

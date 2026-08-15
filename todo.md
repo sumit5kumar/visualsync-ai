@@ -93,3 +93,8 @@
 - [x] Preserve all 20 ordered Finance images while enforcing a readable, variable minimum on-screen duration through a genuine Groq pacing plan.
 - [x] Validate the smoother timeline, revoke approval, and confirm the revised review state before rendering.
 - [x] Query and verify that Finance approval is revoked after the readable-pacing rebuild, then confirm the Timeline requires fresh approval before rendering.
+- [x] Make the 20-image readable, variable-duration Groq pacing strategy the default for all future project timelines, with a safe adaptation when narration duration cannot support the preferred minimum hold.
+- [x] Replace manual narration and image-folder path entry with functional file and folder selection that uploads the chosen media to secure project storage.
+- [x] Add a clear output-folder chooser or explicit native-output destination workflow so the project configuration has a real effect.
+- [x] Generate the Windows PowerShell render command and handoff details from the currently selected project rather than a stale project-specific value.
+- [x] Use the current project’s saved output-folder selection to prefill the native Windows output-folder dialog and verify that the generated command changes with that project configuration.

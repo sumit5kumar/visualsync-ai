@@ -1,0 +1,36 @@
+import crypto from "crypto";
+import express, { type Express } from "express";
+import { sdk } from "./_core/sdk";
+import { saveUploadedProjectMedia } from "./db";
+import { storagePut } from "./storage";
+
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+const safeFilename = (filename: string) => filename.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+/, "").slice(0, 180) || "upload";
+
+export function registerProjectMediaRoutes(app: Express) {
+  app.post("/api/project-media/upload", express.raw({ type: "application/octet-stream", limit: MAX_UPLOAD_BYTES }), async (req, res) => {
+    try {
+      const user = await sdk.authenticateRequest(req).catch(() => null);
+      if (!user) return res.status(401).json({ error: "Sign in before uploading project media." });
+      const projectId = Number(req.header("x-project-id"));
+      const assetType = req.header("x-asset-type");
+      const originalFilename = decodeURIComponent(req.header("x-original-filename") ?? "").replace(/[\\/]/g, "").trim().slice(0, 255);
+      const storageFilename = safeFilename(originalFilename);
+      const requestedSequenceNumber = Number(req.header("x-sequence-number"));
+      const requestedAudioDurationMs = Number(req.header("x-audio-duration-ms"));
+      const mimeType = req.header("content-type")?.split(";")[0] || "application/octet-stream";
+      if (!Number.isInteger(projectId) || projectId <= 0 || (assetType !== "narration" && assetType !== "image") || !originalFilename || !Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: "The selected project media upload is incomplete." });
+      if (assetType === "image" && (!Number.isInteger(requestedSequenceNumber) || requestedSequenceNumber < 1)) return res.status(400).json({ error: "Every selected image needs a positive sequence number." });
+      if (assetType === "narration" && (!Number.isInteger(requestedAudioDurationMs) || requestedAudioDurationMs <= 0)) return res.status(400).json({ error: "The selected narration needs a measurable duration." });
+      const contentHash = crypto.createHash("sha256").update(req.body).digest("hex");
+      const sequenceNumber = assetType === "image" ? requestedSequenceNumber : null;
+      const audioDurationMs = assetType === "narration" ? requestedAudioDurationMs : null;
+      const stored = await storagePut(`projects/${projectId}/${assetType}/${assetType === "image" ? `${String(requestedSequenceNumber).padStart(4, "0")}_` : ""}${storageFilename}`, req.body, mimeType);
+      await saveUploadedProjectMedia({ userId: user.id, projectId, assetType, originalFilename, storageKey: stored.key, mimeType, byteSize: req.body.length, contentHash, sequenceNumber, audioDurationMs });
+      return res.status(201).json({ success: true, filename: originalFilename, storageKey: stored.key });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Project media could not be uploaded.";
+      return res.status(400).json({ error: message });
+    }
+  });
+}

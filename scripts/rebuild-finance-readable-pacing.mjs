@@ -3,7 +3,7 @@ import { mediaAssets, projects, timelineApprovals, timelineSegments } from "../d
 import { getDb } from "../server/db.ts";
 import { GROQ_VISION_MODEL } from "../server/groqClient.ts";
 import { executeWithGroqRotation } from "../server/groqPool.ts";
-import { MIN_READABLE_IMAGE_DURATION_MS, distributeReadableWeightedDurations } from "../server/readablePacing.ts";
+import { MIN_READABLE_IMAGE_DURATION_MS, buildGlobalReadableImageDurations } from "../server/readablePacing.ts";
 import { validateTimeline } from "../server/timelineValidation.ts";
 
 const projectId = 60001;
@@ -29,8 +29,9 @@ try {
   const weights = Array.isArray(pacingResult.value?.weights) ? pacingResult.value.weights.map(value => Number(value)) : [];
   if (weights.length !== images.length || weights.some(weight => !Number.isFinite(weight) || weight <= 0)) throw new Error("Groq returned an invalid readable visual-pacing plan.");
   if (new Set(weights.map(weight => weight.toFixed(3))).size === 1) throw new Error("Groq returned equal visual pacing weights, which would violate the variable-duration rule.");
-  const durations = distributeReadableWeightedDurations(project.audioDurationMs, weights);
-  if (durations.some(duration => duration < MIN_READABLE_IMAGE_DURATION_MS) || new Set(durations).size === 1) throw new Error("The regenerated Finance pacing plan is not readable and variable.");
+  const globalPacing = buildGlobalReadableImageDurations(project.audioDurationMs, weights);
+  const durations = globalPacing.durations;
+  if (durations.some(duration => duration < globalPacing.minimumDurationMs) || new Set(durations).size === 1) throw new Error("The regenerated Finance pacing plan is not readable and variable.");
 
   let cursor = 0;
   const rebuilt = images.map((image, index) => {
@@ -44,7 +45,7 @@ try {
 
   await db.transaction(async transaction => {
     await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId));
-    await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: pacingResult.key.label, pacingProviderKeyMasked: pacingResult.key.maskedKey, allImagesRequired: true, minReadableDurationMs: MIN_READABLE_IMAGE_DURATION_MS, pacingMethod: "full-narration-sequence" } })));
+    await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: pacingResult.key.label, pacingProviderKeyMasked: pacingResult.key.maskedKey, allImagesRequired: true, minReadableDurationMs: globalPacing.minimumDurationMs, pacingMethod: "global-full-narration-sequence" } })));
     await transaction.insert(timelineApprovals).values({ projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
     await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, projectId));
   });
