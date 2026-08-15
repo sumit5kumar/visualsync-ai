@@ -89,3 +89,7 @@
 - [x] Rebuild Finance so all 20 user-supplied script images are selected in chronological visual order rather than only one image per transcription beat.
 - [x] Use genuine Groq pacing decisions to assign non-equal narration-aligned durations to all 20 Finance images with no gaps or overlaps.
 - [x] Revoke the current Finance review state, verify the 20-card Timeline flow, and require fresh approval before rendering.
+- [x] Identify and correct rapid opening Finance cuts that make the visual sequence hard to read.
+- [x] Preserve all 20 ordered Finance images while enforcing a readable, variable minimum on-screen duration through a genuine Groq pacing plan.
+- [x] Validate the smoother timeline, revoke approval, and confirm the revised review state before rendering.
+- [x] Query and verify that Finance approval is revoked after the readable-pacing rebuild, then confirm the Timeline requires fresh approval before rendering.
