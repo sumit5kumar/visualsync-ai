@@ -34,12 +34,13 @@ foreach ($segment in $handoff.timeline) {
   if ($durationSeconds -le 0) { throw "Timeline contains a non-positive duration for image: $filename" }
   $isLast = $index -eq ($handoff.timeline.Count - 1)
   $inputSeconds = $durationSeconds + $(if ($isLast) { 0 } else { $transitionSeconds })
-  $frameCount = [Math]::Max(1, [Math]::Ceiling($inputSeconds * 30))
   $zoomTarget = [Math]::Min(1.17, 1.06 + ($durationSeconds * 0.011))
-  $zoomFrameCount = [Math]::Max(1, [Math]::Ceiling($durationSeconds * 30 * 0.9))
-  $zoomIncrement = ($zoomTarget - 1.0) / $zoomFrameCount
+  $zoomDurationSeconds = [Math]::Max(0.1, $durationSeconds * 0.9)
+  $zoomRate = ($zoomTarget - 1.0) / $zoomDurationSeconds
+  $zoomSpan = $zoomTarget - 1.0
+  $zoomExpression = "min($($zoomSpan.ToString([System.Globalization.CultureInfo]::InvariantCulture))\,t*$($zoomRate.ToString([System.Globalization.CultureInfo]::InvariantCulture)))"
   $inputs += @("-loop", "1", "-t", $inputSeconds.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-i", $imagePath)
-  $filterParts += "[$index`:v]scale=2112:1188:force_original_aspect_ratio=increase,crop=2112:1188,zoompan=z='min(zoom+$($zoomIncrement.ToString([System.Globalization.CultureInfo]::InvariantCulture)),$($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture)))':x='floor((iw-ow/zoom)/2)':y='floor((ih-oh/zoom)/2)':d=$frameCount`:s=1920x1080:fps=30,setsar=1,format=yuv420p[v$index]"
+  $filterParts += "[$index`:v]scale=w='trunc(2112*(1+$zoomExpression)/2)*2':h='trunc(1188*(1+$zoomExpression)/2)*2':eval=frame,crop=1920:1080:(in_w-out_w)/2:(in_h-out_h)/2,fps=30,setsar=1,format=yuv420p[v$index]"
   $segmentDurations += $durationSeconds
   $index++
 }

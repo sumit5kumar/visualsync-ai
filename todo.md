@@ -140,3 +140,4 @@
 - [x] Stabilize centered native zoom to remove vibration, lengthen the direct crossfade slightly, and increase the duration-aware zoom intensity and speed in native and browser preview.
 - [x] Trim the native video stream to the validated final timeline timestamp so longer crossfades cannot extend past narration audio.
 - [x] Diagnose and eliminate shake visible only in native-rendered MP4 files while preserving centered duration-aware zoom and direct crossfades.
+- [x] Replace native zoompan crop motion with a center-locked scaling filter so rendered MP4 zoom remains smooth, vibration-free, and fixed to the middle of each image.
