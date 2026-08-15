@@ -25,3 +25,15 @@ The official OpenAPI schema represents text, image, and audio inputs as typed co
 [3] [Google AI for Developers — Interactions API overview](https://ai.google.dev/gemini-api/docs/interactions-overview)
 
 [4] [Google AI for Developers — Interactions API reference](https://ai.google.dev/api/interactions-api#CreateInteraction)
+
+## Groq Cloud provider contract — August 2026
+
+Groq Cloud will remain an independent, user-selectable provider alongside Gemini. Its API key must be encrypted at rest, decrypted only in server memory, and sent only as a server-side `Authorization: Bearer` header. The browser receives labels, masked suffixes, verification state, and activation state only.
+
+For Hindi and Hinglish narration transcription, Groq documents its OpenAI-compatible `POST https://api.groq.com/openai/v1/audio/transcriptions` endpoint with `whisper-large-v3` for multilingual accuracy and `whisper-large-v3-turbo` for lower-cost multilingual transcription. The integration will request `verbose_json`, segment timestamps, and an explicit `hi` language hint where suitable, preserving only returned timestamps rather than estimating durations. [5]
+
+For image analysis, Groq documents `qwen/qwen3.6-27b` as the current vision-capable model through `POST https://api.groq.com/openai/v1/chat/completions`, accepting text plus image URLs or data URLs and supporting JSON mode. This supersedes the unverified assumption that a Llama 3.2 Vision identifier is the current contract. [6]
+
+[5] [GroqDocs — Speech to Text](https://console.groq.com/docs/speech-to-text)
+
+[6] [GroqDocs — Images and Vision](https://console.groq.com/docs/vision)

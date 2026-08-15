@@ -6,7 +6,7 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarInset, Si
 import { AudioLines, Bot, Clapperboard, FolderKanban, LayoutDashboard, LogOut, Settings2, Sparkles } from "lucide-react";
 import { useLocation } from "wouter";
 
-const navigation = [{ label: "Home", path: "/", icon: LayoutDashboard }, { label: "Projects", path: "/projects", icon: FolderKanban }, { label: "Gemini AI", path: "/gemini", icon: Bot }, { label: "Timeline", path: "/timeline", icon: AudioLines }, { label: "Preview", path: "/preview", icon: Clapperboard }, { label: "Settings", path: "/settings", icon: Settings2 }];
+const navigation = [{ label: "Home", path: "/", icon: LayoutDashboard }, { label: "Projects", path: "/projects", icon: FolderKanban }, { label: "AI Providers", path: "/gemini", icon: Bot }, { label: "Timeline", path: "/timeline", icon: AudioLines }, { label: "Preview", path: "/preview", icon: Clapperboard }, { label: "Settings", path: "/settings", icon: Settings2 }];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useLocation();

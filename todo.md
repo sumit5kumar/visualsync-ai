@@ -64,3 +64,8 @@
 - [x] Prevent PowerShell from treating normal FFmpeg diagnostic output as a terminating native-worker error.
 - [x] Allow a completed project’s previously validated timeline to accept a candidate-image replacement and return to a re-approval state.
 - [x] Explain the local native-render workflow clearly in Preview when a persistent worker connection is unavailable.
+- [x] Verify the current supported Groq Cloud transcription and vision models against official documentation before choosing provider contracts.
+- [x] Add encrypted server-side Groq key storage, verification, activation, masking, and removal without exposing Groq keys to the client.
+- [x] Add Groq Cloud transcription and vision-analysis contracts alongside the retained Gemini integration.
+- [x] Add clear Groq provider controls to the AI workspace and preserve Gemini as an independent provider.
+- [x] Verify the user-supplied First Groq Key against Groq Cloud and cover the dual-provider workflow with regression tests.

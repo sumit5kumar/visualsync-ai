@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { geminiApiKeys, mediaAssets, projects, timelineApprovals, timelineSegments, type InsertUser, users } from "../drizzle/schema";
+import { geminiApiKeys, groqApiKeys, mediaAssets, projects, timelineApprovals, timelineSegments, type InsertUser, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { canEditValidatedTimeline, planImageSubstitution } from "./timelineEditing";
 import { validateTimeline } from "./timelineValidation";
@@ -111,6 +111,39 @@ export async function activateGeminiKey(userId: number, keyId: number) {
 export async function removeGeminiKey(userId: number, keyId: number) {
   const db = await requireDb();
   await db.delete(geminiApiKeys).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId)));
+}
+
+export async function listVisibleGroqKeys(userId: number) {
+  const db = await requireDb();
+  return (await db.select().from(groqApiKeys).where(eq(groqApiKeys.userId, userId))).map(record => ({ id: record.id, label: record.label, maskedKey: `${record.keyPrefix}••••••••${record.keySuffix}`, isActive: record.isActive, testStatus: record.testStatus, lastTestedAt: record.lastTestedAt, createdAt: record.createdAt }));
+}
+
+export async function getStoredGroqKey(userId: number, keyId: number) {
+  const db = await requireDb();
+  return (await db.select().from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, keyId))).limit(1))[0];
+}
+
+export async function saveValidatedGroqKey(userId: number, input: { label: string; keyPrefix: string; keySuffix: string; keyFingerprint: string; encryptedCiphertext: string; encryptionIv: string; encryptionTag: string }) {
+  const db = await requireDb();
+  const duplicate = await db.select({ id: groqApiKeys.id }).from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.keyFingerprint, input.keyFingerprint))).limit(1);
+  if (duplicate.length > 0) throw new Error("This Groq API key is already saved in your workspace.");
+  const activeKeys = await db.select({ id: groqApiKeys.id }).from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true)));
+  await db.insert(groqApiKeys).values({ ...input, userId, isActive: activeKeys.length === 0, testStatus: "verified", lastTestedAt: new Date() });
+}
+
+export async function recordGroqKeyTest(userId: number, keyId: number, testStatus: "verified" | "invalid" | "quota_limited" | "unavailable") {
+  const db = await requireDb();
+  await db.update(groqApiKeys).set({ testStatus, lastTestedAt: new Date() }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, keyId)));
+}
+
+export async function activateGroqKey(userId: number, keyId: number) {
+  const db = await requireDb();
+  await db.transaction(async transaction => { await transaction.update(groqApiKeys).set({ isActive: false }).where(eq(groqApiKeys.userId, userId)); await transaction.update(groqApiKeys).set({ isActive: true }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, keyId))); });
+}
+
+export async function removeGroqKey(userId: number, keyId: number) {
+  const db = await requireDb();
+  await db.delete(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, keyId)));
 }
 
 export async function listProjectTimeline(userId: number, projectId: number) {

@@ -4,10 +4,11 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { activateGeminiKey, approveTimeline, createProjectRecord, getApprovedRenderHandoff, getStoredGeminiKey, getTimelineReview, listProjectTimeline, listTimelineCandidates, listUserProjects, listVisibleGeminiKeys, recordGeminiKeyTest, removeGeminiKey, saveValidatedGeminiKey, substituteTimelineImage } from "./db";
-import { decryptSecret, describeGeminiKey, encryptSecret, fingerprintSecret } from "./crypto";
+import { activateGeminiKey, activateGroqKey, approveTimeline, createProjectRecord, getApprovedRenderHandoff, getStoredGeminiKey, getStoredGroqKey, getTimelineReview, listProjectTimeline, listTimelineCandidates, listUserProjects, listVisibleGeminiKeys, listVisibleGroqKeys, recordGeminiKeyTest, recordGroqKeyTest, removeGeminiKey, removeGroqKey, saveValidatedGeminiKey, saveValidatedGroqKey, substituteTimelineImage } from "./db";
+import { decryptSecret, describeApiKey, describeGeminiKey, encryptSecret, fingerprintSecret } from "./crypto";
 import { GEMINI_MODEL, GeminiClient } from "./geminiClient";
-import { canActivateGeminiKey, canRemoveGeminiKey } from "./keyPolicy";
+import { GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL, GroqClient } from "./groqClient";
+import { canActivateGeminiKey, canActivateProviderKey, canRemoveGeminiKey, canRemoveProviderKey } from "./keyPolicy";
 import { validateTimeline } from "./timelineValidation";
 import { getWorkerCapabilities, workerPayloadSchemas } from "./workerContracts";
 
@@ -25,6 +26,33 @@ export const appRouter = router({
     test: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const storedKey = await getStoredGeminiKey(ctx.user.id, input.keyId); if (!storedKey) throw new TRPCError({ code: "NOT_FOUND", message: "Gemini key not found." }); const apiKey = decryptSecret({ ciphertext: storedKey.encryptedCiphertext, iv: storedKey.encryptionIv, tag: storedKey.encryptionTag }); const testResult = await new GeminiClient(apiKey).testKey(); await recordGeminiKeyTest(ctx.user.id, input.keyId, testResult.status); return testResult; }),
     activate: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const key = await getStoredGeminiKey(ctx.user.id, input.keyId); if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "Gemini key not found." }); if (!canActivateGeminiKey(key.testStatus)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only a successfully verified Gemini key can become active." }); await activateGeminiKey(ctx.user.id, input.keyId); return { success: true } as const; }),
     remove: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const keys = await listVisibleGeminiKeys(ctx.user.id); const target = keys.find(key => key.id === input.keyId); if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Gemini key not found." }); const verifiedAlternatives = keys.filter(key => key.id !== input.keyId && key.testStatus === "verified"); if (!canRemoveGeminiKey(target.isActive, verifiedAlternatives.length)) throw new TRPCError({ code: "BAD_REQUEST", message: "Add and verify another key before removing the active key." }); await removeGeminiKey(ctx.user.id, input.keyId); return { success: true } as const; }),
+  }),
+  groq: router({
+    models: publicProcedure.query(() => ({ transcription: GROQ_TRANSCRIPTION_MODEL, vision: GROQ_VISION_MODEL })),
+    list: protectedProcedure.query(({ ctx }) => listVisibleGroqKeys(ctx.user.id)),
+    addAndTest: protectedProcedure.input(z.object({ label: z.string().trim().min(1).max(80), apiKey: z.string().trim().regex(/^gsk_[A-Za-z0-9_-]{20,}$/, "Enter a Groq Cloud API key beginning with gsk_.") })).mutation(async ({ ctx, input }) => {
+      const apiKey = input.apiKey.trim(); const testResult = await new GroqClient(apiKey).testKey();
+      if (testResult.status !== "verified") return { saved: false, ...testResult };
+      const encryption = encryptSecret(apiKey); const descriptor = describeApiKey(apiKey);
+      await saveValidatedGroqKey(ctx.user.id, { label: input.label, keyPrefix: descriptor.prefix, keySuffix: descriptor.suffix, keyFingerprint: fingerprintSecret(apiKey), encryptedCiphertext: encryption.ciphertext, encryptionIv: encryption.iv, encryptionTag: encryption.tag });
+      return { saved: true, ...testResult };
+    }),
+    test: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const storedKey = await getStoredGroqKey(ctx.user.id, input.keyId); if (!storedKey) throw new TRPCError({ code: "NOT_FOUND", message: "Groq key not found." });
+      const testResult = await new GroqClient(decryptSecret({ ciphertext: storedKey.encryptedCiphertext, iv: storedKey.encryptionIv, tag: storedKey.encryptionTag })).testKey();
+      await recordGroqKeyTest(ctx.user.id, input.keyId, testResult.status); return testResult;
+    }),
+    activate: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const key = await getStoredGroqKey(ctx.user.id, input.keyId); if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "Groq key not found." });
+      if (!canActivateProviderKey(key.testStatus)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only a successfully verified Groq key can become active." });
+      await activateGroqKey(ctx.user.id, input.keyId); return { success: true } as const;
+    }),
+    remove: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const keys = await listVisibleGroqKeys(ctx.user.id); const target = keys.find(key => key.id === input.keyId); if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Groq key not found." });
+      const verifiedAlternatives = keys.filter(key => key.id !== input.keyId && key.testStatus === "verified");
+      if (!canRemoveProviderKey(target.isActive, verifiedAlternatives.length)) throw new TRPCError({ code: "BAD_REQUEST", message: "Add and verify another Groq key before removing the active key." });
+      await removeGroqKey(ctx.user.id, input.keyId); return { success: true } as const;
+    }),
   }),
   timeline: router({
     list: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).query(({ ctx, input }) => listProjectTimeline(ctx.user.id, input.projectId)),

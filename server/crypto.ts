@@ -23,7 +23,9 @@ export function decryptSecret(secret: EncryptedSecret): string {
 }
 
 export const fingerprintSecret = (value: string) => createHash("sha256").update(value).digest("hex");
-export function describeGeminiKey(value: string) {
+export function describeApiKey(value: string) {
   const normalized = value.trim();
   return { prefix: normalized.slice(0, 4) || "key", suffix: normalized.slice(-4) || "••••", masked: `${normalized.slice(0, 4) || "key"}••••••••${normalized.slice(-4) || "••••"}` };
 }
+
+export const describeGeminiKey = describeApiKey;

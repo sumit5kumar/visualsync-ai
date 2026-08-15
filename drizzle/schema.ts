@@ -47,6 +47,23 @@ export const geminiApiKeys = mysqlTable("geminiApiKeys", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [index("gemini_keys_user_idx").on(table.userId)]);
 
+export const groqApiKeys = mysqlTable("groqApiKeys", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  label: varchar("label", { length: 80 }).notNull(),
+  keyPrefix: varchar("keyPrefix", { length: 8 }).notNull(),
+  keySuffix: varchar("keySuffix", { length: 8 }).notNull(),
+  keyFingerprint: varchar("keyFingerprint", { length: 64 }).notNull(),
+  encryptedCiphertext: text("encryptedCiphertext").notNull(),
+  encryptionIv: varchar("encryptionIv", { length: 32 }).notNull(),
+  encryptionTag: varchar("encryptionTag", { length: 32 }).notNull(),
+  isActive: boolean("isActive").notNull().default(false),
+  testStatus: mysqlEnum("testStatus", ["untested", "verified", "invalid", "quota_limited", "unavailable"]).notNull().default("untested"),
+  lastTestedAt: timestamp("lastTestedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [index("groq_keys_user_idx").on(table.userId)]);
+
 export const mediaAssets = mysqlTable("mediaAssets", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
@@ -94,5 +111,6 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Project = typeof projects.$inferSelect;
 export type GeminiApiKey = typeof geminiApiKeys.$inferSelect;
+export type GroqApiKey = typeof groqApiKeys.$inferSelect;
 export type TimelineSegment = typeof timelineSegments.$inferSelect;
 export type TimelineApproval = typeof timelineApprovals.$inferSelect;
