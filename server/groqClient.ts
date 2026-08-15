@@ -17,6 +17,12 @@ function classifyGroqError(statusCode: number, message: string) {
   return new GroqRequestError(message || "Groq is currently unavailable.", "unavailable");
 }
 
+function parseGeneratedJsonObject(content: string, malformedMessage: string) {
+  const objectText = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").match(/\{[\s\S]*\}/)?.[0];
+  if (!objectText) throw new GroqRequestError(malformedMessage, "prompt_error");
+  try { return JSON.parse(objectText) as unknown; } catch { throw new GroqRequestError(malformedMessage, "prompt_error"); }
+}
+
 export class GroqClient {
   constructor(private readonly apiKey: string) {}
 
@@ -64,8 +70,10 @@ export class GroqClient {
       body: JSON.stringify({
         model: GROQ_VISION_MODEL,
         temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [{ role: "user", content: [{ type: "text", text: input.prompt }, { type: "image_url", image_url: { url: input.imageUrl } }] }],
+        max_completion_tokens: 600,
+        reasoning_effort: "none",
+        reasoning_format: "hidden",
+        messages: [{ role: "user", content: [{ type: "text", text: `${input.prompt}\nReply with exactly one JSON object and no markdown.` }, { type: "image_url", image_url: { url: input.imageUrl } }] }],
       }),
       signal: AbortSignal.timeout(60_000),
     });
@@ -76,7 +84,7 @@ export class GroqClient {
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const content = payload.choices?.[0]?.message?.content?.trim();
     if (!content) throw new GroqRequestError("Groq returned no usable vision content.", "unavailable");
-    try { return JSON.parse(content) as unknown; } catch { throw new GroqRequestError("Groq returned malformed vision JSON.", "unavailable"); }
+    return parseGeneratedJsonObject(content, "Groq returned malformed vision JSON.");
   }
 
   async completeText(input: { prompt: string }) {
@@ -111,5 +119,22 @@ export class GroqClient {
     const content = payload.choices?.[0]?.message?.content?.trim();
     if (!content) throw new GroqRequestError("Groq returned no usable structured timeline content.", "unavailable");
     try { return JSON.parse(content) as unknown; } catch { throw new GroqRequestError("Groq returned malformed timeline-selection JSON.", "prompt_error"); }
+  }
+
+  async completePacingPlan(input: { prompt: string }) {
+    const response = await fetch(`${GROQ_API_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: this.headers("application/json"),
+      body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 500, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: input.prompt }] }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      throw classifyGroqError(response.status, payload?.error?.message ?? "");
+    }
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = payload.choices?.[0]?.message?.content?.trim();
+    if (!content) throw new GroqRequestError("Groq returned no usable pacing content.", "unavailable");
+    return parseGeneratedJsonObject(content, "Groq returned malformed pacing JSON.");
   }
 }

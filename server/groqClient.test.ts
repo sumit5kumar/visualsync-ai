@@ -18,14 +18,15 @@ describe("GroqClient", () => {
     expect(url).not.toContain("gsk_");
   });
 
-  it("submits image analysis to Groq’s vision model in JSON mode", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"sceneDescription":"hourglass"}' } }] }), { status: 200 }));
+  it("submits image analysis without the rejected JSON response mode and parses generated JSON", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '```json\n{"sceneDescription":"hourglass"}\n```' } }] }), { status: 200 }));
     global.fetch = fetchMock;
 
     await expect(new GroqClient("gsk_test").analyzeImage({ imageUrl: "https://example.test/image.jpg", prompt: "Describe this scene as JSON." })).resolves.toEqual({ sceneDescription: "hourglass" });
 
     const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(request.body))).toMatchObject({ model: GROQ_VISION_MODEL, response_format: { type: "json_object" } });
+    expect(JSON.parse(String(request.body))).toMatchObject({ model: GROQ_VISION_MODEL, reasoning_effort: "none", reasoning_format: "hidden" });
+    expect(JSON.parse(String(request.body))).not.toHaveProperty("response_format");
   });
 
   it("returns compact text completion without forcing JSON mode", async () => {
@@ -40,14 +41,15 @@ describe("GroqClient", () => {
     expect(JSON.parse(String(request.body))).not.toHaveProperty("response_format");
   });
 
-  it("uses enforced JSON mode for machine-readable pacing plans", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"assignments":[{"beat":1,"weight":1.2}]}' } }] }), { status: 200 }));
+  it("uses compatibility-safe text completion for a machine-readable pacing plan", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '```json\n{"weights":[1.2,0.8]}\n```' } }] }), { status: 200 }));
     global.fetch = fetchMock;
 
-    await expect(new GroqClient("gsk_test").completeJson({ prompt: "Return a JSON pacing plan." })).resolves.toEqual({ assignments: [{ beat: 1, weight: 1.2 }] });
+    await expect(new GroqClient("gsk_test").completePacingPlan({ prompt: "Return a JSON pacing plan." })).resolves.toEqual({ weights: [1.2, 0.8] });
 
     const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(request.body))).toMatchObject({ model: GROQ_VISION_MODEL, reasoning_effort: "none", reasoning_format: "hidden", max_completion_tokens: 500, response_format: { type: "json_object" } });
+    expect(JSON.parse(String(request.body))).toMatchObject({ model: GROQ_VISION_MODEL, reasoning_effort: "none", reasoning_format: "hidden", max_completion_tokens: 500 });
+    expect(JSON.parse(String(request.body))).not.toHaveProperty("response_format");
   });
 
   it("reports prompt-size rejections without classifying the key as quota limited", async () => {

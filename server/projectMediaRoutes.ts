@@ -6,22 +6,30 @@ import { storagePut } from "./storage";
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const safeFilename = (filename: string) => filename.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+/, "").slice(0, 180) || "upload";
+export const projectMediaBodyParserOptions = { type: () => true, limit: MAX_UPLOAD_BYTES };
+
+export function validateProjectMediaUpload(input: { projectId: number; assetType: string | null; originalFilename: string; body: unknown; sequenceNumber: number; audioDurationMs: number }) {
+  if (!Number.isInteger(input.projectId) || input.projectId <= 0 || (input.assetType !== "narration" && input.assetType !== "image") || !input.originalFilename || !Buffer.isBuffer(input.body) || !input.body.length) return "The selected project media upload is incomplete.";
+  if (input.assetType === "image" && (!Number.isInteger(input.sequenceNumber) || input.sequenceNumber < 1)) return "Every selected image needs a positive sequence number.";
+  if (input.assetType === "narration" && (!Number.isInteger(input.audioDurationMs) || input.audioDurationMs <= 0)) return "The selected narration needs a measurable duration.";
+  return null;
+}
 
 export function registerProjectMediaRoutes(app: Express) {
-  app.post("/api/project-media/upload", express.raw({ type: "application/octet-stream", limit: MAX_UPLOAD_BYTES }), async (req, res) => {
+  app.post("/api/project-media/upload", express.raw(projectMediaBodyParserOptions), async (req, res) => {
     try {
       const user = await sdk.authenticateRequest(req).catch(() => null);
       if (!user) return res.status(401).json({ error: "Sign in before uploading project media." });
       const projectId = Number(req.header("x-project-id"));
-      const assetType = req.header("x-asset-type");
+      const assetType = req.header("x-asset-type") ?? null;
       const originalFilename = decodeURIComponent(req.header("x-original-filename") ?? "").replace(/[\\/]/g, "").trim().slice(0, 255);
       const storageFilename = safeFilename(originalFilename);
       const requestedSequenceNumber = Number(req.header("x-sequence-number"));
       const requestedAudioDurationMs = Number(req.header("x-audio-duration-ms"));
       const mimeType = req.header("content-type")?.split(";")[0] || "application/octet-stream";
-      if (!Number.isInteger(projectId) || projectId <= 0 || (assetType !== "narration" && assetType !== "image") || !originalFilename || !Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: "The selected project media upload is incomplete." });
-      if (assetType === "image" && (!Number.isInteger(requestedSequenceNumber) || requestedSequenceNumber < 1)) return res.status(400).json({ error: "Every selected image needs a positive sequence number." });
-      if (assetType === "narration" && (!Number.isInteger(requestedAudioDurationMs) || requestedAudioDurationMs <= 0)) return res.status(400).json({ error: "The selected narration needs a measurable duration." });
+      const validationError = validateProjectMediaUpload({ projectId, assetType, originalFilename, body: req.body, sequenceNumber: requestedSequenceNumber, audioDurationMs: requestedAudioDurationMs });
+      if (validationError) return res.status(400).json({ error: validationError });
+      if (assetType !== "narration" && assetType !== "image") return res.status(400).json({ error: "The selected project media upload is incomplete." });
       const contentHash = crypto.createHash("sha256").update(req.body).digest("hex");
       const sequenceNumber = assetType === "image" ? requestedSequenceNumber : null;
       const audioDurationMs = assetType === "narration" ? requestedAudioDurationMs : null;

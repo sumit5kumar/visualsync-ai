@@ -98,3 +98,15 @@
 - [x] Add a clear output-folder chooser or explicit native-output destination workflow so the project configuration has a real effect.
 - [x] Generate the Windows PowerShell render command and handoff details from the currently selected project rather than a stale project-specific value.
 - [x] Use the current project’s saved output-folder selection to prefill the native Windows output-folder dialog and verify that the generated command changes with that project configuration.
+- [x] Fix the browser media-upload request that currently fails with “The selected project media upload is incomplete.”
+- [x] Repair the Choose output control with a reliable browser-compatible selection fallback and clear behavior.
+- [x] Add regression coverage and verify the repaired picker/upload setup flow before processing a new project.
+- [x] Add targeted regression coverage for browser audio/image MIME uploads and required project-media request fields.
+- [x] Verify the repaired project setup flow end to end with actual browser-style WAV/JPEG uploads and persisted secure project-media calls.
+- [x] Verify that choosing an output folder updates the project configuration and prefilled native render command for that project.
+- [x] Verify a live browser-selected media import through persisted project assets and project state updates without altering existing user timelines.
+- [ ] Verify the live output-folder picker persistence path updates the selected project configuration and Preview command.
+- [x] Fix Groq’s rejected JSON response format in the global project pacing request without changing key rotation or provider selection.
+- [x] Add regression coverage for the compatible pacing-response contract and verify uploaded project processing can continue past Groq analysis.
+- [x] Replace Groq vision analysis JSON mode, which rejected the real Movie image-analysis request, with a compatible generated-JSON parser while preserving the same Groq pool.
+- [x] Retry the real uploaded Movie project after vision and pacing compatibility fixes, then verify its complete timeline.
