@@ -139,3 +139,4 @@
 - [x] Center the zoom anchor in both the native FFmpeg renderer and in-browser timeline preview, then re-render the Finance video for verification.
 - [x] Stabilize centered native zoom to remove vibration, lengthen the direct crossfade slightly, and increase the duration-aware zoom intensity and speed in native and browser preview.
 - [x] Trim the native video stream to the validated final timeline timestamp so longer crossfades cannot extend past narration audio.
+- [x] Diagnose and eliminate shake visible only in native-rendered MP4 files while preserving centered duration-aware zoom and direct crossfades.

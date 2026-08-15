@@ -39,7 +39,7 @@ foreach ($segment in $handoff.timeline) {
   $zoomFrameCount = [Math]::Max(1, [Math]::Ceiling($durationSeconds * 30 * 0.9))
   $zoomIncrement = ($zoomTarget - 1.0) / $zoomFrameCount
   $inputs += @("-loop", "1", "-t", $inputSeconds.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-i", $imagePath)
-  $filterParts += "[$index`:v]scale=2112:1188:force_original_aspect_ratio=increase,crop=2112:1188,zoompan=z='min(zoom+$($zoomIncrement.ToString([System.Globalization.CultureInfo]::InvariantCulture)),$($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture)))':x='floor((iw-iw/zoom)/2)':y='floor((ih-ih/zoom)/2)':d=$frameCount`:s=1920x1080:fps=30,setsar=1,format=yuv420p[v$index]"
+  $filterParts += "[$index`:v]scale=2112:1188:force_original_aspect_ratio=increase,crop=2112:1188,zoompan=z='min(zoom+$($zoomIncrement.ToString([System.Globalization.CultureInfo]::InvariantCulture)),$($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture)))':x='floor((iw-ow/zoom)/2)':y='floor((ih-oh/zoom)/2)':d=$frameCount`:s=1920x1080:fps=30,setsar=1,format=yuv420p[v$index]"
   $segmentDurations += $durationSeconds
   $index++
 }
