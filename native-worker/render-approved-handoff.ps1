@@ -24,7 +24,7 @@ $inputs = @()
 $filterParts = @()
 $segmentDurations = @()
 $index = 0
-$transitionSeconds = 0.35
+$transitionSeconds = 0.55
 foreach ($segment in $handoff.timeline) {
   $filename = $assetNames[[string]$segment.imageAssetId]
   if (!$filename) { throw "Timeline image asset $($segment.imageAssetId) is absent from the approved handoff." }
@@ -35,10 +35,11 @@ foreach ($segment in $handoff.timeline) {
   $isLast = $index -eq ($handoff.timeline.Count - 1)
   $inputSeconds = $durationSeconds + $(if ($isLast) { 0 } else { $transitionSeconds })
   $frameCount = [Math]::Max(1, [Math]::Ceiling($inputSeconds * 30))
-  $zoomTarget = [Math]::Min(1.11, 1.045 + ($durationSeconds * 0.008))
-  $zoomIncrement = ($zoomTarget - 1.0) / $frameCount
+  $zoomTarget = [Math]::Min(1.17, 1.06 + ($durationSeconds * 0.011))
+  $zoomFrameCount = [Math]::Max(1, [Math]::Ceiling($durationSeconds * 30 * 0.9))
+  $zoomIncrement = ($zoomTarget - 1.0) / $zoomFrameCount
   $inputs += @("-loop", "1", "-t", $inputSeconds.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-i", $imagePath)
-  $filterParts += "[$index`:v]scale=2112:1188:force_original_aspect_ratio=increase,crop=2112:1188,zoompan=z='min(zoom+$($zoomIncrement.ToString([System.Globalization.CultureInfo]::InvariantCulture)),$($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture)))':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d=$frameCount`:s=1920x1080:fps=30,setsar=1,format=yuv420p[v$index]"
+  $filterParts += "[$index`:v]scale=2112:1188:force_original_aspect_ratio=increase,crop=2112:1188,zoompan=z='min(zoom+$($zoomIncrement.ToString([System.Globalization.CultureInfo]::InvariantCulture)),$($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture)))':x='floor((iw-iw/zoom)/2)':y='floor((ih-ih/zoom)/2)':d=$frameCount`:s=1920x1080:fps=30,setsar=1,format=yuv420p[v$index]"
   $segmentDurations += $durationSeconds
   $index++
 }
@@ -55,10 +56,12 @@ else {
   }
   if ($index -eq 2) { $filterChain = $filterChain -replace "\[xf1\]$", "[vout]" }
 }
-$filterComplex = ($filterParts -join ";") + ";" + $filterChain
+$timelineDurationSeconds = ([double]$handoff.timeline[-1].endMs) / 1000
+$timelineDuration = $timelineDurationSeconds.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+$filterComplex = ($filterParts -join ";") + ";" + $filterChain + ";[vout]trim=duration=$timelineDuration,setpts=PTS-STARTPTS[vfinal]"
 $outputPath = Join-Path $OutputDirectory $handoff.output.filename
 $audioInputIndex = $index
-$arguments = @($inputs) + @("-i", $narrationPath, "-filter_complex", $filterComplex, "-map", "[vout]", "-map", "$audioInputIndex`:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath)
+$arguments = @($inputs) + @("-i", $narrationPath, "-filter_complex", $filterComplex, "-map", "[vfinal]", "-map", "$audioInputIndex`:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath)
 
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"

@@ -137,3 +137,5 @@
 - [x] Fix native FFmpeg rendering so final MP4 files visibly include direct crossfades and duration-aware zoom rather than static image cuts.
 - [x] Place the latest motion-enabled native worker and approved handoff in the user’s Finance folder so the PowerShell command resolves locally.
 - [x] Center the zoom anchor in both the native FFmpeg renderer and in-browser timeline preview, then re-render the Finance video for verification.
+- [x] Stabilize centered native zoom to remove vibration, lengthen the direct crossfade slightly, and increase the duration-aware zoom intensity and speed in native and browser preview.
+- [x] Trim the native video stream to the validated final timeline timestamp so longer crossfades cannot extend past narration audio.
