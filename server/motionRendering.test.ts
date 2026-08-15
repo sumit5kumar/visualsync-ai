@@ -9,10 +9,15 @@ describe("middle-origin motion rendering", () => {
     const worker = readFileSync(resolve(projectRoot, "native-worker/render-approved-handoff.ps1"), "utf8");
 
     expect(worker).toContain('"-framerate", "30"');
-    expect(worker).not.toContain("zoompan=");
-    expect(worker).toContain("scale=w='trunc(2112*(1+$zoomExpression)/2)*2'");
-    expect(worker).toContain("crop=1920:1080:(in_w-out_w)/2:(in_h-out_h)/2");
-    expect(worker).toContain("[Math]::Min(1.06, 1.025 + ($durationSeconds * 0.004))");
+    expect(worker).toContain("scale=4224:2376:force_original_aspect_ratio=increase,crop=4224:2376");
+    expect(worker).toContain("zoompan=z='min(zoom+$($zoomIncrement.ToString([System.Globalization.CultureInfo]::InvariantCulture))\\,$($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture)))'");
+    expect(worker).toContain("x='floor(iw/2-iw/(2*zoom))'");
+    expect(worker).toContain("y='floor(ih/2-ih/(2*zoom))'");
+    expect(worker).toContain("s=3840x2160:fps=30,scale=1920:1080:flags=lanczos+accurate_rnd+full_chroma_int");
+    expect(worker).toContain('"-sws_flags", "lanczos+accurate_rnd+full_chroma_int"');
+    expect(worker).toContain('"-fps_mode", "cfr"');
+    expect(worker).toContain('"-pix_fmt", "yuv420p"');
+    expect(worker).toContain("[Math]::Min(1.08, 1.035 + ($durationSeconds * 0.006))");
     expect(worker).toContain("xfade=transition=fade");
     expect(worker).toContain("$transitionSeconds = 0.5");
     expect(worker).toContain("[vout]trim=duration=$timelineDuration,setpts=PTS-STARTPTS[vfinal]");

@@ -146,3 +146,4 @@
 - [x] Verify the exact worker, handoff, and MP4 used in the Finance folder, then eliminate any remaining motion from the actual render path.
 - [x] Restore a conservative native middle-origin zoom on top of the verified static crossfade path and create a separately named Finance comparison MP4.
 - [x] Measure and eliminate the frame-to-frame instability isolated to native middle zoom while retaining the confirmed stable crossfade path.
+- [x] Audit the full native rendering and playback pipeline, identify the actual source of zoom-induced shake, and implement a permanent fix verified independently from the browser preview.

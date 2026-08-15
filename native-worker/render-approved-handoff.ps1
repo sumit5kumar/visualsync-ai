@@ -34,12 +34,11 @@ foreach ($segment in $handoff.timeline) {
   if ($durationSeconds -le 0) { throw "Timeline contains a non-positive duration for image: $filename" }
   $isLast = $index -eq ($handoff.timeline.Count - 1)
   $inputSeconds = $durationSeconds + $(if ($isLast) { 0 } else { $transitionSeconds })
-  $zoomTarget = [Math]::Min(1.06, 1.025 + ($durationSeconds * 0.004))
-  $zoomRate = ($zoomTarget - 1.0) / [Math]::Max(0.1, $durationSeconds)
-  $zoomSpan = $zoomTarget - 1.0
-  $zoomExpression = "min($($zoomSpan.ToString([System.Globalization.CultureInfo]::InvariantCulture))\,t*$($zoomRate.ToString([System.Globalization.CultureInfo]::InvariantCulture)))"
+  $frameCount = [Math]::Max(1, [Math]::Ceiling($inputSeconds * 30))
+  $zoomTarget = [Math]::Min(1.08, 1.035 + ($durationSeconds * 0.006))
+  $zoomIncrement = ($zoomTarget - 1.0) / $frameCount
   $inputs += @("-loop", "1", "-framerate", "30", "-t", $inputSeconds.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-i", $imagePath)
-  $filterParts += "[$index`:v]scale=2112:1188:force_original_aspect_ratio=increase,crop=2112:1188,scale=w='trunc(2112*(1+$zoomExpression)/2)*2':h='trunc(1188*(1+$zoomExpression)/2)*2':eval=frame:flags=lanczos,crop=1920:1080:(in_w-out_w)/2:(in_h-out_h)/2,setsar=1,format=yuv420p[v$index]"
+  $filterParts += "[$index`:v]scale=4224:2376:force_original_aspect_ratio=increase,crop=4224:2376,zoompan=z='min(zoom+$($zoomIncrement.ToString([System.Globalization.CultureInfo]::InvariantCulture))\,$($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture)))':x='floor(iw/2-iw/(2*zoom))':y='floor(ih/2-ih/(2*zoom))':d=$frameCount`:s=3840x2160:fps=30,scale=1920:1080:flags=lanczos+accurate_rnd+full_chroma_int,setsar=1,format=yuv420p[v$index]"
   $segmentDurations += $durationSeconds
   $index++
 }
@@ -61,7 +60,7 @@ $timelineDuration = $timelineDurationSeconds.ToString([System.Globalization.Cult
 $filterComplex = ($filterParts -join ";") + ";" + $filterChain + ";[vout]trim=duration=$timelineDuration,setpts=PTS-STARTPTS[vfinal]"
 $outputPath = Join-Path $OutputDirectory $handoff.output.filename
 $audioInputIndex = $index
-$arguments = @($inputs) + @("-i", $narrationPath, "-filter_complex", $filterComplex, "-map", "[vfinal]", "-map", "$audioInputIndex`:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath)
+$arguments = @("-sws_flags", "lanczos+accurate_rnd+full_chroma_int") + @($inputs) + @("-i", $narrationPath, "-filter_complex", $filterComplex, "-map", "[vfinal]", "-map", "$audioInputIndex`:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-r", "30", "-fps_mode", "cfr", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath)
 
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
