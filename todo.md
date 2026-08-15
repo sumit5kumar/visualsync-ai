@@ -143,3 +143,4 @@
 - [x] Replace native zoompan crop motion with a center-locked scaling filter so rendered MP4 zoom remains smooth, vibration-free, and fixed to the middle of each image.
 - [x] Remove the current native zoom and crossfade implementation, then rebuild both effects from a minimal clean baseline without altering the approved media, timing, or output workflow.
 - [x] Temporarily disable native zoom and render Finance with direct crossfades only to isolate whether zoom causes the reported shake.
+- [x] Verify the exact worker, handoff, and MP4 used in the Finance folder, then eliminate any remaining motion from the actual render path.
