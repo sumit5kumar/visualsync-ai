@@ -71,7 +71,7 @@
 - [x] Verify the user-supplied First Groq Key against Groq Cloud and cover the dual-provider workflow with regression tests.
 - [x] Restore a clear, truthful next-step processing action on Timeline when the selected Finance project has no generated timeline.
 - [x] Distinguish registered local Finance source settings from attached media and expose the real next ingestion action without leaving the project ambiguously in draft.
-- [ ] Analyze the uploaded Finance narration and 20 images with the verified active Groq key, then persist only a genuine validated variable-duration timeline.
+- [x] Analyze the uploaded Finance narration and 20 images with the verified active Groq key, then persist only a genuine validated variable-duration timeline.
 - [x] Add secure server-side round-robin selection across all verified Groq keys without exposing key material to the client.
 - [x] Track Groq quota or rate-limit outcomes, temporarily cool down affected keys, and exclude them from eligible rotations.
 - [x] Retry a Groq request only through other eligible Groq keys with bounded attempts and no automatic Gemini fallback.
@@ -82,5 +82,7 @@
 - [x] Add a Groq pool regression proving masked metadata and errors never expose decrypted API key material.
 - [x] Add a Groq pool metadata test proving the operation interface exposes only label and masked key information.
 - [x] Add a retry-path regression proving raw decrypted key text is absent from all surfaced pool errors.
-- [ ] Treat a Groq request-size rejection as a non-rotatable prompt error, then reduce Finance timeline payload size without falsely cooling down the key pool.
-- [ ] Treat Groq JSON-schema generation failures as non-rotatable prompt errors and use a deterministic structured-output fallback within Groq only.
+- [x] Treat a Groq request-size rejection as a non-rotatable prompt error, then reduce Finance timeline payload size without falsely cooling down the key pool.
+- [x] Treat Groq JSON-schema generation failures as non-rotatable prompt errors and use a deterministic structured-output fallback within Groq only.
+- [x] Ask Groq to normalize real Whisper beat boundaries across actual pauses so Finance covers the measured narration without gaps or equal-split timing.
+- [x] Replace stale Gemini and 23-image Timeline copy with provider- and project-aware review metadata for Finance.

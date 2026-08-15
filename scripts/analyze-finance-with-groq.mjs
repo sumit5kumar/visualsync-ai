@@ -65,13 +65,24 @@ try {
     normalized.push({ imageAssetId: chosenId, startMs: beat.startMs, endMs: beat.endMs, narrationText: beat.text.trim(), confidence, selectionReason, decisionType: "KEEP", index });
     selectionAudit.push({ providerKeyLabel: selectionResult.key.label, providerKeyMasked: selectionResult.key.maskedKey });
   }
+  const boundaryPrompt = `Keep these narration beats in order and choose continuous visual end boundaries that preserve their real timestamp rhythm while covering pauses. Do not equal-split. First visual starts at 0; final visual ends at ${project.audioDurationMs}. Respond with one final line only: FINAL_ENDS=<comma-separated integer end milliseconds, exactly ${normalized.length} values>. Original beats: ${JSON.stringify(normalized.map(segment => ({ startMs: segment.startMs, endMs: segment.endMs, text: segment.narrationText })))}`;
+  const boundaryResult = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completeText({ prompt: boundaryPrompt }), key }));
+  const boundaryMatches = Array.from(boundaryResult.value.matchAll(/FINAL_ENDS\s*=\s*([0-9,\s]+)/gi));
+  const finalEnds = boundaryMatches.map(match => match[1].split(",").map(value => Number(value.trim()))).find(values => values.length === normalized.length);
+  if (!finalEnds || finalEnds.some(value => !Number.isInteger(value))) throw new Error(`Groq returned invalid continuous timing boundaries: ${boundaryResult.value.slice(-300)}`);
+  let continuousStartMs = 0;
+  for (const [index, segment] of normalized.entries()) {
+    segment.startMs = continuousStartMs;
+    segment.endMs = finalEnds[index];
+    continuousStartMs = finalEnds[index];
+  }
   const validation = validateTimeline(project.audioDurationMs, normalized);
   if (!validation.valid) throw new Error(`Groq Finance timeline did not pass continuous-coverage validation: ${validation.issues.join(" ")}`);
 
   await db.transaction(async transaction => {
     await transaction.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: { provider: "groq", model: GROQ_TRANSCRIPTION_MODEL, providerKeyLabel: transcriptionResult.key.label, providerKeyMasked: transcriptionResult.key.maskedKey, text: transcription.text, language: transcription.language ?? "hi", segments: transcription.segments } }).where(eq(mediaAssets.id, narration.id));
     for (const { image, analysis } of imageAnalyses) await transaction.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: analysis, embeddingSourceText: analysis.sceneDescription }).where(eq(mediaAssets.id, image.id));
-    await transaction.insert(timelineSegments).values(normalized.map((segment, index) => ({ projectId, imageAssetId: segment.imageAssetId, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText, confidence: String(segment.confidence), selectionReason: segment.selectionReason, candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, ...selectionAudit[index] }, decisionType: segment.decisionType })));
+    await transaction.insert(timelineSegments).values(normalized.map((segment, index) => ({ projectId, imageAssetId: segment.imageAssetId, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText, confidence: String(segment.confidence), selectionReason: segment.selectionReason, candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, ...selectionAudit[index], boundaryProviderKeyLabel: boundaryResult.key.label, boundaryProviderKeyMasked: boundaryResult.key.maskedKey }, decisionType: segment.decisionType })));
     await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, projectId));
   });
   console.log(JSON.stringify({ projectId, provider: "groq", transcriptionModel: GROQ_TRANSCRIPTION_MODEL, visionModel: GROQ_VISION_MODEL, segmentCount: normalized.length, validation }));

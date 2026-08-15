@@ -65,13 +65,13 @@ export async function listUserProjects(userId: number) {
       narrationAnalyzed,
       semanticAnalysisComplete,
       analysisBlocker: project.status === "timeline_ready"
-        ? "A genuine Gemini-selected timeline is ready and has passed continuous coverage validation."
+        ? "A genuine AI-selected timeline is ready and has passed continuous coverage validation."
         : sourcesAttached && project.status === "ready" && project.workerState === "error" && !hasEligibleGroqKey
           ? "The real narration and images are attached, but every active Groq key is currently rate limited or unavailable. Add another verified Groq key, or wait for a cooldown before retrying; no timeline has been created."
         : semanticAnalysisComplete && project.status === "analyzing"
-          ? "Narration and all source images are analyzed. Gemini timeline selection is waiting for available service capacity."
-          : sourcesAttached && project.status === "ready" && project.workerState === "unconfigured"
-            ? "Sources are attached. Gemini analysis is waiting for available service capacity."
+          ? "Narration and all source images are analyzed. Provider timeline selection is waiting for available service capacity."
+        : sourcesAttached && project.status === "ready" && project.workerState === "unconfigured"
+            ? "Sources are attached. Provider analysis is waiting for available service capacity."
             : null,
     };
   });
@@ -205,11 +205,16 @@ export async function getTimelineReview(userId: number, projectId: number) {
   const segments = await db.select().from(timelineSegments).where(eq(timelineSegments.projectId, projectId)).orderBy(timelineSegments.startMs);
   const imageIds = segments.flatMap(segment => segment.imageAssetId ? [segment.imageAssetId] : []);
   const imageRecords = imageIds.length ? await db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), inArray(mediaAssets.id, imageIds))) : [];
+  const analyzedImageRecords = await db.select({ id: mediaAssets.id }).from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.assetType, "image"), eq(mediaAssets.analysisState, "analyzed")));
   const assetById = new Map(imageRecords.map(asset => [asset.id, asset]));
   const approval = (await db.select().from(timelineApprovals).where(eq(timelineApprovals.projectId, projectId)).limit(1))[0] ?? null;
+  const firstAudit = segments[0]?.candidateImagesJson as { provider?: unknown; model?: unknown } | null;
+  const provider = typeof firstAudit?.provider === "string" ? firstAudit.provider : null;
+  const model = typeof firstAudit?.model === "string" ? firstAudit.model : null;
   return {
     project,
     approval: approval ? { status: approval.status, approvedAt: approval.approvedAt, approvedByUserId: approval.userId } : { status: "pending" as const, approvedAt: null, approvedByUserId: null },
+    metadata: { provider, model, analyzedImageCount: analyzedImageRecords.length, selectedImageCount: new Set(imageIds).size, candidateImageCount: Math.max(0, analyzedImageRecords.length - new Set(imageIds).size) },
     segments: segments.map(segment => {
       const image = segment.imageAssetId ? assetById.get(segment.imageAssetId) : null;
       const thumbnailUrl = image ? `/manus-storage/${image.storageKey}` : null;
@@ -246,7 +251,7 @@ export async function substituteTimelineImage(userId: number, input: { projectId
     await transaction.update(timelineSegments).set({
       imageAssetId: candidate.id,
       decisionType: "CHANGE",
-      selectionReason: `User selected ${candidate.originalFilename} from the analyzed candidate gallery. Original Gemini rationale: ${originalReason}`,
+      selectionReason: `User selected ${candidate.originalFilename} from the analyzed candidate gallery. Original analysis rationale: ${originalReason}`,
     }).where(eq(timelineSegments.id, segment.id));
     await transaction.insert(timelineApprovals).values({ projectId: input.projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
     await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, input.projectId));
