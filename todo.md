@@ -111,3 +111,6 @@
 - [x] Add regression coverage for the compatible pacing-response contract and verify uploaded project processing can continue past Groq analysis.
 - [x] Replace Groq vision analysis JSON mode, which rejected the real Movie image-analysis request, with a compatible generated-JSON parser while preserving the same Groq pool.
 - [x] Retry the real uploaded Movie project after vision and pacing compatibility fixes, then verify its complete timeline.
+- [x] Remove the repeated synthetic 92% confidence display and replace it with truthful Groq decision evidence per timeline image.
+- [x] Verify the corrected Timeline labels no longer imply fabricated image-match confidence.
+- [x] Add focused coverage that Groq timeline cards render decision-evidence labels rather than percentage confidence text.

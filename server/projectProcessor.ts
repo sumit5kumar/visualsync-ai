@@ -50,7 +50,7 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
     let cursor = 0;
     const rebuilt = images.map((image, index) => {
       const startMs = cursor; const endMs = startMs + pacing.durations[index]; cursor = endMs;
-      return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: Math.min(0.99, 0.72 + Math.min(weights[index], 2) * 0.1), selectionReason: `Groq retained user-supplied image ${image.sequenceNumber} in chronological script order and assigned a variable full-narration pacing weight of ${weights[index]}. The global readable-hold rule set a minimum of ${pacing.minimumDurationMs} ms.`, decisionType: "KEEP" as const };
+      return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: 0, selectionReason: `Groq retained user-supplied image ${image.sequenceNumber} in chronological script order and assigned a variable full-narration pacing weight of ${weights[index]}. The global readable-hold rule set a minimum of ${pacing.minimumDurationMs} ms.`, decisionType: "KEEP" as const };
     });
     const validation = validateTimeline(project.audioDurationMs, rebuilt);
     if (!validation.valid || cursor !== project.audioDurationMs) throw new Error(`Generated timeline failed validation: ${validation.issues.join(" ")}`);
