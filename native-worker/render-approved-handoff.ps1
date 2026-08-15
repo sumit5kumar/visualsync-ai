@@ -34,11 +34,8 @@ foreach ($segment in $handoff.timeline) {
   if ($durationSeconds -le 0) { throw "Timeline contains a non-positive duration for image: $filename" }
   $isLast = $index -eq ($handoff.timeline.Count - 1)
   $inputSeconds = $durationSeconds + $(if ($isLast) { 0 } else { $transitionSeconds })
-  $zoomTarget = [Math]::Min(1.14, 1.05 + ($durationSeconds * 0.009))
-  $zoomRate = ($zoomTarget - 1.0) / [Math]::Max(0.1, $durationSeconds)
-  $zoomExpression = "min($($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture))\,1+t*$($zoomRate.ToString([System.Globalization.CultureInfo]::InvariantCulture)))"
   $inputs += @("-loop", "1", "-t", $inputSeconds.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-i", $imagePath)
-  $filterParts += "[$index`:v]fps=30,scale=2112:1188:force_original_aspect_ratio=increase,crop=2112:1188,scale=w='trunc(iw*$zoomExpression/2)*2':h='trunc(ih*$zoomExpression/2)*2':eval=frame:flags=lanczos,crop=1920:1080:(in_w-out_w)/2:(in_h-out_h)/2,setsar=1,format=yuv420p[v$index]"
+  $filterParts += "[$index`:v]fps=30,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1,format=yuv420p[v$index]"
   $segmentDurations += $durationSeconds
   $index++
 }
