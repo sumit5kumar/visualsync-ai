@@ -69,3 +69,4 @@
 - [x] Add Groq Cloud transcription and vision-analysis contracts alongside the retained Gemini integration.
 - [x] Add clear Groq provider controls to the AI workspace and preserve Gemini as an independent provider.
 - [x] Verify the user-supplied First Groq Key against Groq Cloud and cover the dual-provider workflow with regression tests.
+- [x] Restore a clear, truthful next-step processing action on Timeline when the selected Finance project has no generated timeline.

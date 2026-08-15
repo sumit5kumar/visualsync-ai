@@ -75,6 +75,18 @@ export async function createProjectRecord(userId: number, input: { name: string;
   await db.insert(projects).values({ userId, name: input.name, narrationOriginalName: input.narrationOriginalName || null, imageSourcePath: input.imageSourcePath || null, outputPath: input.outputPath || null });
 }
 
+export async function updateProjectSetup(userId: number, projectId: number, input: { narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string }) {
+  const db = await requireDb();
+  const project = await getUserProject(userId, projectId);
+  if (!project) throw new Error("Project not found.");
+  await db.update(projects).set({
+    narrationOriginalName: input.narrationOriginalName?.trim() || null,
+    imageSourcePath: input.imageSourcePath?.trim() || null,
+    outputPath: input.outputPath?.trim() || null,
+  }).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
+  return { success: true } as const;
+}
+
 export async function getUserProject(userId: number, projectId: number) {
   const db = await requireDb();
   return (await db.select().from(projects).where(and(eq(projects.userId, userId), eq(projects.id, projectId))).limit(1))[0];
