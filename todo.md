@@ -144,3 +144,4 @@
 - [x] Remove the current native zoom and crossfade implementation, then rebuild both effects from a minimal clean baseline without altering the approved media, timing, or output workflow.
 - [x] Temporarily disable native zoom and render Finance with direct crossfades only to isolate whether zoom causes the reported shake.
 - [x] Verify the exact worker, handoff, and MP4 used in the Finance folder, then eliminate any remaining motion from the actual render path.
+- [x] Restore a conservative native middle-origin zoom on top of the verified static crossfade path and create a separately named Finance comparison MP4.

@@ -4,15 +4,15 @@ import { describe, expect, it } from "vitest";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 
-describe("crossfade-only diagnostic rendering", () => {
-  it("removes native zoom while preserving static framing, direct crossfade, and validated output timing", () => {
+describe("middle-origin motion rendering", () => {
+  it("uses a conservative 30-fps native zoom that keeps the output window centered while preserving direct crossfade and validated timing", () => {
     const worker = readFileSync(resolve(projectRoot, "native-worker/render-approved-handoff.ps1"), "utf8");
 
-    expect(worker).not.toContain("zoompan=");
-    expect(worker).not.toContain("zoomTarget");
-    expect(worker).not.toContain("zoomExpression");
-    expect(worker).not.toContain("eval=frame");
-    expect(worker).toContain("fps=30,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080");
+    expect(worker).toContain('"-framerate", "30"');
+    expect(worker).toContain("zoompan=z='min(zoom+$($zoomIncrement.ToString([System.Globalization.CultureInfo]::InvariantCulture))\\,$($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture)))'");
+    expect(worker).toContain("x='floor(iw/2-ow/(2*zoom))'");
+    expect(worker).toContain("y='floor(ih/2-oh/(2*zoom))'");
+    expect(worker).toContain("[Math]::Min(1.08, 1.035 + ($durationSeconds * 0.006))");
     expect(worker).toContain("xfade=transition=fade");
     expect(worker).toContain("$transitionSeconds = 0.5");
     expect(worker).toContain("[vout]trim=duration=$timelineDuration,setpts=PTS-STARTPTS[vfinal]");
