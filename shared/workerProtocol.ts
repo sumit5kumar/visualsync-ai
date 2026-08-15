@@ -60,6 +60,7 @@ export const workerRenderHandoffSchema = z.object({
   projectId: z.number().int().positive(),
   projectName: z.string().min(1),
   approval: z.object({ approvedByUserId: z.number().int().positive(), approvedAtMs: z.number().int().positive() }),
+  nativePaths: z.object({ sourceDirectory: z.string().nullable(), outputDirectory: z.string().nullable() }),
   output: z.object({ width: z.literal(1920), height: z.literal(1080), aspectRatio: z.literal("16:9"), container: z.literal("mp4"), filename: z.string().regex(/^[A-Za-z0-9_-]+_approved_1920x1080\.mp4$/) }),
   narration: workerAssetSchema,
   images: z.array(workerAssetSchema).min(1),

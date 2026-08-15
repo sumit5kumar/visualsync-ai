@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import express, { type Express } from "express";
 import { sdk } from "./_core/sdk";
-import { saveUploadedProjectMedia } from "./db";
+import { saveRenderedProjectVideo, saveUploadedProjectMedia } from "./db";
 import { storagePut } from "./storage";
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -39,6 +39,23 @@ export function registerProjectMediaRoutes(app: Express) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Project media could not be uploaded.";
       return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post("/api/project-media/rendered-video", express.raw({ type: () => true, limit: 500 * 1024 * 1024 }), async (req, res) => {
+    try {
+      const user = await sdk.authenticateRequest(req).catch(() => null);
+      if (!user) return res.status(401).json({ error: "Sign in before importing a rendered video." });
+      const projectId = Number(req.header("x-project-id"));
+      const originalFilename = decodeURIComponent(req.header("x-original-filename") ?? "").replace(/[\\/]/g, "").trim().slice(0, 255);
+      const mimeType = req.header("content-type")?.split(";")[0] || "video/mp4";
+      if (!Number.isInteger(projectId) || projectId <= 0 || !originalFilename.toLowerCase().endsWith(".mp4") || !Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: "Choose a rendered MP4 file to import." });
+      const contentHash = crypto.createHash("sha256").update(req.body).digest("hex");
+      const stored = await storagePut(`projects/${projectId}/rendered/${safeFilename(originalFilename)}`, req.body, mimeType);
+      await saveRenderedProjectVideo({ userId: user.id, projectId, originalFilename, storageKey: stored.key, mimeType, byteSize: req.body.length, contentHash });
+      return res.status(201).json({ success: true, filename: originalFilename, storageKey: stored.key });
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : "Rendered video could not be imported." });
     }
   });
 }

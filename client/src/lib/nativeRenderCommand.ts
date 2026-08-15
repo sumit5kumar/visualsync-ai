@@ -1,16 +1,23 @@
 function quotePowerShell(value: string) { return `'${value.replace(/'/g, "''")}'`; }
 
 export function outputFolderSeed(savedOutputPath: string | null | undefined) {
-  const selectedName = savedOutputPath?.match(/^Native output folder selected:\s*(.+)$/i)?.[1]?.trim();
+  const selectedName = savedOutputPath?.match(/^Native (?:source|output) folder selected:\s*(.+)$/i)?.[1]?.trim();
   if (selectedName) return `Join-Path $env:USERPROFILE ${quotePowerShell(`Downloads\\${selectedName.replace(/[\\/]/g, "_")}`)}`;
   if (savedOutputPath && /^[A-Za-z]:\\/.test(savedOutputPath)) return quotePowerShell(savedOutputPath);
-  return "(Join-Path $env:USERPROFILE 'Downloads')";
+  return null;
 }
 
-export function buildNativeRenderCommand(projectName: string, savedOutputPath?: string | null) {
+export function buildNativeRenderCommand(projectName: string, savedSourcePath?: string | null, savedOutputPath?: string | null) {
+  const sourceSeed = outputFolderSeed(savedSourcePath);
   const outputSeed = outputFolderSeed(savedOutputPath);
+  const handoffName = `${projectName.replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || "project"}-approved-render-handoff.json`;
+  if (sourceSeed && outputSeed) return `# VisualSync approved render: ${projectName}
+$sourceDirectory = ${sourceSeed}
+$outputDirectory = ${outputSeed}
+$handoffPath = Join-Path $outputDirectory ${quotePowerShell(handoffName)}
+& ".\\render-approved-handoff.ps1" -HandoffPath $handoffPath -SourceDirectory $sourceDirectory -OutputDirectory $outputDirectory -FFmpegPath "D:\\ffmpeg-8.1-essentials_build\\ffmpeg-8.1-essentials_build\\bin\\ffmpeg.exe"`;
   return `# VisualSync approved render: ${projectName}
-Add-Type -AssemblyName System.Windows.Forms
+	Add-Type -AssemblyName System.Windows.Forms
 $handoff = New-Object System.Windows.Forms.OpenFileDialog
 $handoff.Filter = "VisualSync handoff (*.json)|*.json"
 if ($handoff.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
@@ -19,7 +26,7 @@ $source.Description = "Choose the folder containing the original narration and i
 if ($source.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
 $output = New-Object System.Windows.Forms.FolderBrowserDialog
 $output.Description = "Choose the folder where the project MP4 will be saved"
-$output.SelectedPath = ${outputSeed}
+	$output.SelectedPath = (Join-Path $env:USERPROFILE 'Downloads')
 if ($output.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
 & ".\\render-approved-handoff.ps1" -HandoffPath $handoff.FileName -SourceDirectory $source.SelectedPath -OutputDirectory $output.SelectedPath -FFmpegPath "D:\\ffmpeg-8.1-essentials_build\\ffmpeg-8.1-essentials_build\\bin\\ffmpeg.exe"`;
 }

@@ -79,7 +79,7 @@ export const mediaAssets = mysqlTable("mediaAssets", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
   projectId: int("projectId"),
-  assetType: mysqlEnum("assetType", ["narration", "image"]).notNull(),
+  assetType: mysqlEnum("assetType", ["narration", "image", "rendered_video"]).notNull(),
   originalFilename: varchar("originalFilename", { length: 255 }).notNull(),
   storageKey: varchar("storageKey", { length: 512 }).notNull(),
   mimeType: varchar("mimeType", { length: 128 }),

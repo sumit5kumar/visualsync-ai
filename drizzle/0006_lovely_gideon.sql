@@ -1,0 +1,1 @@
+ALTER TABLE `mediaAssets` MODIFY COLUMN `assetType` enum('narration','image','rendered_video') NOT NULL;

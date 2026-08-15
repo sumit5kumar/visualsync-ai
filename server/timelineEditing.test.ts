@@ -11,9 +11,9 @@ describe("planImageSubstitution", () => {
     expect(planImageSubstitution(segments, 32, 24)).toEqual({ segmentId: 32, imageAssetId: 24, startMs: 1360, endMs: 4920 });
   });
 
-  it("rejects selecting the current or another segment's image", () => {
+  it("rejects the current image but allows a source image already used by another segment", () => {
     expect(() => planImageSubstitution(segments, 32, 8)).toThrow("already selected for the segment");
-    expect(() => planImageSubstitution(segments, 32, 7)).toThrow("not already used");
+    expect(planImageSubstitution(segments, 32, 7)).toEqual({ segmentId: 32, imageAssetId: 7, startMs: 1360, endMs: 4920 });
   });
 });
 

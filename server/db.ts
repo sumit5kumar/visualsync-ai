@@ -212,20 +212,14 @@ export async function listTimelineCandidates(userId: number, projectId: number) 
   const project = await getUserProject(userId, projectId);
   if (!project) throw new Error("Project not found.");
   const db = await requireDb();
-  const [segments, images] = await Promise.all([
-    db.select({ imageAssetId: timelineSegments.imageAssetId }).from(timelineSegments).where(eq(timelineSegments.projectId, projectId)),
-    db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.assetType, "image"), eq(mediaAssets.analysisState, "analyzed"))).orderBy(mediaAssets.sequenceNumber),
-  ]);
-  const selectedImageIds = new Set(segments.flatMap(segment => segment.imageAssetId ? [segment.imageAssetId] : []));
-  return images
-    .filter(image => !selectedImageIds.has(image.id))
-    .map(image => ({
+  const images = await db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.assetType, "image"), eq(mediaAssets.analysisState, "analyzed"))).orderBy(mediaAssets.sequenceNumber);
+  return images.map(image => ({
       id: image.id,
       originalFilename: image.originalFilename,
       sequenceNumber: image.sequenceNumber,
       thumbnailUrl: `/manus-storage/${image.storageKey}`,
       sceneDescription: getSceneDescription(image.analysisJson),
-    }));
+  }));
 }
 
 export async function getTimelineReview(userId: number, projectId: number) {
@@ -298,5 +292,38 @@ export async function getApprovedRenderHandoff(userId: number, projectId: number
   if (!narration || review.segments.some(segment => !segment.imageAssetId)) throw new Error("Render handoff is missing required media assets.");
   const asWorkerAsset = (asset: typeof assets[number]) => ({ assetId: asset.id, filename: asset.originalFilename, storageKey: asset.storageKey, mimeType: asset.mimeType ?? "application/octet-stream", sequenceNumber: asset.sequenceNumber, contentHash: asset.contentHash, perceptualHash: asset.perceptualHash });
   const safeProjectName = review.project.name.replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || `project_${projectId}`;
-  return { projectId, projectName: review.project.name, approval: { approvedByUserId: review.approval.approvedByUserId, approvedAtMs: review.approval.approvedAt.getTime() }, output: { width: 1920 as const, height: 1080 as const, aspectRatio: "16:9" as const, container: "mp4" as const, filename: `${safeProjectName}_approved_1920x1080.mp4` }, narration: asWorkerAsset(narration), images: assets.filter(asset => asset.assetType === "image").map(asWorkerAsset), timeline: review.segments.map(segment => ({ imageAssetId: segment.imageAssetId!, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText })) };
+  return { projectId, projectName: review.project.name, approval: { approvedByUserId: review.approval.approvedByUserId, approvedAtMs: review.approval.approvedAt.getTime() }, nativePaths: { sourceDirectory: review.project.imageSourcePath, outputDirectory: review.project.outputPath }, output: { width: 1920 as const, height: 1080 as const, aspectRatio: "16:9" as const, container: "mp4" as const, filename: `${safeProjectName}_approved_1920x1080.mp4` }, narration: asWorkerAsset(narration), images: assets.filter(asset => asset.assetType === "image").map(asWorkerAsset), timeline: review.segments.map(segment => ({ imageAssetId: segment.imageAssetId!, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText })) };
+}
+
+export async function deleteProjectRecord(userId: number, projectId: number) {
+  const db = await requireDb();
+  const project = await getUserProject(userId, projectId);
+  if (!project) throw new Error("Project not found.");
+  await db.transaction(async transaction => {
+    await transaction.delete(timelineApprovals).where(eq(timelineApprovals.projectId, projectId));
+    await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId));
+    await transaction.delete(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.userId, userId)));
+    await transaction.delete(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
+  });
+  return { success: true } as const;
+}
+
+export async function saveRenderedProjectVideo(input: { userId: number; projectId: number; originalFilename: string; storageKey: string; mimeType: string; byteSize: number; contentHash: string }) {
+  const db = await requireDb();
+  const project = await getUserProject(input.userId, input.projectId);
+  if (!project) throw new Error("Project not found.");
+  await db.transaction(async transaction => {
+    await transaction.delete(mediaAssets).where(and(eq(mediaAssets.projectId, input.projectId), eq(mediaAssets.userId, input.userId), eq(mediaAssets.assetType, "rendered_video")));
+    await transaction.insert(mediaAssets).values({ ...input, assetType: "rendered_video", sequenceNumber: null, analysisState: "cached" });
+    await transaction.update(projects).set({ status: "completed", workerState: "ready" }).where(and(eq(projects.id, input.projectId), eq(projects.userId, input.userId)));
+  });
+  return { success: true } as const;
+}
+
+export async function getRenderedProjectVideo(userId: number, projectId: number) {
+  const project = await getUserProject(userId, projectId);
+  if (!project) throw new Error("Project not found.");
+  const db = await requireDb();
+  const asset = (await db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.userId, userId), eq(mediaAssets.assetType, "rendered_video"))).orderBy(desc(mediaAssets.createdAt)).limit(1))[0] ?? null;
+  return asset ? { id: asset.id, originalFilename: asset.originalFilename, url: `/manus-storage/${asset.storageKey}`, uploadedAt: asset.createdAt } : null;
 }

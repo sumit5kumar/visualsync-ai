@@ -114,3 +114,11 @@
 - [x] Remove the repeated synthetic 92% confidence display and replace it with truthful Groq decision evidence per timeline image.
 - [x] Verify the corrected Timeline labels no longer imply fabricated image-match confidence.
 - [x] Add focused coverage that Groq timeline cards render decision-evidence labels rather than percentage confidence text.
+- [x] Save user-provided native Windows source, output, and handoff locations per project so the render command can run without repeated folder or handoff prompts where those paths are configured.
+- [x] Add a secure rendered-MP4 import workflow and a full 16:9 in-app video preview after the local native render is uploaded.
+- [x] Add a safe project deletion flow that removes a selected project and its related timeline/media metadata from the workspace.
+- [x] Let Timeline replacement show the complete source-image library, including currently selected images, so any project image can be reused for a segment.
+- [x] Refine Projects, Timeline, and Preview with cleaner hierarchy, clearer actions, and restrained professional motion.
+- [x] Add explicit restrained entrance and hover motion to the upgraded project, timeline, and preview surfaces.
+- [x] Add cache invalidation for Timeline and Preview after deleting a project, then verify the safe deletion state transition.
+- [x] Verify rendered MP4 import persistence and the full in-app video player with an authenticated project after the user selects a completed local file.
