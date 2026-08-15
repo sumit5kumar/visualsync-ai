@@ -9,10 +9,10 @@ describe("middle-origin motion rendering", () => {
     const worker = readFileSync(resolve(projectRoot, "native-worker/render-approved-handoff.ps1"), "utf8");
 
     expect(worker).toContain('"-framerate", "30"');
-    expect(worker).toContain("zoompan=z='min(zoom+$($zoomIncrement.ToString([System.Globalization.CultureInfo]::InvariantCulture))\\,$($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture)))'");
-    expect(worker).toContain("x='floor(iw/2-ow/(2*zoom))'");
-    expect(worker).toContain("y='floor(ih/2-oh/(2*zoom))'");
-    expect(worker).toContain("[Math]::Min(1.08, 1.035 + ($durationSeconds * 0.006))");
+    expect(worker).not.toContain("zoompan=");
+    expect(worker).toContain("scale=w='trunc(2112*(1+$zoomExpression)/2)*2'");
+    expect(worker).toContain("crop=1920:1080:(in_w-out_w)/2:(in_h-out_h)/2");
+    expect(worker).toContain("[Math]::Min(1.06, 1.025 + ($durationSeconds * 0.004))");
     expect(worker).toContain("xfade=transition=fade");
     expect(worker).toContain("$transitionSeconds = 0.5");
     expect(worker).toContain("[vout]trim=duration=$timelineDuration,setpts=PTS-STARTPTS[vfinal]");
