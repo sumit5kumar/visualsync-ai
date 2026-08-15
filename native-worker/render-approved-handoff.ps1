@@ -22,8 +22,9 @@ if (!(Test-Path $narrationPath)) { throw "Narration file missing from source dir
 
 $inputs = @()
 $filterParts = @()
-$concatInputs = @()
+$segmentDurations = @()
 $index = 0
+$transitionSeconds = 0.35
 foreach ($segment in $handoff.timeline) {
   $filename = $assetNames[[string]$segment.imageAssetId]
   if (!$filename) { throw "Timeline image asset $($segment.imageAssetId) is absent from the approved handoff." }
@@ -31,13 +32,30 @@ foreach ($segment in $handoff.timeline) {
   if (!(Test-Path $imagePath)) { throw "Timeline image missing from source directory: $imagePath" }
   $durationSeconds = ([double]$segment.endMs - [double]$segment.startMs) / 1000
   if ($durationSeconds -le 0) { throw "Timeline contains a non-positive duration for image: $filename" }
-  $inputs += @("-loop", "1", "-t", $durationSeconds.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-i", $imagePath)
-  $filterParts += "[$index`:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1,format=yuv420p[v$index]"
-  $concatInputs += "[v$index]"
+  $isLast = $index -eq ($handoff.timeline.Count - 1)
+  $inputSeconds = $durationSeconds + $(if ($isLast) { 0 } else { $transitionSeconds })
+  $frameCount = [Math]::Max(1, [Math]::Ceiling($inputSeconds * 30))
+  $zoomTarget = [Math]::Min(1.11, 1.045 + ($durationSeconds * 0.008))
+  $zoomIncrement = ($zoomTarget - 1.0) / $frameCount
+  $inputs += @("-loop", "1", "-t", $inputSeconds.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-i", $imagePath)
+  $filterParts += "[$index`:v]scale=2112:1188:force_original_aspect_ratio=increase,crop=2112:1188,zoompan=z='min(zoom+$($zoomIncrement.ToString([System.Globalization.CultureInfo]::InvariantCulture)),$($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture)))':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d=$frameCount`:s=1920x1080:fps=30,setsar=1,format=yuv420p[v$index]"
+  $segmentDurations += $durationSeconds
   $index++
 }
 
-$filterComplex = ($filterParts -join ";") + ";" + (($concatInputs -join "") + "concat=n=$index`:v=1:a=0[vout]")
+$filterChain = ""
+if ($index -eq 1) { $filterChain = "[v0]null[vout]" }
+else {
+  $cumulativeDuration = $segmentDurations[0]
+  $filterChain = "[v0][v1]xfade=transition=fade:duration=$transitionSeconds`:offset=$($cumulativeDuration.ToString([System.Globalization.CultureInfo]::InvariantCulture))[xf1]"
+  for ($transitionIndex = 2; $transitionIndex -lt $index; $transitionIndex++) {
+    $cumulativeDuration += $segmentDurations[$transitionIndex - 1]
+    $outputLabel = if ($transitionIndex -eq $index - 1) { "vout" } else { "xf$transitionIndex" }
+    $filterChain += ";[xf$($transitionIndex - 1)][v$transitionIndex]xfade=transition=fade:duration=$transitionSeconds`:offset=$($cumulativeDuration.ToString([System.Globalization.CultureInfo]::InvariantCulture))[$outputLabel]"
+  }
+  if ($index -eq 2) { $filterChain = $filterChain -replace "\[xf1\]$", "[vout]" }
+}
+$filterComplex = ($filterParts -join ";") + ";" + $filterChain
 $outputPath = Join-Path $OutputDirectory $handoff.output.filename
 $audioInputIndex = $index
 $arguments = @($inputs) + @("-i", $narrationPath, "-filter_complex", $filterComplex, "-map", "[vout]", "-map", "$audioInputIndex`:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-r", "30", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath)

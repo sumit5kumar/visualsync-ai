@@ -122,3 +122,18 @@
 - [x] Add explicit restrained entrance and hover motion to the upgraded project, timeline, and preview surfaces.
 - [x] Add cache invalidation for Timeline and Preview after deleting a project, then verify the safe deletion state transition.
 - [x] Verify rendered MP4 import persistence and the full in-app video player with an authenticated project after the user selects a completed local file.
+- [x] Add subtle zoom motion and short crossfade transitions to the native FFmpeg output while preserving exact narration coverage and 1920×1080 MP4 output.
+- [x] Add synchronized in-browser timeline playback with narration audio before final local MP4 rendering.
+- [x] Create a per-project render history that preserves and plays previously imported rendered MP4 files.
+- [x] Document the real throughput effect and limits of adding verified Groq keys to the rotation pool for larger projects.
+- [x] Compact or batch the global Groq pacing prompt so large uploaded image sets do not exceed selected-model request limits.
+- [x] Add a regression for oversized project inputs and retry the user’s failed project through the same Groq rotation pool.
+- [x] Fix the inactive Preview handoff button for eligible approved timeline projects while keeping the approval gate intact.
+- [x] Add a seek bar, elapsed/total timing, and accurate play/pause control state to the pre-render timeline player.
+- [x] Add visible synchronized crossfade and restrained zoom motion to browser timeline preview images.
+- [x] Replace motion that appears directional with direct opacity-only crossfades in both browser preview and native MP4 output.
+- [x] Scale browser and native zoom intensity to each image’s actual timeline duration, with stronger but restrained long-shot zoom.
+- [x] Eliminate the black flash in browser preview image changes and ensure a true direct opacity crossfade is visibly applied.
+- [x] Fix native FFmpeg rendering so final MP4 files visibly include direct crossfades and duration-aware zoom rather than static image cuts.
+- [x] Place the latest motion-enabled native worker and approved handoff in the user’s Finance folder so the PowerShell command resolves locally.
+- [x] Center the zoom anchor in both the native FFmpeg renderer and in-browser timeline preview, then re-render the Finance video for verification.

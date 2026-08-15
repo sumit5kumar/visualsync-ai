@@ -13,3 +13,7 @@ button:not(:disabled):active { transform: scale(0.97); }
 ::selection { background: rgba(103, 232, 249, 0.25); color: white; }
 @media (prefers-reduced-motion: no-preference) { .vs-page-enter { animation: vs-page-enter 260ms cubic-bezier(0.23, 1, 0.32, 1) both; } .vs-surface-hover { transition: transform 180ms cubic-bezier(0.23, 1, 0.32, 1), border-color 180ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms cubic-bezier(0.23, 1, 0.32, 1); } .vs-surface-hover:hover { transform: translateY(-2px); } }
 @keyframes vs-page-enter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: no-preference) { .vs-preview-active { transform-origin: center center; animation: vs-preview-zoom var(--preview-zoom-duration, 5s) linear both; } .vs-preview-transition { transform-origin: center center; animation: vs-preview-crossfade 420ms linear both, vs-preview-zoom var(--preview-zoom-duration, 5s) linear both; } .vs-preview-previous { animation: vs-preview-fadeout 420ms linear both; } }
+@keyframes vs-preview-crossfade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vs-preview-fadeout { from { opacity: 1; } to { opacity: 0; } }
+@keyframes vs-preview-zoom { from { transform: scale(1); } to { transform: scale(var(--preview-zoom, 1.07)); } }

@@ -73,7 +73,7 @@ export class GroqClient {
         max_completion_tokens: 600,
         reasoning_effort: "none",
         reasoning_format: "hidden",
-        messages: [{ role: "user", content: [{ type: "text", text: `${input.prompt}\nReply with exactly one JSON object and no markdown.` }, { type: "image_url", image_url: { url: input.imageUrl } }] }],
+        messages: [{ role: "user", content: [{ type: "text", text: `${input.prompt}\nReply with exactly one compact JSON object and no markdown.` }, { type: "image_url", image_url: { url: input.imageUrl, detail: "low" } }] }],
       }),
       signal: AbortSignal.timeout(60_000),
     });

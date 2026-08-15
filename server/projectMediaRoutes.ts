@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import express, { type Express } from "express";
+import path from "node:path";
 import { sdk } from "./_core/sdk";
 import { saveRenderedProjectVideo, saveUploadedProjectMedia } from "./db";
 import { storagePut } from "./storage";
@@ -16,6 +17,11 @@ export function validateProjectMediaUpload(input: { projectId: number; assetType
 }
 
 export function registerProjectMediaRoutes(app: Express) {
+  app.get("/api/project-media/latest-worker", async (req, res) => {
+    const user = await sdk.authenticateRequest(req).catch(() => null);
+    if (!user) return res.status(401).json({ error: "Sign in before downloading the native worker." });
+    return res.download(path.resolve(process.cwd(), "native-worker", "render-approved-handoff.ps1"), "render-approved-handoff.ps1");
+  });
   app.post("/api/project-media/upload", express.raw(projectMediaBodyParserOptions), async (req, res) => {
     try {
       const user = await sdk.authenticateRequest(req).catch(() => null);

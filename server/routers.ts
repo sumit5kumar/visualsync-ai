@@ -4,7 +4,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { activateGeminiKey, activateGroqKey, approveTimeline, createProjectRecord, deleteProjectRecord, getApprovedRenderHandoff, getRenderedProjectVideo, getStoredGeminiKey, getStoredGroqKey, getTimelineReview, listProjectTimeline, listTimelineCandidates, listUserProjects, listVisibleGeminiKeys, listVisibleGroqKeys, prepareProjectMediaImport, recordGeminiKeyTest, recordGroqKeyTest, removeGeminiKey, removeGroqKey, saveValidatedGeminiKey, saveValidatedGroqKey, substituteTimelineImage, updateProjectSetup } from "./db";
+import { activateGeminiKey, activateGroqKey, approveTimeline, createProjectRecord, deleteProjectRecord, getApprovedRenderHandoff, getRenderedProjectVideo, getStoredGeminiKey, getStoredGroqKey, getTimelineReview, listProjectTimeline, listRenderedProjectVideos, listTimelineCandidates, listUserProjects, listVisibleGeminiKeys, listVisibleGroqKeys, prepareProjectMediaImport, recordGeminiKeyTest, recordGroqKeyTest, removeGeminiKey, removeGroqKey, saveValidatedGeminiKey, saveValidatedGroqKey, substituteTimelineImage, updateProjectSetup } from "./db";
 import { processProjectWithGlobalReadablePacing } from "./projectProcessor";
 import { decryptSecret, describeApiKey, describeGeminiKey, encryptSecret, fingerprintSecret } from "./crypto";
 import { GEMINI_MODEL, GeminiClient } from "./geminiClient";
@@ -68,6 +68,7 @@ export const appRouter = router({
     contract: protectedProcedure.query(() => getWorkerCapabilities()),
     renderHandoff: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).query(async ({ ctx, input }) => workerPayloadSchemas.renderHandoff.parse(await getApprovedRenderHandoff(ctx.user.id, input.projectId))),
     renderedVideo: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).query(({ ctx, input }) => getRenderedProjectVideo(ctx.user.id, input.projectId)),
+    renderHistory: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).query(({ ctx, input }) => listRenderedProjectVideos(ctx.user.id, input.projectId)),
   }),
 });
 export type AppRouter = typeof appRouter;

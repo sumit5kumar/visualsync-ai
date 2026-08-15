@@ -237,6 +237,7 @@ export async function getTimelineReview(userId: number, projectId: number) {
   const model = typeof firstAudit?.model === "string" ? firstAudit.model : null;
   return {
     project,
+    narrationUrl: project.narrationStorageKey ? `/manus-storage/${project.narrationStorageKey}` : null,
     approval: approval ? { status: approval.status, approvedAt: approval.approvedAt, approvedByUserId: approval.userId } : { status: "pending" as const, approvedAt: null, approvedByUserId: null },
     metadata: { provider, model, analyzedImageCount: analyzedImageRecords.length, selectedImageCount: new Set(imageIds).size, candidateImageCount: Math.max(0, analyzedImageRecords.length - new Set(imageIds).size) },
     segments: segments.map(segment => {
@@ -313,7 +314,6 @@ export async function saveRenderedProjectVideo(input: { userId: number; projectI
   const project = await getUserProject(input.userId, input.projectId);
   if (!project) throw new Error("Project not found.");
   await db.transaction(async transaction => {
-    await transaction.delete(mediaAssets).where(and(eq(mediaAssets.projectId, input.projectId), eq(mediaAssets.userId, input.userId), eq(mediaAssets.assetType, "rendered_video")));
     await transaction.insert(mediaAssets).values({ ...input, assetType: "rendered_video", sequenceNumber: null, analysisState: "cached" });
     await transaction.update(projects).set({ status: "completed", workerState: "ready" }).where(and(eq(projects.id, input.projectId), eq(projects.userId, input.userId)));
   });
@@ -326,4 +326,11 @@ export async function getRenderedProjectVideo(userId: number, projectId: number)
   const db = await requireDb();
   const asset = (await db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.userId, userId), eq(mediaAssets.assetType, "rendered_video"))).orderBy(desc(mediaAssets.createdAt)).limit(1))[0] ?? null;
   return asset ? { id: asset.id, originalFilename: asset.originalFilename, url: `/manus-storage/${asset.storageKey}`, uploadedAt: asset.createdAt } : null;
+}
+
+export async function listRenderedProjectVideos(userId: number, projectId: number) {
+  const project = await getUserProject(userId, projectId);
+  if (!project) throw new Error("Project not found.");
+  const db = await requireDb();
+  return (await db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.userId, userId), eq(mediaAssets.assetType, "rendered_video"))).orderBy(desc(mediaAssets.createdAt))).map(asset => ({ id: asset.id, originalFilename: asset.originalFilename, url: `/manus-storage/${asset.storageKey}`, uploadedAt: asset.createdAt }));
 }

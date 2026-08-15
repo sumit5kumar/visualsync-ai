@@ -6,10 +6,24 @@ import { executeWithGroqRotation } from "./groqPool";
 import { buildGlobalReadableImageDurations } from "./readablePacing";
 import { storageGetSignedUrl } from "./storage";
 import { validateTimeline } from "./timelineValidation";
+import sharp from "sharp";
 
 function transcriptForRange(segments: Array<{ start: number; end: number; text: string }>, startMs: number, endMs: number) {
   const text = segments.filter(segment => segment.end * 1000 > startMs && segment.start * 1000 < endMs).map(segment => segment.text.trim()).filter(Boolean).join(" ");
   return text || segments.at(-1)?.text.trim() || "Narration visual sequence";
+}
+
+const MAX_PACING_IMAGES_PER_REQUEST = 24;
+const MAX_PACING_NARRATION_CHARACTERS = 3600;
+export function buildBoundedPacingBatches<T>(items: T[], batchSize = MAX_PACING_IMAGES_PER_REQUEST) { const batches: T[][] = []; for (let index = 0; index < items.length; index += batchSize) batches.push(items.slice(index, index + batchSize)); return batches; }
+
+async function boundedVisionImageUrl(storageKey: string) {
+  const url = await storageGetSignedUrl(storageKey);
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Uploaded image could not be retrieved from secure storage.");
+  const source = Buffer.from(await response.arrayBuffer());
+  const preview = await sharp(source, { limitInputPixels: 36_000_000 }).rotate().resize(512, 512, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 40, mozjpeg: true }).toBuffer();
+  return `data:image/jpeg;base64,${preview.toString("base64")}`;
 }
 
 export async function processProjectWithGlobalReadablePacing(userId: number, projectId: number) {
@@ -31,9 +45,16 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
     const transcription = transcriptionRun.value;
     const transcriptSegments = (transcription.segments ?? []).filter(segment => segment.text.trim());
     if (!transcriptSegments.length) throw new Error("Groq Whisper returned no timestamped narration segments.");
+    const analyzedImageCache = await db.select().from(mediaAssets).where(and(eq(mediaAssets.userId, userId), eq(mediaAssets.assetType, "image"), eq(mediaAssets.analysisState, "analyzed")));
+    const analysisByContentHash = new Map(analyzedImageCache.filter(asset => asset.contentHash && asset.analysisJson).map(asset => [asset.contentHash!, asset.analysisJson as Record<string, unknown>]));
     const imageAnalyses = [] as Array<{ image: typeof images[number]; analysis: Record<string, unknown> }>;
     for (const image of images) {
-      const imageUrl = await storageGetSignedUrl(image.storageKey);
+      const cachedAnalysis = image.contentHash ? analysisByContentHash.get(image.contentHash) : null;
+      if (cachedAnalysis && typeof cachedAnalysis.sceneDescription === "string" && cachedAnalysis.sceneDescription.trim()) {
+        imageAnalyses.push({ image, analysis: { ...cachedAnalysis, sceneDescription: cachedAnalysis.sceneDescription.trim(), provider: "groq", model: GROQ_VISION_MODEL, reusedByContentHash: true } });
+        continue;
+      }
+      const imageUrl = await boundedVisionImageUrl(image.storageKey);
       const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.analyzeImage({ imageUrl, prompt: "Analyze this image for a narration-driven video. Return JSON with sceneDescription, subjects, setting, mood, and relevance. Describe only visible content." }), key }));
       const record = typeof run.value === "object" && run.value ? run.value as Record<string, unknown> : {};
       const sceneDescription = typeof record.sceneDescription === "string" ? record.sceneDescription.trim() : "";
@@ -41,10 +62,20 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
       imageAnalyses.push({ image, analysis: { ...record, sceneDescription, provider: "groq", model: GROQ_VISION_MODEL, providerKeyLabel: run.key.label, providerKeyMasked: run.key.maskedKey } });
     }
     const fullNarration = transcriptSegments.map(segment => segment.text.trim()).join(" ");
-    const visualCatalog = imageAnalyses.map(({ image, analysis }) => ({ sequence: image.sequenceNumber, scene: String(analysis.sceneDescription).slice(0, 160) }));
-    const prompt = `Create a calm, variable visual pacing plan for the full narration below. The supplied images are already in exact script order: use every image once, do not reorder them, and do not force them into individual Whisper timestamp boundaries. Reply with exactly one JSON object and no markdown or explanation. The object must have only this property: "weights", an array of exactly ${images.length} positive, non-equal decimal numbers. Larger weights mean a longer visual hold. Narration: ${JSON.stringify(fullNarration)}. Ordered image scenes: ${JSON.stringify(visualCatalog)}`;
-    const pacingRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completePacingPlan({ prompt }), key }));
-    const weights = Array.isArray((pacingRun.value as { weights?: unknown }).weights) ? (pacingRun.value as { weights: unknown[] }).weights.map(weight => Number(weight)) : [];
+    const narrationDigest = fullNarration.slice(0, MAX_PACING_NARRATION_CHARACTERS);
+    const visualCatalog = imageAnalyses.map(({ image, analysis }) => ({ sequence: image.sequenceNumber, scene: String(analysis.sceneDescription).replace(/\s+/g, " ").slice(0, 84) }));
+    const batches = buildBoundedPacingBatches(visualCatalog);
+    const weights: number[] = [];
+    let pacingProviderKey: { label: string; maskedKey: string } | null = null;
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      const prompt = `Create variable pacing weights for contiguous ordered image batch ${batchIndex + 1}/${batches.length}. Reply only {"weights":[...]} with exactly ${batch.length} positive non-equal decimals. Larger means longer hold. Narration digest: ${JSON.stringify(narrationDigest)}. Image batch: ${JSON.stringify(batch)}`;
+      const pacingRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completePacingPlan({ prompt }), key }));
+      const batchWeights = Array.isArray((pacingRun.value as { weights?: unknown }).weights) ? (pacingRun.value as { weights: unknown[] }).weights.map(weight => Number(weight)) : [];
+      if (batchWeights.length !== batch.length || batchWeights.some(weight => !Number.isFinite(weight) || weight <= 0)) throw new Error("Groq returned an invalid bounded pacing plan.");
+      weights.push(...batchWeights);
+      pacingProviderKey = pacingRun.key;
+    }
     if (weights.length !== images.length || weights.some(weight => !Number.isFinite(weight) || weight <= 0) || new Set(weights.map(weight => weight.toFixed(3))).size === 1) throw new Error("Groq returned an invalid variable pacing plan.");
     const pacing = buildGlobalReadableImageDurations(project.audioDurationMs, weights);
     let cursor = 0;
@@ -58,7 +89,7 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
       await transaction.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: { provider: "groq", model: GROQ_TRANSCRIPTION_MODEL, providerKeyLabel: transcriptionRun.key.label, providerKeyMasked: transcriptionRun.key.maskedKey, text: transcription.text, language: transcription.language ?? "hi", segments: transcription.segments } }).where(eq(mediaAssets.id, narration.id));
       for (const { image, analysis } of imageAnalyses) await transaction.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: analysis, embeddingSourceText: String(analysis.sceneDescription) }).where(eq(mediaAssets.id, image.id));
       await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId));
-      await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: pacingRun.key.label, pacingProviderKeyMasked: pacingRun.key.maskedKey, allImagesRequired: true, minReadableDurationMs: pacing.minimumDurationMs, pacingMethod: "global-full-narration-sequence" } })));
+      await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: pacingProviderKey?.label ?? null, pacingProviderKeyMasked: pacingProviderKey?.maskedKey ?? null, allImagesRequired: true, minReadableDurationMs: pacing.minimumDurationMs, pacingMethod: "bounded-global-full-narration-sequence" } })));
       await transaction.insert(timelineApprovals).values({ projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
       await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, projectId));
     });
