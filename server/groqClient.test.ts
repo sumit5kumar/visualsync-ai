@@ -40,6 +40,16 @@ describe("GroqClient", () => {
     expect(JSON.parse(String(request.body))).not.toHaveProperty("response_format");
   });
 
+  it("uses enforced JSON mode for machine-readable pacing plans", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '{"assignments":[{"beat":1,"weight":1.2}]}' } }] }), { status: 200 }));
+    global.fetch = fetchMock;
+
+    await expect(new GroqClient("gsk_test").completeJson({ prompt: "Return a JSON pacing plan." })).resolves.toEqual({ assignments: [{ beat: 1, weight: 1.2 }] });
+
+    const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(request.body))).toMatchObject({ model: GROQ_VISION_MODEL, reasoning_effort: "none", reasoning_format: "hidden", max_completion_tokens: 500, response_format: { type: "json_object" } });
+  });
+
   it("reports prompt-size rejections without classifying the key as quota limited", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "Request too large for model" } }), { status: 429 }));
     global.fetch = fetchMock;
