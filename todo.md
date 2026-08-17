@@ -147,18 +147,18 @@
 - [x] Restore a conservative native middle-origin zoom on top of the verified static crossfade path and create a separately named Finance comparison MP4.
 - [x] Measure and eliminate the frame-to-frame instability isolated to native middle zoom while retaining the confirmed stable crossfade path.
 - [x] Audit the full native rendering and playback pipeline, identify the actual source of zoom-induced shake, and implement a permanent fix verified independently from the browser preview.
-- [ ] Run controlled native render-stage comparisons to identify and eliminate the exact operation that introduces shake during zoom encoding.
-- [ ] Verify the Finance renderer uses original-resolution source images and fully audit or replace the PowerShell worker if it causes zoom shake.
-- [ ] Replace the raster worker’s corrupt MJPEG frame pipe with a numbered frame-sequence encoder and verify the rendered MP4 decodes without H.264 errors.
-- [ ] Remove temporal H.264 prediction from the raster zoom encode and test a high-quality all-intra MP4 for remaining motion artifacts.
-- [ ] Measure and replace the raster zoom drawing method if per-frame image resampling causes visible shimmer despite clean decoding and all-intra encoding.
-- [ ] Replace crop-and-resample zoom with a motion-blended method that suppresses pixel-grid shimmer in native single-image zoom renders.
-- [ ] Replace continuous native zoom with a stable dissolve-to-zoomed composition so visual emphasis remains without pixel-motion shimmer.
-- [ ] Build a gradual centered zoom from multiple pre-rendered stable zoom stages and soft dissolves rather than continuous per-frame resampling.
-- [ ] Slow the shake-free staged zoom so smaller centered zoom increments span the full duration of each image hold.
-- [ ] Create an editor-style slow continuous-feeling zoom from many tiny stable zoom stages with longer overlapping blends.
+- [x] Run controlled native render-stage comparisons to identify and eliminate the exact operation that introduces shake during zoom encoding.
+- [x] Verify the Finance renderer uses original-resolution source images and fully audit or replace the PowerShell worker if it causes zoom shake.
+- [x] Replace the raster worker’s corrupt MJPEG frame pipe with a numbered frame-sequence encoder and verify the rendered MP4 decodes without H.264 errors.
+- [x] Remove temporal H.264 prediction from the raster zoom encode and test a high-quality all-intra MP4 for remaining motion artifacts.
+- [x] Measure and replace the raster zoom drawing method if per-frame image resampling causes visible shimmer despite clean decoding and all-intra encoding.
+- [x] Replace crop-and-resample zoom with a motion-blended method that suppresses pixel-grid shimmer in native single-image zoom renders.
+- [x] Test a dissolve-to-zoomed diagnostic composition; it was rejected in favor of the accepted continuous renderer.
+- [x] Test a gradual centered staged-zoom diagnostic composition; it was rejected in favor of the accepted continuous renderer.
+- [x] Test a slower staged-zoom diagnostic composition; it was rejected in favor of the accepted continuous renderer.
+- [x] Test an editor-style staged-zoom diagnostic composition; it was rejected in favor of the accepted continuous renderer.
 - [x] Replace the rejected staged-dissolve diagnostic with a true continuous, deterministic centered zoom renderer that keeps a fixed 1920×1080 output canvas and avoids rounded animated crop positions.
 - [x] Render isolated 1 s, 2 s, 5 s, and 10 s no-zoom, 5% zoom-in, and 5% zoom-out clips; verify constant resolution, 30 FPS, frame count, time base, and user-visible motion before integration.
 - [x] Preserve the matching, variable-duration timeline, narration synchronization, and working direct-opacity crossfade path while integrating only a user-accepted continuous zoom renderer.
 - [x] Add project-level zoom controls for OFF/ON, 3%/5%/8%, and deterministic IN/OUT/AUTO direction after the isolated renderer is accepted.
-- [ ] Complete final Zoom OFF and Zoom ON playback acceptance on the integrated Finance render with unchanged narration and direct crossfade behavior.
+- [x] Complete final Zoom OFF and Zoom ON playback acceptance on the integrated Finance render with unchanged narration and direct crossfade behavior.
