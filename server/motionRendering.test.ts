@@ -53,6 +53,11 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain('$zoomAmountPercent = 8.0');
     expect(worker).toContain('$zoomDirection = "IN"');
     expect(worker).toContain('$crossfadeDurationMs = 800');
+    expect(worker).toContain('if ($crossfadeDurationMs -notin @(0, 300, 500, 800, 1000, 1200))');
+    expect(worker).toContain('$fastRender = !$zoomEnabled -and $crossfadeDurationMs -eq 0');
+    expect(worker).toContain('if ($fastRender) {');
+    expect(worker).toContain('concat=n=$($segments.Count):v=1:a=0[fastvideo]');
+    expect(worker).toContain('CPU_BOUND_STAGES=none (Fast Render bypasses continuous zoom and alpha crossfade)');
     expect(worker).toContain('$transitionSeconds = $crossfadeDurationMs / 1000.0');
     expect(worker).toContain('$transitionHalfSeconds = $transitionSeconds / 2.0');
     expect(worker).toContain('"-pix_fmt", "yuv420p", "-r", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-fps_mode", "cfr"');
@@ -72,6 +77,9 @@ describe("middle-origin motion rendering", () => {
     expect(preview).toContain('alt={current.imageFilename ?? "Timeline image"}');
     expect(preview).toContain("ENCODER=NVIDIA NVENC H.264");
     expect(preview).toContain("The continuous zoom-frame preparation and direct-opacity crossfade compositor remain CPU-based");
+    expect(preview).toContain("Fast Render");
+    expect(preview).not.toContain("Import rendered MP4");
+    expect(preview).not.toContain("Render history");
   });
 
   it("keeps the editor-style staged zoom diagnostic free of continuous per-frame zoom filters", () => {

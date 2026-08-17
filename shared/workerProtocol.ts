@@ -63,7 +63,7 @@ export const workerRenderHandoffSchema = z.object({
   nativePaths: z.object({ sourceDirectory: z.string().nullable(), outputDirectory: z.string().nullable() }),
   output: z.object({ width: z.literal(1920), height: z.literal(1080), aspectRatio: z.literal("16:9"), container: z.literal("mp4"), filename: z.string().regex(/^[A-Za-z0-9_-]+_approved_1920x1080\.mp4$/) }),
   zoom: z.object({ enabled: z.boolean(), amountPercent: z.union([z.literal(3), z.literal(5), z.literal(8), z.literal(12)]), direction: z.enum(["IN", "OUT", "AUTO"]) }),
-  crossfade: z.object({ durationMs: z.union([z.literal(300), z.literal(500), z.literal(800), z.literal(1000), z.literal(1200)]) }),
+  crossfade: z.object({ durationMs: z.union([z.literal(0), z.literal(300), z.literal(500), z.literal(800), z.literal(1000), z.literal(1200)]) }),
   narration: workerAssetSchema,
   images: z.array(workerAssetSchema).min(1),
   timeline: z.array(z.object({ imageAssetId: z.number().int().positive(), startMs: z.number().int().nonnegative(), endMs: z.number().int().positive(), narrationText: z.string().min(1) })).min(1),

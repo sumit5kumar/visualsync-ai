@@ -42,9 +42,10 @@ if ($handoff.PSObject.Properties.Name -contains "crossfade") {
 }
 if ($zoomAmountPercent -notin @(3.0, 5.0, 8.0, 12.0)) { $zoomAmountPercent = 8.0 }
 if ($zoomDirection -notin @("IN", "OUT", "AUTO")) { $zoomDirection = "IN" }
-if ($crossfadeDurationMs -notin @(300, 500, 800, 1000, 1200)) { $crossfadeDurationMs = 800 }
+if ($crossfadeDurationMs -notin @(0, 300, 500, 800, 1000, 1200)) { $crossfadeDurationMs = 800 }
 $transitionSeconds = $crossfadeDurationMs / 1000.0
 $transitionHalfSeconds = $transitionSeconds / 2.0
+$fastRender = !$zoomEnabled -and $crossfadeDurationMs -eq 0
 
 $assetNames = @{}
 foreach ($image in $handoff.images) { $assetNames[[string]$image.assetId] = $image.filename }
@@ -245,6 +246,69 @@ $compositionTelemetryJob = $null
 $encodeTelemetryJob = $null
 
 try {
+  if ($fastRender) {
+    $timelineDurationSeconds = ([double]$handoff.timeline[-1].endMs) / 1000
+    $outputFrameCount = [Math]::Ceiling($timelineDurationSeconds * $FrameRate)
+    $encoderSelectionStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $finalEncoder = Get-FinalVideoEncoder $RenderMode
+    $encoderSelectionStopwatch.Stop()
+    $effectivePipelineMode = if ($finalEncoder.acceleration -eq "GPU") { "HYBRID" } else { "CPU" }
+    Write-Output "RENDER_MODE_REQUESTED=$RenderMode"
+    Write-Output "RENDER_MODE_EFFECTIVE=$effectivePipelineMode"
+    Write-Output "ENCODER=$($finalEncoder.label)"
+    Write-Output "CPU_BOUND_STAGES=none (Fast Render bypasses continuous zoom and alpha crossfade)"
+    $fastFilter = "scale=$canvasWidth`:$canvasHeight`:force_original_aspect_ratio=increase:flags=lanczos,crop=$canvasWidth`:$canvasHeight,setsar=1,format=yuv420p,fps=$FrameRate"
+    $fastArguments = @("-hide_banner", "-loglevel", "warning")
+    $fastChains = @()
+    $fastLabels = @()
+    for ($fastIndex = 0; $fastIndex -lt $segments.Count; $fastIndex++) {
+      $segment = $segments[$fastIndex]
+      $fastArguments += @("-loop", "1", "-framerate", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-t", (Format-Number $segment.durationSeconds), "-i", $segment.imagePath)
+      $fastChains += "[$fastIndex`:v]$fastFilter[fast$fastIndex]"
+      $fastLabels += "[fast$fastIndex]"
+    }
+    $narrationInputIndex = $segments.Count
+    $fastArguments += @("-i", $narrationPath)
+    $fastFilterGraph = (($fastChains -join ";") + ";" + ($fastLabels -join "") + "concat=n=$($segments.Count):v=1:a=0[fastvideo]")
+    $outputPath = Join-Path $OutputDirectory $handoff.output.filename
+    $fastArguments += @("-filter_complex", $fastFilterGraph, "-map", "[fastvideo]", "-map", "$narrationInputIndex`:a:0") + $finalEncoder.arguments + @(
+      "-g", ($FrameRate * 2).ToString(), "-keyint_min", $FrameRate.ToString(), "-sc_threshold", "0", "-bf", "2",
+      "-pix_fmt", "yuv420p", "-r", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-fps_mode", "cfr",
+      "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath
+    )
+    $encodeStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $encodeTelemetryJob = Start-StageTelemetry
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $FFmpegPath @fastArguments
+    $encodeExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorActionPreference
+    $encodeStopwatch.Stop()
+    $encodeTelemetry = Stop-StageTelemetry $encodeTelemetryJob
+    $encodeTelemetryJob = $null
+    if ($encodeExitCode -ne 0) { throw "FFmpeg exited with code $encodeExitCode while running Fast Render." }
+    if (!(Test-Path $outputPath)) { throw "Fast Render completed without writing the expected MP4." }
+    $renderStopwatch.Stop()
+    $profilePath = Join-Path $OutputDirectory (([System.IO.Path]::GetFileNameWithoutExtension($handoff.output.filename)) + "-render-profile.json")
+    $profile = [pscustomobject]@{
+      schemaVersion = 1
+      renderModeRequested = $RenderMode
+      renderModeEffective = $effectivePipelineMode
+      fastRender = $true
+      encoder = $finalEncoder.label
+      cpuBoundStages = @()
+      output = [pscustomobject]@{ path = $outputPath; width = $canvasWidth; height = $canvasHeight; frameRate = $FrameRate; frameCount = $outputFrameCount; timelineDurationSeconds = [Math]::Round($timelineDurationSeconds, 3) }
+      stages = [pscustomobject]@{
+        continuousZoomFrameGeneration = [pscustomobject]@{ elapsedSeconds = 0; telemetry = $null }
+        directCrossfadeComposition = [pscustomobject]@{ elapsedSeconds = 0; telemetry = $null }
+        encoderSelection = [pscustomobject]@{ elapsedSeconds = [Math]::Round($encoderSelectionStopwatch.Elapsed.TotalSeconds, 3) }
+        staticTimelineEncodeAndAudioMux = [pscustomobject]@{ elapsedSeconds = [Math]::Round($encodeStopwatch.Elapsed.TotalSeconds, 3); outputFramesPerSecond = [Math]::Round(($outputFrameCount / [Math]::Max(0.001, $encodeStopwatch.Elapsed.TotalSeconds)), 3); telemetry = $encodeTelemetry }
+      }
+      totalElapsedSeconds = [Math]::Round($renderStopwatch.Elapsed.TotalSeconds, 3)
+    }
+    $profile | ConvertTo-Json -Depth 8 | Set-Content -Path $profilePath -Encoding UTF8
+    Write-Output "PROFILE=$profilePath"
+  } else {
   $clipStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
   $clipTelemetryJob = Start-StageTelemetry
   $clipPosition = 0
@@ -374,6 +438,7 @@ try {
   }
   $profile | ConvertTo-Json -Depth 8 | Set-Content -Path $profilePath -Encoding UTF8
   Write-Output "PROFILE=$profilePath"
+  }
 } finally {
   if ($clipTelemetryJob) { Stop-Job -Job $clipTelemetryJob -ErrorAction SilentlyContinue; Remove-Job -Job $clipTelemetryJob -Force -ErrorAction SilentlyContinue }
   if ($compositionTelemetryJob) { Stop-Job -Job $compositionTelemetryJob -ErrorAction SilentlyContinue; Remove-Job -Job $compositionTelemetryJob -Force -ErrorAction SilentlyContinue }

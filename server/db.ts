@@ -95,7 +95,7 @@ export async function updateProjectSetup(userId: number, projectId: number, inpu
   return { success: true } as const;
 }
 
-export async function updateProjectZoomSettings(userId: number, projectId: number, input: { enabled: boolean; amountPercent: 3 | 5 | 8 | 12; direction: "IN" | "OUT" | "AUTO"; crossfadeDurationMs: 300 | 500 | 800 | 1000 | 1200 }) {
+export async function updateProjectZoomSettings(userId: number, projectId: number, input: { enabled: boolean; amountPercent: 3 | 5 | 8 | 12; direction: "IN" | "OUT" | "AUTO"; crossfadeDurationMs: 0 | 300 | 500 | 800 | 1000 | 1200 }) {
   const db = await requireDb();
   const project = await getUserProject(userId, projectId);
   if (!project) throw new Error("Project not found.");

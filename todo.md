@@ -193,3 +193,6 @@
 - [x] Prioritize the active CPU baseline and stop the duplicate NVENC run before any further GPU-filter experimentation, because the measured CPU preparation stages are identical between the two modes.
 - [x] Stop the duplicate long NVENC benchmark after the full CPU profile completes, then report the measured CPU bottleneck together with the verified NVENC final-encode evidence.
 - [x] Analyze only the CPU-bound GEQ continuous center-zoom stage, document compatible CPU/CUDA alternatives and trade-offs, and wait for user approval before modifying the accepted renderer.
+- [x] Add a project-level Fast Render setting that disables zoom and crossfade together while preserving the existing normal-quality motion settings.
+- [x] Refine the render-settings interface and make rendered-MP4 import explicitly optional for users who only need a local exported file.
+- [x] Remove the rendered-MP4 import button and imported render-history interface from Preview because the user keeps final MP4 files in the local output folder.

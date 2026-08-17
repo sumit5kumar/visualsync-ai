@@ -12,7 +12,9 @@ describe("native render estimate", () => {
   it("shows the materially higher cost of smooth zoom and rejects incomplete inputs", () => {
     const zoomed = estimateNativeRender({ durationMs: 60_000, imageCount: 12, zoomEnabled: true, crossfadeDurationMs: 800 });
     const staticFrames = estimateNativeRender({ durationMs: 60_000, imageCount: 12, zoomEnabled: false, crossfadeDurationMs: 800 });
+    const fastRender = estimateNativeRender({ durationMs: 60_000, imageCount: 12, zoomEnabled: false, crossfadeDurationMs: 0 });
     expect(zoomed?.expectedSeconds).toBeGreaterThan(staticFrames?.expectedSeconds ?? 0);
+    expect(staticFrames?.expectedSeconds).toBeGreaterThan(fastRender?.expectedSeconds ?? 0);
     expect(estimateNativeRender({ durationMs: 0, imageCount: 12, zoomEnabled: true, crossfadeDurationMs: 800 })).toBeNull();
     expect(formatRenderDuration(3_661)).toBe("1h 1m");
   });
