@@ -21,16 +21,24 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain('(Join-Path $segment.frameDirectory "frame_%06d.jpg")');
     expect(worker).toContain('(Join-Path $frameDirectory "frame_%06d.jpg")');
     expect(worker).toContain("Remove-Item -Recurse -Force $frameDirectory");
-    expect(worker).toContain('"-g", "1", "-keyint_min", "1", "-sc_threshold", "0", "-bf", "0"');
-    expect(worker).toContain('"-x264-params", "keyint=1:min-keyint=1:scenecut=0:bframes=0:ref=1"');
-    expect(worker).toContain('"-crf", "14"');
+    expect(worker).toContain('$transitionHalfSeconds = $transitionSeconds / 2.0');
+    expect(worker).toContain('$fadeStart = [double]$current.endSeconds - $transitionHalfSeconds');
+    expect(worker).toContain('$fadeEnd = [double]$current.endSeconds + $transitionHalfSeconds');
+    expect(worker).toContain('$nextLocalSeconds = [Math]::Max(0.0, $timeSeconds - [double]$next.startSeconds)');
+    expect(worker).toContain('"-preset", "fast", "-crf", "16"');
+    expect(worker).toContain('"-g", ($FrameRate * 2).ToString(), "-keyint_min", $FrameRate.ToString()');
     expect(worker).not.toContain("zoompan=");
     expect(worker).not.toContain("perspective=");
     expect(worker).not.toContain("xfade=transition=");
     expect(worker).toContain("Draw-AlphaLayer $graphics $nextLayer $fadeProgress");
-    expect(worker).toContain('$zoomAmountPercent = 5.0');
-    expect(worker).toContain('$zoomDirection = "AUTO"');
-    expect(worker).toContain("$transitionSeconds = 0.5");
+    expect(worker).toContain('$zoomEnabled = $true');
+    expect(worker).toContain('if ($handoff.PSObject.Properties.Name -contains "zoom")');
+    expect(worker).toContain('if (!$zoomEnabled)');
+    expect(worker).toContain('$zoomAmountPercent = 8.0');
+    expect(worker).toContain('$zoomDirection = "IN"');
+    expect(worker).toContain('$crossfadeDurationMs = 800');
+    expect(worker).toContain('$transitionSeconds = $crossfadeDurationMs / 1000.0');
+    expect(worker).toContain('$transitionHalfSeconds = $transitionSeconds / 2.0');
     expect(worker).toContain('"-pix_fmt", "yuv420p", "-r", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-fps_mode", "cfr"');
   });
 
@@ -39,7 +47,7 @@ describe("middle-origin motion rendering", () => {
 
     expect(styles).toMatch(/\.vs-preview-active\s*\{\s*transform-origin:\s*center center;/);
     expect(styles).toMatch(/\.vs-preview-transition\s*\{\s*transform-origin:\s*center center;/);
-    expect(styles).toContain("vs-preview-crossfade 560ms");
+    expect(styles).toContain("vs-preview-crossfade var(--preview-crossfade-duration, 800ms)");
   });
 
   it("keeps the editor-style staged zoom diagnostic free of continuous per-frame zoom filters", () => {

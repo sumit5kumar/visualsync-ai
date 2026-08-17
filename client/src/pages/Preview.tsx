@@ -20,7 +20,7 @@ async function uploadVideo(projectId: number, file: File) {
   if (!response.ok) throw new Error(result?.error || "Rendered MP4 could not be imported.");
 }
 
-type ZoomSettings = { enabled: boolean; amountPercent: 3 | 5 | 8; direction: "IN" | "OUT" | "AUTO" };
+type ZoomSettings = { enabled: boolean; amountPercent: 3 | 5 | 8 | 12; direction: "IN" | "OUT" | "AUTO"; crossfadeDurationMs: 300 | 500 | 800 | 1000 | 1200 };
 
 export default function Preview() {
   const { isAuthenticated } = useAuth();
@@ -54,8 +54,9 @@ export default function Preview() {
 
   const selectedZoom: ZoomSettings = {
     enabled: project?.zoomEnabled ?? true,
-    amountPercent: (project?.zoomAmountPercent === 3 || project?.zoomAmountPercent === 8 ? project.zoomAmountPercent : 5) as 3 | 5 | 8,
-    direction: project?.zoomDirection === "IN" || project?.zoomDirection === "OUT" ? project.zoomDirection : "AUTO",
+    amountPercent: (project?.zoomAmountPercent === 3 || project?.zoomAmountPercent === 5 || project?.zoomAmountPercent === 12 ? project.zoomAmountPercent : 8) as 3 | 5 | 8 | 12,
+    direction: project?.zoomDirection === "OUT" || project?.zoomDirection === "AUTO" ? project.zoomDirection : "IN",
+    crossfadeDurationMs: (project?.crossfadeDurationMs === 300 || project?.crossfadeDurationMs === 500 || project?.crossfadeDurationMs === 1000 || project?.crossfadeDurationMs === 1200 ? project.crossfadeDurationMs : 800) as 300 | 500 | 800 | 1000 | 1200,
   };
   const saveZoom = (next: ZoomSettings) => {
     if (!project) return;
@@ -101,15 +102,17 @@ export default function Preview() {
         <aside className="rounded-[1.5rem] border border-white/[.07] bg-[#101827] p-6">
           <p className="text-xs font-semibold uppercase tracking-[.14em] text-cyan-200">{rendered.data ? "Final render" : "Timeline preview"}</p>
           <h2 className="mt-3 text-lg font-semibold text-white">{rendered.data ? rendered.data.originalFilename : "Watch with narration before rendering"}</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">{rendered.data ? "The latest final MP4 is available above. Earlier versions remain in render history." : "This browser preview changes images at the approved timeline times while playing the original narration."}</p>
+          <p className="mt-2 text-sm leading-6 text-slate-500">{rendered.data ? "The latest final MP4 is available above. Earlier versions remain in render history." : "This browser preview follows the approved image boundaries while playing the original narration."}</p>
           <input ref={fileInput} type="file" accept="video/mp4" className="sr-only" onChange={event => importMp4(event.target.files?.[0] ?? null)} />
           <Button onClick={() => fileInput.current?.click()} disabled={uploading} className="mt-5 w-full bg-cyan-200 text-slate-950 hover:bg-cyan-100"><Upload className="mr-2 h-4 w-4" />{uploading ? "Importing…" : "Import rendered MP4"}</Button>
           <Button onClick={download} disabled={!approved || !handoff.data} variant="outline" className="mt-3 w-full border-white/10 text-slate-200"><Download className="mr-2 h-4 w-4" />Download handoff</Button>
+          <div className="mt-5 rounded-xl border border-cyan-200/[.12] bg-cyan-200/[.04] p-3 text-xs leading-5 text-slate-400"><span className="font-semibold text-cyan-100">One worker only.</span> Download the approved worker below, then download this handoff and run the saved command. The separate zoom-test script is diagnostic only and is not needed for normal rendering.</div>
         </aside>
       </section>
       <ZoomControls zoom={selectedZoom} saving={updateZoom.isPending} onChange={saveZoom} />
       <section className="rounded-[1.5rem] border border-white/[.07] bg-[#101827] p-6">
-        <div className="flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-[.14em] text-cyan-200">Windows PowerShell</p><h2 className="mt-2 font-semibold text-white">Saved-path render command</h2></div><Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(command).then(() => toast.success("Command copied."))} className="border-white/10 text-slate-200"><Clipboard className="mr-2 h-3.5 w-3.5" />Copy</Button></div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[.14em] text-cyan-200">Native render</p><h2 className="mt-2 font-semibold text-white">Three clear steps</h2><p className="mt-1 text-sm leading-6 text-slate-500">The command uses your saved folders and applies the approved timeline, centered zoom, and narration automatically.</p></div><Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(command).then(() => toast.success("Command copied."))} className="border-white/10 text-slate-200"><Clipboard className="mr-2 h-3.5 w-3.5" />Copy command</Button></div>
+        <div className="mt-5 grid gap-3 md:grid-cols-3"><WorkflowStep number="1" title="Download worker" text="Use the current approved worker only." /><WorkflowStep number="2" title="Download handoff" text="Keep its project-specific file name." /><WorkflowStep number="3" title="Paste and render" text="Run the copied command in the saved output folder." /></div>
         <pre className="mt-4 overflow-x-auto rounded-xl bg-black/40 p-4 text-xs leading-6 text-cyan-100"><code>{command}</code></pre>
       </section>
       <section className="rounded-[1.5rem] border border-white/[.07] bg-[#101827] p-6">
@@ -124,13 +127,14 @@ function ZoomControls({ zoom, saving, onChange }: { zoom: ZoomSettings; saving: 
   const controlClass = "h-10 rounded-lg border border-white/10 bg-black/25 px-3 text-sm text-slate-100 outline-none focus:border-cyan-200/60";
   return <section className="rounded-[1.5rem] border border-cyan-200/[.14] bg-[radial-gradient(circle_at_100%_0%,rgba(34,211,238,.1),transparent_35%),#101827] p-6">
     <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-      <div><p className="text-xs font-semibold uppercase tracking-[.14em] text-cyan-200">Native render motion</p><h2 className="mt-2 text-lg font-semibold text-white">Continuous center zoom</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">The native worker uses the accepted smooth subpixel center transform. Crossfades, narration timing, and image selection remain unchanged.</p></div>
+      <div><p className="text-xs font-semibold uppercase tracking-[.14em] text-cyan-200">Native render motion</p><h2 className="mt-2 text-lg font-semibold text-white">Continuous zoom and direct crossfade</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">Crossfades are centered on approved narration boundaries, so increasing their duration does not shift visual changes early. Image selection and timeline timing remain unchanged.</p></div>
       <Button type="button" variant="outline" disabled={saving} onClick={() => onChange({ ...zoom, enabled: !zoom.enabled })} className="border-cyan-200/25 text-cyan-100">Zoom {zoom.enabled ? "ON" : "OFF"}</Button>
     </div>
-    <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <label className="grid gap-1.5 text-xs font-medium text-slate-400">Zoom amount<select aria-label="Zoom amount" disabled={!zoom.enabled || saving} className={controlClass} value={zoom.amountPercent} onChange={event => onChange({ ...zoom, amountPercent: Number(event.target.value) as 3 | 5 | 8 })}><option value={3}>3% subtle</option><option value={5}>5% default</option><option value={8}>8% strong</option></select></label>
+    <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <label className="grid gap-1.5 text-xs font-medium text-slate-400">Zoom amount<select aria-label="Zoom amount" disabled={!zoom.enabled || saving} className={controlClass} value={zoom.amountPercent} onChange={event => onChange({ ...zoom, amountPercent: Number(event.target.value) as 3 | 5 | 8 | 12 })}><option value={3}>3% subtle</option><option value={5}>5% gentle</option><option value={8}>8% default</option><option value={12}>12% strong</option></select></label>
       <label className="grid gap-1.5 text-xs font-medium text-slate-400">Direction<select aria-label="Zoom direction" disabled={!zoom.enabled || saving} className={controlClass} value={zoom.direction} onChange={event => onChange({ ...zoom, direction: event.target.value as ZoomSettings["direction"] })}><option value="AUTO">Auto (alternating)</option><option value="IN">Zoom in</option><option value="OUT">Zoom out</option></select></label>
-      <div className="rounded-lg border border-white/[.07] bg-black/20 px-3 py-2.5 text-xs leading-5 text-slate-400">{zoom.enabled ? <><span className="font-medium text-slate-200">Saved:</span> {zoom.amountPercent}% · {zoom.direction}</> : <><span className="font-medium text-slate-200">Saved:</span> static frames, crossfade only</>}</div>
+      <label className="grid gap-1.5 text-xs font-medium text-slate-400">Crossfade duration<select aria-label="Crossfade duration" disabled={saving} className={controlClass} value={zoom.crossfadeDurationMs} onChange={event => onChange({ ...zoom, crossfadeDurationMs: Number(event.target.value) as ZoomSettings["crossfadeDurationMs"] })}><option value={300}>0.3 seconds · quick</option><option value={500}>0.5 seconds · short</option><option value={800}>0.8 seconds · default</option><option value={1000}>1.0 second · slow</option><option value={1200}>1.2 seconds · very slow</option></select></label>
+      <div className="rounded-lg border border-white/[.07] bg-black/20 px-3 py-2.5 text-xs leading-5 text-slate-400">{zoom.enabled ? <><span className="font-medium text-slate-200">Saved:</span> {zoom.amountPercent}% · {zoom.direction} · {(zoom.crossfadeDurationMs / 1000).toFixed(1)}s fade</> : <><span className="font-medium text-slate-200">Saved:</span> static frames · {(zoom.crossfadeDurationMs / 1000).toFixed(1)}s fade</>}</div>
     </div>
   </section>;
 }
@@ -146,17 +150,20 @@ function TimelinePlayer({ narrationUrl, segments, zoom }: { narrationUrl: string
   const currentIndex = Math.max(0, segments.findIndex(segment => time * 1000 >= segment.startMs && time * 1000 < segment.endMs));
   const current = segments[currentIndex] ?? segments[0];
   const currentImage = current?.thumbnailUrl ?? null;
+
   useEffect(() => {
     if (currentImage && currentImage !== displayedImage) {
       const hasOutgoing = Boolean(displayedImage);
       setPreviousImage(displayedImage);
       setDisplayedImage(currentImage);
       setTransitioning(hasOutgoing);
-      const timeout = window.setTimeout(() => { setPreviousImage(null); setTransitioning(false); }, 560);
+      const timeout = window.setTimeout(() => { setPreviousImage(null); setTransitioning(false); }, zoom.crossfadeDurationMs);
       return () => window.clearTimeout(timeout);
     }
-  }, [currentImage, displayedImage]);
+  }, [currentImage, displayedImage, zoom.crossfadeDurationMs]);
+
   if (!narrationUrl || !current) return <div className="grid h-full place-items-center p-8 text-center text-sm text-slate-500"><Clapperboard className="mx-auto mb-3 h-8 w-8 text-cyan-200" />Timeline preview becomes available after narration and image analysis finish.</div>;
+
   const shotDurationSeconds = (current.endMs - current.startMs) / 1000;
   const resolvedDirection = zoom.direction === "AUTO" ? (currentIndex % 2 === 0 ? "IN" : "OUT") : zoom.direction;
   const zoomMagnitude = 1 + (zoom.amountPercent / 100);
@@ -165,9 +172,31 @@ function TimelinePlayer({ narrationUrl, segments, zoom }: { narrationUrl: string
   const format = (value: number) => `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}`;
   const seek = (value: number) => { if (audio.current) audio.current.currentTime = value; setTime(value); };
   const toggle = async () => { if (!audio.current) return; if (audio.current.paused) await audio.current.play(); else audio.current.pause(); };
-  return <div className="relative h-full overflow-hidden bg-black"><div className="absolute inset-0">{previousImage ? <img src={previousImage} className="vs-preview-previous absolute inset-0 h-full w-full object-cover" alt="" /> : null}{displayedImage ? <img key={displayedImage} src={displayedImage} style={{ ["--preview-zoom-start" as string]: String(zoomStart), ["--preview-zoom-end" as string]: String(zoomEnd), ["--preview-zoom-duration" as string]: `${Math.max(1.8, shotDurationSeconds)}s` }} className={`vs-preview-active ${transitioning ? "vs-preview-transition" : ""} absolute inset-0 h-full w-full object-cover`} alt={current.imageFilename ?? "Timeline image"} /> : null}</div><div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent px-4 pb-4 pt-16"><input type="range" min="0" max={duration || Math.ceil(segments.at(-1)?.endMs ?? 0) / 1000} step="0.01" value={time} onChange={event => seek(Number(event.target.value))} className="mb-3 h-1.5 w-full accent-cyan-300" aria-label="Timeline position" /><div className="flex items-center gap-3"><Button size="icon" onClick={toggle} className="bg-cyan-200 text-slate-950 hover:bg-cyan-100">{playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}</Button><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-white">{current.imageFilename ?? "Current image"}</p><p className="text-[11px] text-slate-300">{format(time)} / {format(duration || Math.ceil(segments.at(-1)?.endMs ?? 0) / 1000)}</p></div></div></div><audio ref={audio} src={narrationUrl} onLoadedMetadata={event => setDuration(event.currentTarget.duration)} onTimeUpdate={event => setTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} /></div>;
+  const motionStyle = {
+    ["--preview-zoom-start" as string]: String(zoomStart),
+    ["--preview-zoom-end" as string]: String(zoomEnd),
+    ["--preview-zoom-duration" as string]: `${Math.max(1.8, shotDurationSeconds)}s`,
+    ["--preview-crossfade-duration" as string]: `${zoom.crossfadeDurationMs}ms`,
+  };
+  const activeClassName = `vs-preview-active ${transitioning ? "vs-preview-transition" : ""} absolute inset-0 h-full w-full object-cover`;
+
+  return <div className="relative h-full overflow-hidden bg-black">
+    <div className="absolute inset-0" style={motionStyle}>
+      {previousImage ? <img src={previousImage} className="vs-preview-previous absolute inset-0 h-full w-full object-cover" alt="" /> : null}
+      {displayedImage ? (<img key={displayedImage} src={displayedImage} style={motionStyle} className={activeClassName} alt={current.imageFilename ?? "Timeline image"} />) : null}
+    </div>
+    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent px-4 pb-4 pt-16">
+      <input type="range" min="0" max={duration || Math.ceil(segments.at(-1)?.endMs ?? 0) / 1000} step="0.01" value={time} onChange={event => seek(Number(event.target.value))} className="mb-3 h-1.5 w-full accent-cyan-300" aria-label="Timeline position" />
+      <div className="flex items-center gap-3"><Button size="icon" onClick={toggle} className="bg-cyan-200 text-slate-950 hover:bg-cyan-100">{playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}</Button><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-white">{current.imageFilename ?? "Current image"}</p><p className="text-[11px] text-slate-300">{format(time)} / {format(duration || Math.ceil(segments.at(-1)?.endMs ?? 0) / 1000)}</p></div></div>
+    </div>
+    <audio ref={audio} src={narrationUrl} onLoadedMetadata={event => setDuration(event.currentTarget.duration)} onTimeUpdate={event => setTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
+  </div>;
+}
+
+function WorkflowStep({ number, title, text }: { number: string; title: string; text: string }) {
+  return <div className="rounded-xl border border-white/[.07] bg-black/20 p-3"><p className="text-[10px] font-semibold tracking-[.16em] text-cyan-200">{number}</p><p className="mt-1 text-sm font-semibold text-slate-100">{title}</p><p className="mt-1 text-xs leading-5 text-slate-500">{text}</p></div>;
 }
 
 function Hero() {
-  return <section className="rounded-[1.5rem] border border-white/[.07] bg-[radial-gradient(circle_at_80%_10%,rgba(34,211,238,.12),transparent_30%),#101827] p-6 md:p-8"><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-200/70">Render and review</p><h1 className="mt-2 text-3xl font-semibold tracking-[-.035em] text-white">Preview the timing. Render with motion.</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">Play the approved narration and image sequence in the browser, then create a motion-enhanced MP4 with the local worker.</p><a href="/api/project-media/latest-worker" download className="mt-4 inline-flex rounded-lg border border-cyan-200/25 bg-cyan-200/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-200/20">Download latest motion-enabled worker</a></section>;
+  return <section className="rounded-[1.5rem] border border-white/[.07] bg-[radial-gradient(circle_at_80%_10%,rgba(34,211,238,.12),transparent_30%),#101827] p-6 md:p-8"><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-200/70">Render and review</p><h1 className="mt-2 text-3xl font-semibold tracking-[-.035em] text-white">Preview the timing. Render with motion.</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">Review the approved narration and image sequence, then render with the one current worker that includes the accepted continuous center zoom and narration-centered crossfades.</p><div className="mt-5 flex flex-wrap items-center gap-3"><a href="/api/project-media/latest-worker" download className="inline-flex rounded-lg border border-cyan-200/25 bg-cyan-200/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-200/20">Download approved render worker</a><span className="text-xs text-slate-500">Diagnostic zoom scripts are optional tests, not production requirements.</span></div></section>;
 }

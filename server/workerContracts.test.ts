@@ -19,8 +19,9 @@ describe("VisualSync local-worker contract", () => {
   });
 
   it("accepts a project-specific output filename in an approved native handoff", () => {
-    const handoff = workerPayloadSchemas.renderHandoff.parse({ projectId: 1, projectName: "Finance project", approval: { approvedByUserId: 1, approvedAtMs: 1 }, nativePaths: { sourceDirectory: "C:\\Users\\sumit\\Downloads\\Finance", outputDirectory: "C:\\Users\\sumit\\Downloads\\Nothing" }, output: { width: 1920, height: 1080, aspectRatio: "16:9", container: "mp4", filename: "Finance_project_approved_1920x1080.mp4" }, zoom: { enabled: true, amountPercent: 5, direction: "AUTO" }, narration: { assetId: 1, filename: "audio.wav", storageKey: "audio.wav", mimeType: "audio/wav", sequenceNumber: null, contentHash: null, perceptualHash: null }, images: [{ assetId: 2, filename: "01.jpg", storageKey: "01.jpg", mimeType: "image/jpeg", sequenceNumber: 1, contentHash: null, perceptualHash: null }], timeline: [{ imageAssetId: 2, startMs: 0, endMs: 1000, narrationText: "Narration" }] });
+    const handoff = workerPayloadSchemas.renderHandoff.parse({ projectId: 1, projectName: "Finance project", approval: { approvedByUserId: 1, approvedAtMs: 1 }, nativePaths: { sourceDirectory: "C:\\Users\\sumit\\Downloads\\Finance", outputDirectory: "C:\\Users\\sumit\\Downloads\\Nothing" }, output: { width: 1920, height: 1080, aspectRatio: "16:9", container: "mp4", filename: "Finance_project_approved_1920x1080.mp4" }, zoom: { enabled: true, amountPercent: 12, direction: "IN" }, crossfade: { durationMs: 800 }, narration: { assetId: 1, filename: "audio.wav", storageKey: "audio.wav", mimeType: "audio/wav", sequenceNumber: null, contentHash: null, perceptualHash: null }, images: [{ assetId: 2, filename: "01.jpg", storageKey: "01.jpg", mimeType: "image/jpeg", sequenceNumber: 1, contentHash: null, perceptualHash: null }], timeline: [{ imageAssetId: 2, startMs: 0, endMs: 1000, narrationText: "Narration" }] });
     expect(handoff.output.filename).toBe("Finance_project_approved_1920x1080.mp4");
-    expect(handoff.zoom).toEqual({ enabled: true, amountPercent: 5, direction: "AUTO" });
+    expect(handoff.zoom).toEqual({ enabled: true, amountPercent: 12, direction: "IN" });
+    expect(handoff.crossfade).toEqual({ durationMs: 800 });
   });
 });

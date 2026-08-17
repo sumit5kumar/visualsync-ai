@@ -64,6 +64,13 @@
       "when": 1786957354891,
       "tag": "0008_add_project_zoom_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1786987695911,
+      "tag": "0009_mature_silverclaw",
+      "breakpoints": true
     }
   ]
 }

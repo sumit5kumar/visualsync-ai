@@ -23,10 +23,11 @@ $canvasWidth = 1920
 $canvasHeight = 1080
 $oversizedWidth = 2112
 $oversizedHeight = 1188
-$transitionSeconds = 0.5
+$transitionSeconds = 0.8
 $zoomEnabled = $true
-$zoomAmountPercent = 5.0
-$zoomDirection = "AUTO"
+$zoomAmountPercent = 8.0
+$zoomDirection = "IN"
+$crossfadeDurationMs = 800
 
 if ($handoff.PSObject.Properties.Name -contains "zoom") {
   $zoomSettings = $handoff.zoom
@@ -34,8 +35,15 @@ if ($handoff.PSObject.Properties.Name -contains "zoom") {
   if ($zoomSettings.PSObject.Properties.Name -contains "amountPercent") { $zoomAmountPercent = [double]$zoomSettings.amountPercent }
   if ($zoomSettings.PSObject.Properties.Name -contains "direction") { $zoomDirection = ([string]$zoomSettings.direction).ToUpperInvariant() }
 }
-if ($zoomAmountPercent -notin @(3.0, 5.0, 8.0)) { $zoomAmountPercent = 5.0 }
-if ($zoomDirection -notin @("IN", "OUT", "AUTO")) { $zoomDirection = "AUTO" }
+if ($handoff.PSObject.Properties.Name -contains "crossfade") {
+  $crossfadeSettings = $handoff.crossfade
+  if ($crossfadeSettings.PSObject.Properties.Name -contains "durationMs") { $crossfadeDurationMs = [int]$crossfadeSettings.durationMs }
+}
+if ($zoomAmountPercent -notin @(3.0, 5.0, 8.0, 12.0)) { $zoomAmountPercent = 8.0 }
+if ($zoomDirection -notin @("IN", "OUT", "AUTO")) { $zoomDirection = "IN" }
+if ($crossfadeDurationMs -notin @(300, 500, 800, 1000, 1200)) { $crossfadeDurationMs = 800 }
+$transitionSeconds = $crossfadeDurationMs / 1000.0
+$transitionHalfSeconds = $transitionSeconds / 2.0
 
 $assetNames = @{}
 foreach ($image in $handoff.images) { $assetNames[[string]$image.assetId] = $image.filename }
@@ -163,20 +171,26 @@ try {
   $segmentIndex = 0
   for ($outputFrameIndex = 0; $outputFrameIndex -lt $outputFrameCount; $outputFrameIndex++) {
     $timeSeconds = $outputFrameIndex / [double]$FrameRate
-    while ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge [double]$segments[$segmentIndex].endSeconds) { $segmentIndex++ }
+    # Keep the direct opacity transition centered on the approved segment boundary.
+    # The outgoing shot remains full-strength until the final half-transition; the incoming shot
+    # reaches full opacity only after its own approved start time. This prevents crossfades from
+    # moving visual cues early relative to the narration timeline.
+    while ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge ([double]$segments[$segmentIndex].endSeconds + $transitionHalfSeconds)) { $segmentIndex++ }
     $current = $segments[$segmentIndex]
     $currentLocalSeconds = $timeSeconds - [double]$current.startSeconds
     $frame = New-Object System.Drawing.Bitmap($canvasWidth, $canvasHeight, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
     $graphics = [System.Drawing.Graphics]::FromImage($frame)
     $graphics.Clear([System.Drawing.Color]::Black)
     $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
-    $fadeStart = [double]$current.endSeconds - $transitionSeconds
+    $fadeStart = [double]$current.endSeconds - $transitionHalfSeconds
+    $fadeEnd = [double]$current.endSeconds + $transitionHalfSeconds
     try {
-      if ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge $fadeStart) {
+      if ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge $fadeStart -and $timeSeconds -lt $fadeEnd) {
         $fadeProgress = [Math]::Min(1.0, [Math]::Max(0.0, ($timeSeconds - $fadeStart) / $transitionSeconds))
         $currentLayer = Open-ClipFrame $current (Get-ClipFrameIndex $current $currentLocalSeconds)
         $next = $segments[$segmentIndex + 1]
-        $nextLayer = Open-ClipFrame $next 0
+        $nextLocalSeconds = [Math]::Max(0.0, $timeSeconds - [double]$next.startSeconds)
+        $nextLayer = Open-ClipFrame $next (Get-ClipFrameIndex $next $nextLocalSeconds)
         try {
           Draw-AlphaLayer $graphics $currentLayer (1.0 - $fadeProgress)
           Draw-AlphaLayer $graphics $nextLayer $fadeProgress
@@ -201,9 +215,11 @@ try {
     "-hide_banner", "-loglevel", "warning",
     "-framerate", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-start_number", "0", "-i", (Join-Path $frameDirectory "frame_%06d.jpg"),
     "-i", $narrationPath,
-    "-c:v", "libx264", "-preset", "medium", "-crf", "14",
-    "-g", "1", "-keyint_min", "1", "-sc_threshold", "0", "-bf", "0",
-    "-x264-params", "keyint=1:min-keyint=1:scenecut=0:bframes=0:ref=1",
+    # The accepted subpixel renderer produces stable source frames, so final H.264 can use normal
+    # inter-frame compression safely. This reduces native render time and file size without altering
+    # the approved timeline, direct-opacity transition, or centered zoom math.
+    "-c:v", "libx264", "-preset", "fast", "-crf", "16",
+    "-g", ($FrameRate * 2).ToString(), "-keyint_min", $FrameRate.ToString(), "-sc_threshold", "0", "-bf", "2",
     "-pix_fmt", "yuv420p", "-r", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-fps_mode", "cfr",
     "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath
   )

@@ -164,3 +164,12 @@
 - [x] Complete final Zoom OFF and Zoom ON playback acceptance on the integrated Finance render with unchanged narration and direct crossfade behavior.
 - [x] Diagnose and fix the Preview page tRPC query that receives an unexpected non-JSON API gateway response, then add regression coverage for the repaired request flow.
 - [x] Update the generated Windows native-render command to bypass execution policy only for its local worker process, then verify the command remains project-aware and test-covered.
+- [x] Audit the latest native Finance MP4 against its approved timeline and narration to identify any crossfade-related visual/audio duration drift.
+- [x] Restore the accepted continuous zoom in the normal approved worker path and prove the separate diagnostic zoom-test script is not required for production rendering.
+- [x] Clarify the approved-worker download and render workflow in Preview, including how users obtain the only worker script needed for rendering.
+- [x] Improve safe native-render efficiency without changing timeline timing, narration sync, crossfade behavior, or the accepted zoom appearance.
+- [x] Refine the Preview interface into a cleaner, more professional render-and-review workspace after render behavior is validated.
+- [x] Complete user playback acceptance of the corrected Finance render with narration-centered direct crossfades and built-in continuous zoom.
+- [x] Add a persisted direct-crossfade duration control with a 0.8-second default that remains centered on approved narration boundaries.
+- [x] Update project zoom defaults to 8% Zoom In and add a validated 12% zoom option in the native handoff, worker, and Preview controls.
+- [x] Validate the new motion defaults and controls without shifting visual changes early relative to narration or altering image matching and timeline selection.
