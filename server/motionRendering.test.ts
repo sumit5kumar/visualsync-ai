@@ -26,6 +26,8 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain('$fadeEnd = [double]$current.endSeconds + $transitionHalfSeconds');
     expect(worker).toContain('$nextLocalSeconds = [Math]::Max(0.0, $timeSeconds - [double]$next.startSeconds)');
     expect(worker).toContain("function Test-FinalEncoder");
+    expect(worker).toContain('"-f", "lavfi", "-i", "color=c=black:s=1920x1080:r=30:d=0.1", "-frames:v", "1"');
+    expect(worker).not.toContain('color=c=black:s=128x128:r=30:d=0.1');
     expect(worker).toContain("function Get-FinalVideoEncoder");
     expect(worker).toContain('label = "NVIDIA NVENC H.264"');
     expect(worker).toContain('label = "AMD AMF H.264"');
@@ -56,6 +58,14 @@ describe("middle-origin motion rendering", () => {
     expect(styles).toMatch(/\.vs-preview-active\s*\{\s*transform-origin:\s*center center;/);
     expect(styles).toMatch(/\.vs-preview-transition\s*\{\s*transform-origin:\s*center center;/);
     expect(styles).toContain("vs-preview-crossfade var(--preview-crossfade-duration, 800ms)");
+  });
+
+  it("keeps the Preview image alt text parseable and explains the final-encode GPU boundary", () => {
+    const preview = readFileSync(resolve(projectRoot, "client/src/pages/Preview.tsx"), "utf8");
+
+    expect(preview).toContain('alt={current.imageFilename ?? "Timeline image"}');
+    expect(preview).toContain("ENCODER=NVIDIA NVENC H.264");
+    expect(preview).toContain("The continuous zoom-frame preparation and direct-opacity crossfade compositor remain CPU-based");
   });
 
   it("keeps the editor-style staged zoom diagnostic free of continuous per-frame zoom filters", () => {

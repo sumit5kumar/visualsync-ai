@@ -179,3 +179,10 @@
 - [x] Diagnose and fix the Projects-page mutation that aborts with the message “signal is aborted without reason,” then add regression coverage for the repaired action.
 - [x] Detect supported Windows GPU encoders in the native worker, prefer a compatible GPU encoder when available, and retain the validated CPU encode path as an automatic fallback.
 - [x] Verify the GPU-preferred render output preserves the approved 1920×1080, 30 FPS, audio-synchronized, continuous-zoom, direct-crossfade contract.
+- [x] Audit the actual Finance worker encoder selection and identify which render stages remain CPU-bound.
+- [x] Diagnose and, if technically possible without a driver upgrade, enable NVIDIA RTX 3050 NVENC for the final encode while preserving the accepted zoom and crossfade pipeline.
+- [x] Clearly surface GPU encoder status and the remaining CPU-bound stages so local render-performance expectations are accurate.
+- [x] Install an official NVIDIA driver version 570 or newer for the RTX 3050, restart Windows if required, and verify NVENC API 13 availability before changing the approved render path.
+- [x] Repair the malformed Preview image alt attribute so Vite can parse the page without a source error.
+- [x] Stop the active Finance verification render on user request and document that GPU acceleration applies only to the final encode in the accepted native pipeline.
+- [x] Replace the non-representative 128×128 final-encoder probe that falsely rejects a working RTX 3050 NVENC encoder, and cover the corrected selection contract with regression tests.

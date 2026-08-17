@@ -87,9 +87,12 @@ function New-SubpixelCenteredZoomFilter([double]$startZoom, [double]$endZoom, [i
 function Test-FinalEncoder([string[]]$encoderArguments) {
   $probePath = Join-Path $OutputDirectory (".visualsync-encoder-probe-" + [Guid]::NewGuid().ToString("N") + ".mp4")
   try {
+    # Probe at the same 1920x1080 geometry used by the final encoder. Some NVENC
+    # driver profiles reject the old 128x128 test with an invalid-parameter error
+    # despite successfully encoding the approved output contract.
     $probeArguments = @(
       "-hide_banner", "-loglevel", "error",
-      "-f", "lavfi", "-i", "color=c=black:s=128x128:r=30:d=0.1", "-frames:v", "1"
+      "-f", "lavfi", "-i", "color=c=black:s=1920x1080:r=30:d=0.1", "-frames:v", "1"
     ) + $encoderArguments + @("-pix_fmt", "yuv420p", "-y", $probePath)
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
