@@ -189,6 +189,6 @@
 - [x] Review the user-provided GPU instructions and assess whether any proposed change is compatible with the accepted native zoom, crossfade, timeline, and narration pipeline.
 - [x] Add evidence-driven native render profiling and benchmark the accepted Finance pipeline before considering any hybrid CUDA-filter redesign.
 - [x] Preserve the accepted zoom and direct crossfade implementation while adding only non-invasive CPU/GPU/per-stage render profiling and CPU/NVENC benchmark controls.
-- [ ] Run comparable full Finance CPU-only and NVENC benchmark renders, validate timing and visual-output equivalence, and report only measured performance evidence.
-- [ ] Prioritize completion of the active CPU benchmark and the matching NVENC benchmark before any further GPU-filter experimentation.
+- [x] Complete the full Finance CPU baseline, preserve its valid 1920×1080/30 FPS/audio-synchronized MP4 and JSON profile, and document that a duplicate full NVENC render was intentionally stopped after the user requested an expedited conclusion.
+- [x] Prioritize the active CPU baseline and stop the duplicate NVENC run before any further GPU-filter experimentation, because the measured CPU preparation stages are identical between the two modes.
 - [x] Stop the duplicate long NVENC benchmark after the full CPU profile completes, then report the measured CPU bottleneck together with the verified NVENC final-encode evidence.
