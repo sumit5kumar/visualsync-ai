@@ -28,6 +28,12 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain("function Test-FinalEncoder");
     expect(worker).toContain('"-f", "lavfi", "-i", "color=c=black:s=1920x1080:r=30:d=0.1", "-frames:v", "1"');
     expect(worker).not.toContain('color=c=black:s=128x128:r=30:d=0.1');
+    expect(worker).toContain('[ValidateSet("AUTO", "GPU", "CPU")][string]$RenderMode = "AUTO"');
+    expect(worker).toContain("function Start-StageTelemetry");
+    expect(worker).toContain("function Stop-StageTelemetry");
+    expect(worker).toContain('Write-Output "RENDER_MODE_EFFECTIVE=$effectivePipelineMode"');
+    expect(worker).toContain('Write-Output "CPU_BOUND_STAGES=continuous centered zoom frame generation; direct-opacity crossfade composition"');
+    expect(worker).toContain('"-render-profile.json"');
     expect(worker).toContain("function Get-FinalVideoEncoder");
     expect(worker).toContain('label = "NVIDIA NVENC H.264"');
     expect(worker).toContain('label = "AMD AMF H.264"');

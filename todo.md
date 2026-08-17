@@ -186,3 +186,9 @@
 - [x] Repair the malformed Preview image alt attribute so Vite can parse the page without a source error.
 - [x] Stop the active Finance verification render on user request and document that GPU acceleration applies only to the final encode in the accepted native pipeline.
 - [x] Replace the non-representative 128×128 final-encoder probe that falsely rejects a working RTX 3050 NVENC encoder, and cover the corrected selection contract with regression tests.
+- [x] Review the user-provided GPU instructions and assess whether any proposed change is compatible with the accepted native zoom, crossfade, timeline, and narration pipeline.
+- [x] Add evidence-driven native render profiling and benchmark the accepted Finance pipeline before considering any hybrid CUDA-filter redesign.
+- [x] Preserve the accepted zoom and direct crossfade implementation while adding only non-invasive CPU/GPU/per-stage render profiling and CPU/NVENC benchmark controls.
+- [ ] Run comparable full Finance CPU-only and NVENC benchmark renders, validate timing and visual-output equivalence, and report only measured performance evidence.
+- [ ] Prioritize completion of the active CPU benchmark and the matching NVENC benchmark before any further GPU-filter experimentation.
+- [x] Stop the duplicate long NVENC benchmark after the full CPU profile completes, then report the measured CPU bottleneck together with the verified NVENC final-encode evidence.

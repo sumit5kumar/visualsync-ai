@@ -3,7 +3,8 @@ param(
   [Parameter(Mandatory = $true)][string]$SourceDirectory,
   [Parameter(Mandatory = $true)][string]$OutputDirectory,
   [string]$FFmpegPath = "ffmpeg",
-  [ValidateSet(30, 60)][int]$FrameRate = 30
+  [ValidateSet(30, 60)][int]$FrameRate = 30,
+  [ValidateSet("AUTO", "GPU", "CPU")][string]$RenderMode = "AUTO"
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,6 +53,63 @@ if (!(Test-Path $narrationPath)) { throw "Narration file missing from source dir
 
 function Format-Number([double]$value) {
   return $value.ToString("0.0000000000", [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Start-StageTelemetry() {
+  # Local Windows counters provide device-level samples without changing any
+  # generated pixels, timeline timing, zoom math, or crossfade composition.
+  return Start-Job -ScriptBlock {
+    while ($true) {
+      try {
+        $cpu = (Get-Counter -Counter "\Processor Information(_Total)\% Processor Time").CounterSamples | Select-Object -First 1
+        $gpu = Get-Counter -Counter "\GPU Engine(*)\Utilization Percentage"
+        $gpuMemory = Get-Counter -Counter "\GPU Adapter Memory(*)\Dedicated Usage"
+        $gpuValues = @($gpu.CounterSamples | ForEach-Object { [double]$_.CookedValue })
+        $videoEncodeValues = @($gpu.CounterSamples | Where-Object { $_.Path -match "engtype_(VideoEncode|Encode)" } | ForEach-Object { [double]$_.CookedValue })
+        $memoryValues = @($gpuMemory.CounterSamples | ForEach-Object { [double]$_.CookedValue })
+        [pscustomobject]@{
+          capturedAt = (Get-Date).ToUniversalTime().ToString("o")
+          systemCpuPercent = [Math]::Round([double]$cpu.CookedValue, 2)
+          gpuEnginePeakPercent = if ($gpuValues.Count) { [Math]::Round(($gpuValues | Measure-Object -Maximum).Maximum, 2) } else { $null }
+          gpuVideoEncodePeakPercent = if ($videoEncodeValues.Count) { [Math]::Round(($videoEncodeValues | Measure-Object -Maximum).Maximum, 2) } else { $null }
+          gpuDedicatedMemoryPeakBytes = if ($memoryValues.Count) { [Math]::Round(($memoryValues | Measure-Object -Maximum).Maximum, 0) } else { $null }
+          counterError = $null
+        }
+      } catch {
+        [pscustomobject]@{
+          capturedAt = (Get-Date).ToUniversalTime().ToString("o")
+          systemCpuPercent = $null
+          gpuEnginePeakPercent = $null
+          gpuVideoEncodePeakPercent = $null
+          gpuDedicatedMemoryPeakBytes = $null
+          counterError = $_.Exception.Message
+        }
+      }
+      Start-Sleep -Seconds 1
+    }
+  }
+}
+
+function Stop-StageTelemetry([object]$job) {
+  if (!$job) {
+    return [pscustomobject]@{ sampleCount = 0; cpuAveragePercent = $null; cpuPeakPercent = $null; gpuEnginePeakPercent = $null; gpuVideoEncodePeakPercent = $null; gpuDedicatedMemoryPeakBytes = $null; counterErrors = @() }
+  }
+  Stop-Job -Job $job -ErrorAction SilentlyContinue
+  $samples = @(Receive-Job -Job $job -ErrorAction SilentlyContinue)
+  Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+  $cpuValues = @($samples | Where-Object { $null -ne $_.systemCpuPercent } | ForEach-Object { [double]$_.systemCpuPercent })
+  $gpuValues = @($samples | Where-Object { $null -ne $_.gpuEnginePeakPercent } | ForEach-Object { [double]$_.gpuEnginePeakPercent })
+  $videoEncodeValues = @($samples | Where-Object { $null -ne $_.gpuVideoEncodePeakPercent } | ForEach-Object { [double]$_.gpuVideoEncodePeakPercent })
+  $memoryValues = @($samples | Where-Object { $null -ne $_.gpuDedicatedMemoryPeakBytes } | ForEach-Object { [double]$_.gpuDedicatedMemoryPeakBytes })
+  return [pscustomobject]@{
+    sampleCount = $samples.Count
+    cpuAveragePercent = if ($cpuValues.Count) { [Math]::Round(($cpuValues | Measure-Object -Average).Average, 2) } else { $null }
+    cpuPeakPercent = if ($cpuValues.Count) { [Math]::Round(($cpuValues | Measure-Object -Maximum).Maximum, 2) } else { $null }
+    gpuEnginePeakPercent = if ($gpuValues.Count) { [Math]::Round(($gpuValues | Measure-Object -Maximum).Maximum, 2) } else { $null }
+    gpuVideoEncodePeakPercent = if ($videoEncodeValues.Count) { [Math]::Round(($videoEncodeValues | Measure-Object -Maximum).Maximum, 2) } else { $null }
+    gpuDedicatedMemoryPeakBytes = if ($memoryValues.Count) { [Math]::Round(($memoryValues | Measure-Object -Maximum).Maximum, 0) } else { $null }
+    counterErrors = @($samples | Where-Object { $_.counterError } | Select-Object -ExpandProperty counterError -Unique)
+  }
 }
 
 function Get-ZoomPlan([int]$segmentIndex) {
@@ -105,20 +163,23 @@ function Test-FinalEncoder([string[]]$encoderArguments) {
   }
 }
 
-function Get-FinalVideoEncoder() {
+function Get-FinalVideoEncoder([string]$mode) {
+  if ($mode -eq "CPU") {
+    return [pscustomobject]@{ label = "CPU libx264 (requested)"; acceleration = "CPU"; arguments = @("-c:v", "libx264", "-preset", "fast", "-crf", "16") }
+  }
   # Each hardware encoder is verified through an actual tiny MP4 encode instead of relying on
   # FFmpeg merely listing a compiled-in encoder. This safely handles missing or outdated drivers.
   $candidates = @(
-    [pscustomobject]@{ label = "NVIDIA NVENC H.264"; arguments = @("-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc:v", "vbr", "-cq:v", "18", "-b:v", "0") },
-    [pscustomobject]@{ label = "AMD AMF H.264"; arguments = @("-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "18", "-qp_p", "18") },
-    [pscustomobject]@{ label = "Intel Quick Sync H.264"; arguments = @("-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "18") }
+    [pscustomobject]@{ label = "NVIDIA NVENC H.264"; acceleration = "GPU"; arguments = @("-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc:v", "vbr", "-cq:v", "18", "-b:v", "0") },
+    [pscustomobject]@{ label = "AMD AMF H.264"; acceleration = "GPU"; arguments = @("-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "18", "-qp_p", "18") },
+    [pscustomobject]@{ label = "Intel Quick Sync H.264"; acceleration = "GPU"; arguments = @("-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "18") }
   )
   foreach ($candidate in $candidates) {
     if (Test-FinalEncoder $candidate.arguments) {
       return $candidate
     }
   }
-  return [pscustomobject]@{ label = "CPU libx264 fallback"; arguments = @("-c:v", "libx264", "-preset", "fast", "-crf", "16") }
+  return [pscustomobject]@{ label = "CPU libx264 fallback"; acceleration = "CPU"; arguments = @("-c:v", "libx264", "-preset", "fast", "-crf", "16") }
 }
 
 function Open-ClipFrame([object]$segment, [int]$frameIndex) {
@@ -178,8 +239,14 @@ foreach ($segmentIndex in 0..($handoff.timeline.Count - 1)) {
 $jpegEncoder = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq "image/jpeg" }
 $jpegParameters = New-Object System.Drawing.Imaging.EncoderParameters(1)
 $jpegParameters.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, 95L)
+$renderStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+$clipTelemetryJob = $null
+$compositionTelemetryJob = $null
+$encodeTelemetryJob = $null
 
 try {
+  $clipStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+  $clipTelemetryJob = Start-StageTelemetry
   $clipPosition = 0
   foreach ($segment in $segments) {
     New-Item -ItemType Directory -Path $segment.frameDirectory -Force | Out-Null
@@ -202,9 +269,14 @@ try {
     if (!(Test-Path (Join-Path $segment.frameDirectory "frame_000000.jpg"))) { throw "FFmpeg did not write the expected continuous zoom frames for $($segment.filename)." }
     $clipPosition++
   }
+  $clipStopwatch.Stop()
+  $clipTelemetry = Stop-StageTelemetry $clipTelemetryJob
+  $clipTelemetryJob = $null
 
   $timelineDurationSeconds = ([double]$handoff.timeline[-1].endMs) / 1000
   $outputFrameCount = [Math]::Ceiling($timelineDurationSeconds * $FrameRate)
+  $compositionStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+  $compositionTelemetryJob = Start-StageTelemetry
   $segmentIndex = 0
   for ($outputFrameIndex = 0; $outputFrameIndex -lt $outputFrameCount; $outputFrameIndex++) {
     $timeSeconds = $outputFrameIndex / [double]$FrameRate
@@ -246,10 +318,19 @@ try {
     }
     if (($outputFrameIndex % $FrameRate) -eq 0) { Write-Progress -Activity "Applying existing direct crossfade" -Status "Frame $outputFrameIndex of $outputFrameCount" -PercentComplete (45 + (($outputFrameIndex / [double]$outputFrameCount) * 45)) }
   }
+  $compositionStopwatch.Stop()
+  $compositionTelemetry = Stop-StageTelemetry $compositionTelemetryJob
+  $compositionTelemetryJob = $null
 
   $outputPath = Join-Path $OutputDirectory $handoff.output.filename
-  $finalEncoder = Get-FinalVideoEncoder
+  $encoderSelectionStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+  $finalEncoder = Get-FinalVideoEncoder $RenderMode
+  $encoderSelectionStopwatch.Stop()
+  $effectivePipelineMode = if ($finalEncoder.acceleration -eq "GPU") { "HYBRID" } else { "CPU" }
+  Write-Output "RENDER_MODE_REQUESTED=$RenderMode"
+  Write-Output "RENDER_MODE_EFFECTIVE=$effectivePipelineMode"
   Write-Output "ENCODER=$($finalEncoder.label)"
+  Write-Output "CPU_BOUND_STAGES=continuous centered zoom frame generation; direct-opacity crossfade composition"
   $encodeArguments = @(
     "-hide_banner", "-loglevel", "warning",
     "-framerate", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-start_number", "0", "-i", (Join-Path $frameDirectory "frame_%06d.jpg"),
@@ -262,14 +343,41 @@ try {
     "-pix_fmt", "yuv420p", "-r", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-fps_mode", "cfr",
     "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath
   )
+  $encodeStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+  $encodeTelemetryJob = Start-StageTelemetry
   $previousErrorActionPreference = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
   & $FFmpegPath @encodeArguments
   $encodeExitCode = $LASTEXITCODE
   $ErrorActionPreference = $previousErrorActionPreference
+  $encodeStopwatch.Stop()
+  $encodeTelemetry = Stop-StageTelemetry $encodeTelemetryJob
+  $encodeTelemetryJob = $null
   if ($encodeExitCode -ne 0) { throw "FFmpeg exited with code $encodeExitCode" }
   if (!(Test-Path $outputPath)) { throw "FFmpeg completed without writing the expected MP4." }
+  $renderStopwatch.Stop()
+  $profilePath = Join-Path $OutputDirectory (([System.IO.Path]::GetFileNameWithoutExtension($handoff.output.filename)) + "-render-profile.json")
+  $profile = [pscustomobject]@{
+    schemaVersion = 1
+    renderModeRequested = $RenderMode
+    renderModeEffective = $effectivePipelineMode
+    encoder = $finalEncoder.label
+    cpuBoundStages = @("continuous centered zoom frame generation", "direct-opacity crossfade composition")
+    output = [pscustomobject]@{ path = $outputPath; width = $canvasWidth; height = $canvasHeight; frameRate = $FrameRate; frameCount = $outputFrameCount; timelineDurationSeconds = [Math]::Round($timelineDurationSeconds, 3) }
+    stages = [pscustomobject]@{
+      continuousZoomFrameGeneration = [pscustomobject]@{ elapsedSeconds = [Math]::Round($clipStopwatch.Elapsed.TotalSeconds, 3); telemetry = $clipTelemetry }
+      directCrossfadeComposition = [pscustomobject]@{ elapsedSeconds = [Math]::Round($compositionStopwatch.Elapsed.TotalSeconds, 3); telemetry = $compositionTelemetry }
+      encoderSelection = [pscustomobject]@{ elapsedSeconds = [Math]::Round($encoderSelectionStopwatch.Elapsed.TotalSeconds, 3) }
+      finalH264EncodeAndAudioMux = [pscustomobject]@{ elapsedSeconds = [Math]::Round($encodeStopwatch.Elapsed.TotalSeconds, 3); outputFramesPerSecond = [Math]::Round(($outputFrameCount / [Math]::Max(0.001, $encodeStopwatch.Elapsed.TotalSeconds)), 3); telemetry = $encodeTelemetry }
+    }
+    totalElapsedSeconds = [Math]::Round($renderStopwatch.Elapsed.TotalSeconds, 3)
+  }
+  $profile | ConvertTo-Json -Depth 8 | Set-Content -Path $profilePath -Encoding UTF8
+  Write-Output "PROFILE=$profilePath"
 } finally {
+  if ($clipTelemetryJob) { Stop-Job -Job $clipTelemetryJob -ErrorAction SilentlyContinue; Remove-Job -Job $clipTelemetryJob -Force -ErrorAction SilentlyContinue }
+  if ($compositionTelemetryJob) { Stop-Job -Job $compositionTelemetryJob -ErrorAction SilentlyContinue; Remove-Job -Job $compositionTelemetryJob -Force -ErrorAction SilentlyContinue }
+  if ($encodeTelemetryJob) { Stop-Job -Job $encodeTelemetryJob -ErrorAction SilentlyContinue; Remove-Job -Job $encodeTelemetryJob -Force -ErrorAction SilentlyContinue }
   $jpegParameters.Dispose()
   if (Test-Path $clipRoot) { Remove-Item -Recurse -Force $clipRoot }
   if (Test-Path $frameDirectory) { Remove-Item -Recurse -Force $frameDirectory }
