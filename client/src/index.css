@@ -16,4 +16,4 @@ button:not(:disabled):active { transform: scale(0.97); }
 @media (prefers-reduced-motion: no-preference) { .vs-preview-active { transform-origin: center center; animation: vs-preview-zoom var(--preview-zoom-duration, 5s) linear both; } .vs-preview-transition { transform-origin: center center; animation: vs-preview-crossfade 560ms linear both, vs-preview-zoom var(--preview-zoom-duration, 5s) linear both; } .vs-preview-previous { animation: vs-preview-fadeout 560ms linear both; } }
 @keyframes vs-preview-crossfade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes vs-preview-fadeout { from { opacity: 1; } to { opacity: 0; } }
-@keyframes vs-preview-zoom { from { transform: scale(1); } to { transform: scale(var(--preview-zoom, 1.07)); } }
+@keyframes vs-preview-zoom { from { transform: scale(var(--preview-zoom-start, 1)); } to { transform: scale(var(--preview-zoom-end, 1.05)); } }

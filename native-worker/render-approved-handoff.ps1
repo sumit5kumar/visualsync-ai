@@ -2,7 +2,8 @@ param(
   [Parameter(Mandatory = $true)][string]$HandoffPath,
   [Parameter(Mandatory = $true)][string]$SourceDirectory,
   [Parameter(Mandatory = $true)][string]$OutputDirectory,
-  [string]$FFmpegPath = "ffmpeg"
+  [string]$FFmpegPath = "ffmpeg",
+  [ValidateSet(30, 60)][int]$FrameRate = 30
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,64 +11,213 @@ $ErrorActionPreference = "Stop"
 if (!(Test-Path $HandoffPath)) { throw "Approved render handoff not found: $HandoffPath" }
 if (!(Test-Path $SourceDirectory)) { throw "Source directory not found: $SourceDirectory" }
 if (!(Test-Path $OutputDirectory)) { throw "Output directory not found: $OutputDirectory" }
+if (!(Test-Path $FFmpegPath)) { throw "FFmpeg executable not found: $FFmpegPath" }
+
+Add-Type -AssemblyName System.Drawing
 
 $handoff = Get-Content -Raw $HandoffPath | ConvertFrom-Json
 if (!$handoff.approval.approvedAtMs -or !$handoff.approval.approvedByUserId) { throw "Rendering is blocked because the timeline handoff is not approved." }
 if ($handoff.output.width -ne 1920 -or $handoff.output.height -ne 1080 -or $handoff.output.container -ne "mp4" -or !$handoff.output.filename) { throw "The worker accepts only the approved project-specific 1920x1080 MP4 contract." }
+
+$canvasWidth = 1920
+$canvasHeight = 1080
+$oversizedWidth = 2112
+$oversizedHeight = 1188
+$transitionSeconds = 0.5
+$zoomEnabled = $true
+$zoomAmountPercent = 5.0
+$zoomDirection = "AUTO"
+
+if ($handoff.PSObject.Properties.Name -contains "zoom") {
+  $zoomSettings = $handoff.zoom
+  if ($zoomSettings.PSObject.Properties.Name -contains "enabled") { $zoomEnabled = [bool]$zoomSettings.enabled }
+  if ($zoomSettings.PSObject.Properties.Name -contains "amountPercent") { $zoomAmountPercent = [double]$zoomSettings.amountPercent }
+  if ($zoomSettings.PSObject.Properties.Name -contains "direction") { $zoomDirection = ([string]$zoomSettings.direction).ToUpperInvariant() }
+}
+if ($zoomAmountPercent -notin @(3.0, 5.0, 8.0)) { $zoomAmountPercent = 5.0 }
+if ($zoomDirection -notin @("IN", "OUT", "AUTO")) { $zoomDirection = "AUTO" }
 
 $assetNames = @{}
 foreach ($image in $handoff.images) { $assetNames[[string]$image.assetId] = $image.filename }
 $narrationPath = Join-Path $SourceDirectory $handoff.narration.filename
 if (!(Test-Path $narrationPath)) { throw "Narration file missing from source directory: $narrationPath" }
 
-$inputs = @()
-$filterParts = @()
-$segmentDurations = @()
-$index = 0
-$transitionSeconds = 0.5
-foreach ($segment in $handoff.timeline) {
-  $filename = $assetNames[[string]$segment.imageAssetId]
-  if (!$filename) { throw "Timeline image asset $($segment.imageAssetId) is absent from the approved handoff." }
+function Format-Number([double]$value) {
+  return $value.ToString("0.0000000000", [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Get-ZoomPlan([int]$segmentIndex) {
+  if (!$zoomEnabled) {
+    return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0; direction = "OFF" }
+  }
+
+  $amount = $zoomAmountPercent / 100.0
+  $direction = $zoomDirection
+  if ($direction -eq "AUTO") { $direction = if (($segmentIndex % 2) -eq 0) { "IN" } else { "OUT" } }
+  if ($direction -eq "OUT") {
+    return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0; direction = "OUT" }
+  }
+  return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; direction = "IN" }
+}
+
+function New-SubpixelCenteredZoomFilter([double]$startZoom, [double]$endZoom, [int]$frameCount) {
+  $denominator = [Math]::Max(1, $frameCount - 1)
+  $start = Format-Number $startZoom
+  $delta = Format-Number ($endZoom - $startZoom)
+  $zoom = "($start+($delta*N/$denominator))"
+  $centerX = Format-Number ($oversizedWidth / 2.0)
+  $centerY = Format-Number ($oversizedHeight / 2.0)
+  $sourceX = "$centerX+(X-$centerX)/$zoom"
+  $sourceY = "$centerY+(Y-$centerY)/$zoom"
+  $normalize = "scale=$oversizedWidth`:$oversizedHeight`:force_original_aspect_ratio=increase:flags=lanczos,crop=$oversizedWidth`:$oversizedHeight,setsar=1,format=yuv444p"
+
+  # This is one continuous source-to-canvas transform. GEQ samples fractional source coordinates with bilinear interpolation;
+  # it does not animate crop dimensions or rounded crop positions.
+  return "$normalize,geq=lum='lum($sourceX,$sourceY)':cb='cb($sourceX,$sourceY)':cr='cr($sourceX,$sourceY)':interpolation=bilinear,scale=$canvasWidth`:$canvasHeight`:flags=lanczos:in_range=pc:out_range=tv,setsar=1,format=yuv420p"
+}
+
+function Open-ClipFrame([object]$segment, [int]$frameIndex) {
+  $safeIndex = [Math]::Min([Math]::Max(0, $frameIndex), [int]$segment.frameCount - 1)
+  $framePath = Join-Path $segment.frameDirectory ("frame_{0:D6}.jpg" -f $safeIndex)
+  if (!(Test-Path $framePath)) { throw "Rendered zoom frame missing: $framePath" }
+  return [System.Drawing.Image]::FromFile($framePath)
+}
+
+function Get-ClipFrameIndex([object]$segment, [double]$localSeconds) {
+  $rawFrame = [Math]::Floor(([Math]::Max(0.0, $localSeconds) * $FrameRate) + 0.000001)
+  return [int][Math]::Min($rawFrame, [int]$segment.frameCount - 1)
+}
+
+function Draw-AlphaLayer([System.Drawing.Graphics]$graphics, [System.Drawing.Image]$layer, [double]$opacity) {
+  $destination = New-Object System.Drawing.Rectangle(0, 0, $canvasWidth, $canvasHeight)
+  $attributes = New-Object System.Drawing.Imaging.ImageAttributes
+  $matrix = New-Object System.Drawing.Imaging.ColorMatrix
+  $matrix.Matrix33 = [single]$opacity
+  $attributes.SetColorMatrix($matrix)
+  $graphics.DrawImage($layer, $destination, 0, 0, $canvasWidth, $canvasHeight, [System.Drawing.GraphicsUnit]::Pixel, $attributes)
+  $attributes.Dispose()
+}
+
+$segments = @()
+$clipRoot = Join-Path $OutputDirectory (".visualsync-subpixel-clips-" + [Guid]::NewGuid().ToString("N"))
+$frameDirectory = Join-Path $OutputDirectory (".visualsync-crossfade-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $clipRoot -Force | Out-Null
+New-Item -ItemType Directory -Path $frameDirectory -Force | Out-Null
+
+foreach ($segmentIndex in 0..($handoff.timeline.Count - 1)) {
+  $timelineSegment = $handoff.timeline[$segmentIndex]
+  $filename = $assetNames[[string]$timelineSegment.imageAssetId]
+  if (!$filename) { throw "Timeline image asset $($timelineSegment.imageAssetId) is absent from the approved handoff." }
   $imagePath = Join-Path $SourceDirectory $filename
   if (!(Test-Path $imagePath)) { throw "Timeline image missing from source directory: $imagePath" }
-  $durationSeconds = ([double]$segment.endMs - [double]$segment.startMs) / 1000
+  $startSeconds = ([double]$timelineSegment.startMs) / 1000
+  $endSeconds = ([double]$timelineSegment.endMs) / 1000
+  $durationSeconds = $endSeconds - $startSeconds
   if ($durationSeconds -le 0) { throw "Timeline contains a non-positive duration for image: $filename" }
-  $isLast = $index -eq ($handoff.timeline.Count - 1)
-  $inputSeconds = $durationSeconds + $(if ($isLast) { 0 } else { $transitionSeconds })
-  $frameCount = [Math]::Max(1, [Math]::Ceiling($inputSeconds * 30))
-  $zoomTarget = [Math]::Min(1.08, 1.035 + ($durationSeconds * 0.006))
-  $zoomIncrement = ($zoomTarget - 1.0) / $frameCount
-  $inputs += @("-loop", "1", "-framerate", "30", "-t", $inputSeconds.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-i", $imagePath)
-  $filterParts += "[$index`:v]scale=4224:2376:force_original_aspect_ratio=increase,crop=4224:2376,zoompan=z='min(zoom+$($zoomIncrement.ToString([System.Globalization.CultureInfo]::InvariantCulture))\,$($zoomTarget.ToString([System.Globalization.CultureInfo]::InvariantCulture)))':x='floor(iw/2-iw/(2*zoom))':y='floor(ih/2-ih/(2*zoom))':d=$frameCount`:s=3840x2160:fps=30,scale=1920:1080:flags=lanczos+accurate_rnd+full_chroma_int,setsar=1,format=yuv420p[v$index]"
-  $segmentDurations += $durationSeconds
-  $index++
-}
-
-$filterChain = ""
-if ($index -eq 1) { $filterChain = "[v0]null[vout]" }
-else {
-  $cumulativeDuration = $segmentDurations[0]
-  $filterChain = "[v0][v1]xfade=transition=fade:duration=$transitionSeconds`:offset=$($cumulativeDuration.ToString([System.Globalization.CultureInfo]::InvariantCulture))[xf1]"
-  for ($transitionIndex = 2; $transitionIndex -lt $index; $transitionIndex++) {
-    $cumulativeDuration += $segmentDurations[$transitionIndex - 1]
-    $outputLabel = if ($transitionIndex -eq $index - 1) { "vout" } else { "xf$transitionIndex" }
-    $filterChain += ";[xf$($transitionIndex - 1)][v$transitionIndex]xfade=transition=fade:duration=$transitionSeconds`:offset=$($cumulativeDuration.ToString([System.Globalization.CultureInfo]::InvariantCulture))[$outputLabel]"
+  $frameCount = [Math]::Max(1, [int][Math]::Ceiling($durationSeconds * $FrameRate))
+  $plan = Get-ZoomPlan $segmentIndex
+  $segments += [pscustomobject]@{
+    filename = $filename
+    imagePath = $imagePath
+    startSeconds = $startSeconds
+    endSeconds = $endSeconds
+    durationSeconds = $durationSeconds
+    frameCount = $frameCount
+    frameDirectory = (Join-Path $clipRoot ("clip_{0:D4}" -f $segmentIndex))
+    zoomStart = $plan.startZoom
+    zoomEnd = $plan.endZoom
+    zoomDirection = $plan.direction
   }
-  if ($index -eq 2) { $filterChain = $filterChain -replace "\[xf1\]$", "[vout]" }
 }
-$timelineDurationSeconds = ([double]$handoff.timeline[-1].endMs) / 1000
-$timelineDuration = $timelineDurationSeconds.ToString([System.Globalization.CultureInfo]::InvariantCulture)
-$filterComplex = ($filterParts -join ";") + ";" + $filterChain + ";[vout]trim=duration=$timelineDuration,setpts=PTS-STARTPTS[vfinal]"
-$outputPath = Join-Path $OutputDirectory $handoff.output.filename
-$audioInputIndex = $index
-$arguments = @("-sws_flags", "lanczos+accurate_rnd+full_chroma_int") + @($inputs) + @("-i", $narrationPath, "-filter_complex", $filterComplex, "-map", "[vfinal]", "-map", "$audioInputIndex`:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-r", "30", "-fps_mode", "cfr", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath)
 
-$previousErrorActionPreference = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-& $FFmpegPath @arguments
-$ffmpegExitCode = $LASTEXITCODE
-$ErrorActionPreference = $previousErrorActionPreference
-if ($ffmpegExitCode -ne 0) { throw "FFmpeg exited with code $ffmpegExitCode" }
-if (!(Test-Path $outputPath)) { throw "FFmpeg completed without writing the expected MP4." }
+$jpegEncoder = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq "image/jpeg" }
+$jpegParameters = New-Object System.Drawing.Imaging.EncoderParameters(1)
+$jpegParameters.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, 95L)
+
+try {
+  $clipPosition = 0
+  foreach ($segment in $segments) {
+    New-Item -ItemType Directory -Path $segment.frameDirectory -Force | Out-Null
+    $filter = New-SubpixelCenteredZoomFilter $segment.zoomStart $segment.zoomEnd $segment.frameCount
+    $clipArguments = @(
+      "-hide_banner", "-loglevel", "warning",
+      "-loop", "1", "-framerate", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-i", $segment.imagePath,
+      "-vf", $filter,
+      "-frames:v", $segment.frameCount.ToString(),
+      "-c:v", "mjpeg", "-q:v", "2", "-pix_fmt", "yuvj444p",
+      "-start_number", "0", "-y", (Join-Path $segment.frameDirectory "frame_%06d.jpg")
+    )
+    Write-Progress -Activity "Rendering continuous centered zoom clips" -Status "$($segment.filename) ($($segment.zoomDirection), $($zoomAmountPercent)%)" -PercentComplete (($clipPosition / [double]$segments.Count) * 45)
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $FFmpegPath @clipArguments
+    $clipExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorActionPreference
+    if ($clipExitCode -ne 0) { throw "FFmpeg failed while building the continuous zoom clip for $($segment.filename) with exit code $clipExitCode" }
+    if (!(Test-Path (Join-Path $segment.frameDirectory "frame_000000.jpg"))) { throw "FFmpeg did not write the expected continuous zoom frames for $($segment.filename)." }
+    $clipPosition++
+  }
+
+  $timelineDurationSeconds = ([double]$handoff.timeline[-1].endMs) / 1000
+  $outputFrameCount = [Math]::Ceiling($timelineDurationSeconds * $FrameRate)
+  $segmentIndex = 0
+  for ($outputFrameIndex = 0; $outputFrameIndex -lt $outputFrameCount; $outputFrameIndex++) {
+    $timeSeconds = $outputFrameIndex / [double]$FrameRate
+    while ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge [double]$segments[$segmentIndex].endSeconds) { $segmentIndex++ }
+    $current = $segments[$segmentIndex]
+    $currentLocalSeconds = $timeSeconds - [double]$current.startSeconds
+    $frame = New-Object System.Drawing.Bitmap($canvasWidth, $canvasHeight, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    $graphics = [System.Drawing.Graphics]::FromImage($frame)
+    $graphics.Clear([System.Drawing.Color]::Black)
+    $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+    $fadeStart = [double]$current.endSeconds - $transitionSeconds
+    try {
+      if ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge $fadeStart) {
+        $fadeProgress = [Math]::Min(1.0, [Math]::Max(0.0, ($timeSeconds - $fadeStart) / $transitionSeconds))
+        $currentLayer = Open-ClipFrame $current (Get-ClipFrameIndex $current $currentLocalSeconds)
+        $next = $segments[$segmentIndex + 1]
+        $nextLayer = Open-ClipFrame $next 0
+        try {
+          Draw-AlphaLayer $graphics $currentLayer (1.0 - $fadeProgress)
+          Draw-AlphaLayer $graphics $nextLayer $fadeProgress
+        } finally {
+          $currentLayer.Dispose()
+          $nextLayer.Dispose()
+        }
+      } else {
+        $currentLayer = Open-ClipFrame $current (Get-ClipFrameIndex $current $currentLocalSeconds)
+        try { Draw-AlphaLayer $graphics $currentLayer 1.0 } finally { $currentLayer.Dispose() }
+      }
+      $frame.Save((Join-Path $frameDirectory ("frame_{0:D6}.jpg" -f $outputFrameIndex)), $jpegEncoder, $jpegParameters)
+    } finally {
+      $graphics.Dispose()
+      $frame.Dispose()
+    }
+    if (($outputFrameIndex % $FrameRate) -eq 0) { Write-Progress -Activity "Applying existing direct crossfade" -Status "Frame $outputFrameIndex of $outputFrameCount" -PercentComplete (45 + (($outputFrameIndex / [double]$outputFrameCount) * 45)) }
+  }
+
+  $outputPath = Join-Path $OutputDirectory $handoff.output.filename
+  $encodeArguments = @(
+    "-hide_banner", "-loglevel", "warning",
+    "-framerate", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-start_number", "0", "-i", (Join-Path $frameDirectory "frame_%06d.jpg"),
+    "-i", $narrationPath,
+    "-c:v", "libx264", "-preset", "medium", "-crf", "14",
+    "-g", "1", "-keyint_min", "1", "-sc_threshold", "0", "-bf", "0",
+    "-x264-params", "keyint=1:min-keyint=1:scenecut=0:bframes=0:ref=1",
+    "-pix_fmt", "yuv420p", "-r", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-fps_mode", "cfr",
+    "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath
+  )
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  & $FFmpegPath @encodeArguments
+  $encodeExitCode = $LASTEXITCODE
+  $ErrorActionPreference = $previousErrorActionPreference
+  if ($encodeExitCode -ne 0) { throw "FFmpeg exited with code $encodeExitCode" }
+  if (!(Test-Path $outputPath)) { throw "FFmpeg completed without writing the expected MP4." }
+} finally {
+  $jpegParameters.Dispose()
+  if (Test-Path $clipRoot) { Remove-Item -Recurse -Force $clipRoot }
+  if (Test-Path $frameDirectory) { Remove-Item -Recurse -Force $frameDirectory }
+}
 
 Write-Output "RENDERED=$outputPath"

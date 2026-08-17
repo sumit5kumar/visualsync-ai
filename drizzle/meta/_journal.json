@@ -50,6 +50,20 @@
       "when": 1786790351005,
       "tag": "0006_lovely_gideon",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1786957178751,
+      "tag": "0007_complex_silver_fox",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1786957354891,
+      "tag": "0008_add_project_zoom_enabled",
+      "breakpoints": true
     }
   ]
 }

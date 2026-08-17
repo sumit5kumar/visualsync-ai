@@ -1,0 +1,27 @@
+Filter perspective
+  Correct the perspective of video.
+    slice threading supported
+    Inputs:
+       #0: default (video)
+    Outputs:
+       #0: default (video)
+perspective AVOptions:
+   x0                <string>     ..FV....... set top left x coordinate (default "0")
+   y0                <string>     ..FV....... set top left y coordinate (default "0")
+   x1                <string>     ..FV....... set top right x coordinate (default "W")
+   y1                <string>     ..FV....... set top right y coordinate (default "0")
+   x2                <string>     ..FV....... set bottom left x coordinate (default "0")
+   y2                <string>     ..FV....... set bottom left y coordinate (default "H")
+   x3                <string>     ..FV....... set bottom right x coordinate (default "W")
+   y3                <string>     ..FV....... set bottom right y coordinate (default "H")
+   interpolation     <int>        ..FV....... set interpolation (from 0 to 1) (default linear)
+     linear          0            ..FV....... 
+     cubic           1            ..FV....... 
+   sense             <int>        ..FV....... specify the sense of the coordinates (from 0 to 1) (default source)
+     source          0            ..FV....... specify locations in source to send to corners in destination
+     destination     1            ..FV....... specify locations in destination to send corners of source
+   eval              <int>        ..FV....... specify when to evaluate expressions (from 0 to 1) (default init)
+     init            0            ..FV....... eval expressions once during initialization
+     frame           1            ..FV....... eval expressions per-frame
+
+This filter has support for timeline through the 'enable' option.

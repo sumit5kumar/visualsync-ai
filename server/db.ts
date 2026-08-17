@@ -95,6 +95,14 @@ export async function updateProjectSetup(userId: number, projectId: number, inpu
   return { success: true } as const;
 }
 
+export async function updateProjectZoomSettings(userId: number, projectId: number, input: { enabled: boolean; amountPercent: 3 | 5 | 8; direction: "IN" | "OUT" | "AUTO" }) {
+  const db = await requireDb();
+  const project = await getUserProject(userId, projectId);
+  if (!project) throw new Error("Project not found.");
+  await db.update(projects).set({ zoomEnabled: input.enabled, zoomAmountPercent: input.amountPercent, zoomDirection: input.direction }).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
+  return { success: true } as const;
+}
+
 export async function prepareProjectMediaImport(userId: number, projectId: number) {
   const db = await requireDb();
   const project = await getUserProject(userId, projectId);
@@ -293,7 +301,7 @@ export async function getApprovedRenderHandoff(userId: number, projectId: number
   if (!narration || review.segments.some(segment => !segment.imageAssetId)) throw new Error("Render handoff is missing required media assets.");
   const asWorkerAsset = (asset: typeof assets[number]) => ({ assetId: asset.id, filename: asset.originalFilename, storageKey: asset.storageKey, mimeType: asset.mimeType ?? "application/octet-stream", sequenceNumber: asset.sequenceNumber, contentHash: asset.contentHash, perceptualHash: asset.perceptualHash });
   const safeProjectName = review.project.name.replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || `project_${projectId}`;
-  return { projectId, projectName: review.project.name, approval: { approvedByUserId: review.approval.approvedByUserId, approvedAtMs: review.approval.approvedAt.getTime() }, nativePaths: { sourceDirectory: review.project.imageSourcePath, outputDirectory: review.project.outputPath }, output: { width: 1920 as const, height: 1080 as const, aspectRatio: "16:9" as const, container: "mp4" as const, filename: `${safeProjectName}_approved_1920x1080.mp4` }, narration: asWorkerAsset(narration), images: assets.filter(asset => asset.assetType === "image").map(asWorkerAsset), timeline: review.segments.map(segment => ({ imageAssetId: segment.imageAssetId!, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText })) };
+  return { projectId, projectName: review.project.name, approval: { approvedByUserId: review.approval.approvedByUserId, approvedAtMs: review.approval.approvedAt.getTime() }, nativePaths: { sourceDirectory: review.project.imageSourcePath, outputDirectory: review.project.outputPath }, output: { width: 1920 as const, height: 1080 as const, aspectRatio: "16:9" as const, container: "mp4" as const, filename: `${safeProjectName}_approved_1920x1080.mp4` }, zoom: { enabled: review.project.zoomEnabled, amountPercent: review.project.zoomAmountPercent as 3 | 5 | 8, direction: review.project.zoomDirection }, narration: asWorkerAsset(narration), images: assets.filter(asset => asset.assetType === "image").map(asWorkerAsset), timeline: review.segments.map(segment => ({ imageAssetId: segment.imageAssetId!, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText })) };
 }
 
 export async function deleteProjectRecord(userId: number, projectId: number) {
