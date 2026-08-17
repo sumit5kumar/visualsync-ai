@@ -173,3 +173,6 @@
 - [x] Add a persisted direct-crossfade duration control with a 0.8-second default that remains centered on approved narration boundaries.
 - [x] Update project zoom defaults to 8% Zoom In and add a validated 12% zoom option in the native handoff, worker, and Preview controls.
 - [x] Validate the new motion defaults and controls without shifting visual changes early relative to narration or altering image matching and timeline selection.
+- [x] Diagnose and repair the Preview page state that remains stuck on loading instead of rendering the selected project workspace.
+- [x] Add an approximate render-time indicator based on the approved real timeline, image count, video duration, and active motion settings.
+- [x] Assess and document the practical processing and local rendering limits for a 40-minute narration with 500 supplied images, including the required scaling safeguards.

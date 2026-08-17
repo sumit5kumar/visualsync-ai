@@ -4,6 +4,7 @@ import { AuthPrompt } from "@/components/AuthPrompt";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { buildNativeRenderCommand } from "@/lib/nativeRenderCommand";
+import { estimateNativeRender, formatRenderDuration } from "@/lib/renderEstimate";
 import { Clapperboard, Clipboard, Download, History, Pause, Play, Upload } from "lucide-react";
 import { toast } from "sonner";
 
@@ -110,6 +111,7 @@ export default function Preview() {
         </aside>
       </section>
       <ZoomControls zoom={selectedZoom} saving={updateZoom.isPending} onChange={saveZoom} />
+      <RenderEstimate durationMs={project.audioDurationMs ?? review.data?.segments.at(-1)?.endMs ?? 0} imageCount={review.data?.segments.length ?? 0} zoom={selectedZoom} />
       <section className="rounded-[1.5rem] border border-white/[.07] bg-[#101827] p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[.14em] text-cyan-200">Native render</p><h2 className="mt-2 font-semibold text-white">Three clear steps</h2><p className="mt-1 text-sm leading-6 text-slate-500">The command uses your saved folders and applies the approved timeline, centered zoom, and narration automatically.</p></div><Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(command).then(() => toast.success("Command copied."))} className="border-white/10 text-slate-200"><Clipboard className="mr-2 h-3.5 w-3.5" />Copy command</Button></div>
         <div className="mt-5 grid gap-3 md:grid-cols-3"><WorkflowStep number="1" title="Download worker" text="Use the current approved worker only." /><WorkflowStep number="2" title="Download handoff" text="Keep its project-specific file name." /><WorkflowStep number="3" title="Paste and render" text="Run the copied command in the saved output folder." /></div>
@@ -137,6 +139,12 @@ function ZoomControls({ zoom, saving, onChange }: { zoom: ZoomSettings; saving: 
       <div className="rounded-lg border border-white/[.07] bg-black/20 px-3 py-2.5 text-xs leading-5 text-slate-400">{zoom.enabled ? <><span className="font-medium text-slate-200">Saved:</span> {zoom.amountPercent}% · {zoom.direction} · {(zoom.crossfadeDurationMs / 1000).toFixed(1)}s fade</> : <><span className="font-medium text-slate-200">Saved:</span> static frames · {(zoom.crossfadeDurationMs / 1000).toFixed(1)}s fade</>}</div>
     </div>
   </section>;
+}
+
+function RenderEstimate({ durationMs, imageCount, zoom }: { durationMs: number; imageCount: number; zoom: ZoomSettings }) {
+  const estimate = estimateNativeRender({ durationMs, imageCount, zoomEnabled: zoom.enabled, crossfadeDurationMs: zoom.crossfadeDurationMs });
+  if (!estimate) return null;
+  return <section className="rounded-[1.5rem] border border-amber-200/[.12] bg-[radial-gradient(circle_at_100%_0%,rgba(251,191,36,.08),transparent_38%),#101827] p-6"><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[.14em] text-amber-200">Approximate local render time</p><h2 className="mt-2 text-xl font-semibold text-white">{formatRenderDuration(estimate.lowerSeconds)}–{formatRenderDuration(estimate.upperSeconds)}</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Based on this approved timeline: {imageCount} images, {formatRenderDuration(durationMs / 1000)} of narration, {estimate.outputFrames.toLocaleString()} output frames, {zoom.enabled ? `${zoom.amountPercent}% ${zoom.direction} zoom` : "static frames"}, and a {(zoom.crossfadeDurationMs / 1000).toFixed(1)}s direct crossfade.</p></div><div className="rounded-xl border border-white/[.07] bg-black/20 px-4 py-3 text-xs leading-5 text-slate-400"><span className="font-semibold text-slate-200">Why it varies:</span> native CPU speed, source-image resolution, and smooth per-frame zoom preparation affect the final time.</div></div></section>;
 }
 
 function TimelinePlayer({ narrationUrl, segments, zoom }: { narrationUrl: string | null; segments: Array<{ startMs: number; endMs: number; thumbnailUrl: string | null; imageFilename: string | null }>; zoom: ZoomSettings }) {
