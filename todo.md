@@ -192,3 +192,4 @@
 - [x] Complete the full Finance CPU baseline, preserve its valid 1920×1080/30 FPS/audio-synchronized MP4 and JSON profile, and document that a duplicate full NVENC render was intentionally stopped after the user requested an expedited conclusion.
 - [x] Prioritize the active CPU baseline and stop the duplicate NVENC run before any further GPU-filter experimentation, because the measured CPU preparation stages are identical between the two modes.
 - [x] Stop the duplicate long NVENC benchmark after the full CPU profile completes, then report the measured CPU bottleneck together with the verified NVENC final-encode evidence.
+- [x] Analyze only the CPU-bound GEQ continuous center-zoom stage, document compatible CPU/CUDA alternatives and trade-offs, and wait for user approval before modifying the accepted renderer.
