@@ -162,3 +162,4 @@
 - [x] Preserve the matching, variable-duration timeline, narration synchronization, and working direct-opacity crossfade path while integrating only a user-accepted continuous zoom renderer.
 - [x] Add project-level zoom controls for OFF/ON, 3%/5%/8%, and deterministic IN/OUT/AUTO direction after the isolated renderer is accepted.
 - [x] Complete final Zoom OFF and Zoom ON playback acceptance on the integrated Finance render with unchanged narration and direct crossfade behavior.
+- [x] Diagnose and fix the Preview page tRPC query that receives an unexpected non-JSON API gateway response, then add regression coverage for the repaired request flow.
