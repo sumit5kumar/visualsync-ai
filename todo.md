@@ -163,3 +163,4 @@
 - [x] Add project-level zoom controls for OFF/ON, 3%/5%/8%, and deterministic IN/OUT/AUTO direction after the isolated renderer is accepted.
 - [x] Complete final Zoom OFF and Zoom ON playback acceptance on the integrated Finance render with unchanged narration and direct crossfade behavior.
 - [x] Diagnose and fix the Preview page tRPC query that receives an unexpected non-JSON API gateway response, then add regression coverage for the repaired request flow.
+- [x] Update the generated Windows native-render command to bypass execution policy only for its local worker process, then verify the command remains project-aware and test-covered.

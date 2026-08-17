@@ -15,7 +15,8 @@ export function buildNativeRenderCommand(projectName: string, savedSourcePath?: 
 $sourceDirectory = ${sourceSeed}
 $outputDirectory = ${outputSeed}
 $handoffPath = Join-Path $outputDirectory ${quotePowerShell(handoffName)}
-& ".\\render-approved-handoff.ps1" -HandoffPath $handoffPath -SourceDirectory $sourceDirectory -OutputDirectory $outputDirectory -FFmpegPath "D:\\ffmpeg-8.1-essentials_build\\ffmpeg-8.1-essentials_build\\bin\\ffmpeg.exe"`;
+# Launches only this downloaded worker with a temporary policy bypass; it does not change your system policy.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\\render-approved-handoff.ps1" -HandoffPath $handoffPath -SourceDirectory $sourceDirectory -OutputDirectory $outputDirectory -FFmpegPath "D:\\ffmpeg-8.1-essentials_build\\ffmpeg-8.1-essentials_build\\bin\\ffmpeg.exe"`;
   return `# VisualSync approved render: ${projectName}
 	Add-Type -AssemblyName System.Windows.Forms
 $handoff = New-Object System.Windows.Forms.OpenFileDialog
@@ -25,8 +26,9 @@ $source = New-Object System.Windows.Forms.FolderBrowserDialog
 $source.Description = "Choose the folder containing the original narration and images"
 if ($source.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
 $output = New-Object System.Windows.Forms.FolderBrowserDialog
-$output.Description = "Choose the folder where the project MP4 will be saved"
-	$output.SelectedPath = (Join-Path $env:USERPROFILE 'Downloads')
+	$output.Description = "Choose the folder where the project MP4 will be saved"
+		$output.SelectedPath = (Join-Path $env:USERPROFILE 'Downloads')
 if ($output.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
-& ".\\render-approved-handoff.ps1" -HandoffPath $handoff.FileName -SourceDirectory $source.SelectedPath -OutputDirectory $output.SelectedPath -FFmpegPath "D:\\ffmpeg-8.1-essentials_build\\ffmpeg-8.1-essentials_build\\bin\\ffmpeg.exe"`;
+# Launches only this downloaded worker with a temporary policy bypass; it does not change your system policy.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\\render-approved-handoff.ps1" -HandoffPath $handoff.FileName -SourceDirectory $source.SelectedPath -OutputDirectory $output.SelectedPath -FFmpegPath "D:\\ffmpeg-8.1-essentials_build\\ffmpeg-8.1-essentials_build\\bin\\ffmpeg.exe"`;
 }

@@ -6,6 +6,8 @@ describe("project-aware native render command", () => {
     const command = buildNativeRenderCommand("Finance project", "C:\\Users\\sumit\\Downloads\\Finance", "Native output folder selected: Finance Exports");
     expect(command).toContain("$handoffPath = Join-Path $outputDirectory 'Finance_project-approved-render-handoff.json'");
     expect(command).toContain("Downloads\\Finance Exports");
+    expect(command).toContain("powershell.exe -NoProfile -ExecutionPolicy Bypass -File \".\\render-approved-handoff.ps1\"");
+    expect(command).not.toContain('& ".\\render-approved-handoff.ps1"');
     expect(command).not.toContain("OpenFileDialog");
   });
 
