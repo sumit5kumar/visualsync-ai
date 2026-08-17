@@ -177,3 +177,5 @@
 - [x] Add an approximate render-time indicator based on the approved real timeline, image count, video duration, and active motion settings.
 - [x] Assess and document the practical processing and local rendering limits for a 40-minute narration with 500 supplied images, including the required scaling safeguards.
 - [x] Diagnose and fix the Projects-page mutation that aborts with the message “signal is aborted without reason,” then add regression coverage for the repaired action.
+- [x] Detect supported Windows GPU encoders in the native worker, prefer a compatible GPU encoder when available, and retain the validated CPU encode path as an automatic fallback.
+- [x] Verify the GPU-preferred render output preserves the approved 1920×1080, 30 FPS, audio-synchronized, continuous-zoom, direct-crossfade contract.

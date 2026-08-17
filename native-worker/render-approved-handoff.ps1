@@ -84,6 +84,40 @@ function New-SubpixelCenteredZoomFilter([double]$startZoom, [double]$endZoom, [i
   return "$normalize,geq=lum='lum($sourceX,$sourceY)':cb='cb($sourceX,$sourceY)':cr='cr($sourceX,$sourceY)':interpolation=bilinear,scale=$canvasWidth`:$canvasHeight`:flags=lanczos:in_range=pc:out_range=tv,setsar=1,format=yuv420p"
 }
 
+function Test-FinalEncoder([string[]]$encoderArguments) {
+  $probePath = Join-Path $OutputDirectory (".visualsync-encoder-probe-" + [Guid]::NewGuid().ToString("N") + ".mp4")
+  try {
+    $probeArguments = @(
+      "-hide_banner", "-loglevel", "error",
+      "-f", "lavfi", "-i", "color=c=black:s=128x128:r=30:d=0.1", "-frames:v", "1"
+    ) + $encoderArguments + @("-pix_fmt", "yuv420p", "-y", $probePath)
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $FFmpegPath @probeArguments 2>$null
+    $probeExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorActionPreference
+    return $probeExitCode -eq 0 -and (Test-Path $probePath) -and (Get-Item $probePath).Length -gt 0
+  } finally {
+    if (Test-Path $probePath) { Remove-Item -Force $probePath }
+  }
+}
+
+function Get-FinalVideoEncoder() {
+  # Each hardware encoder is verified through an actual tiny MP4 encode instead of relying on
+  # FFmpeg merely listing a compiled-in encoder. This safely handles missing or outdated drivers.
+  $candidates = @(
+    [pscustomobject]@{ label = "NVIDIA NVENC H.264"; arguments = @("-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc:v", "vbr", "-cq:v", "18", "-b:v", "0") },
+    [pscustomobject]@{ label = "AMD AMF H.264"; arguments = @("-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "18", "-qp_p", "18") },
+    [pscustomobject]@{ label = "Intel Quick Sync H.264"; arguments = @("-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "18") }
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-FinalEncoder $candidate.arguments) {
+      return $candidate
+    }
+  }
+  return [pscustomobject]@{ label = "CPU libx264 fallback"; arguments = @("-c:v", "libx264", "-preset", "fast", "-crf", "16") }
+}
+
 function Open-ClipFrame([object]$segment, [int]$frameIndex) {
   $safeIndex = [Math]::Min([Math]::Max(0, $frameIndex), [int]$segment.frameCount - 1)
   $framePath = Join-Path $segment.frameDirectory ("frame_{0:D6}.jpg" -f $safeIndex)
@@ -211,14 +245,16 @@ try {
   }
 
   $outputPath = Join-Path $OutputDirectory $handoff.output.filename
+  $finalEncoder = Get-FinalVideoEncoder
+  Write-Output "ENCODER=$($finalEncoder.label)"
   $encodeArguments = @(
     "-hide_banner", "-loglevel", "warning",
     "-framerate", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-start_number", "0", "-i", (Join-Path $frameDirectory "frame_%06d.jpg"),
-    "-i", $narrationPath,
-    # The accepted subpixel renderer produces stable source frames, so final H.264 can use normal
-    # inter-frame compression safely. This reduces native render time and file size without altering
-    # the approved timeline, direct-opacity transition, or centered zoom math.
-    "-c:v", "libx264", "-preset", "fast", "-crf", "16",
+    "-i", $narrationPath
+  ) + $finalEncoder.arguments + @(
+    # The accepted subpixel renderer produces stable source frames, so the final H.264 encoder can
+    # use normal inter-frame compression safely. Hardware acceleration affects only this final encode;
+    # the exact subpixel zoom and alpha compositing remain on the established deterministic path.
     "-g", ($FrameRate * 2).ToString(), "-keyint_min", $FrameRate.ToString(), "-sc_threshold", "0", "-bf", "2",
     "-pix_fmt", "yuv420p", "-r", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-fps_mode", "cfr",
     "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath

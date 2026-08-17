@@ -25,7 +25,15 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain('$fadeStart = [double]$current.endSeconds - $transitionHalfSeconds');
     expect(worker).toContain('$fadeEnd = [double]$current.endSeconds + $transitionHalfSeconds');
     expect(worker).toContain('$nextLocalSeconds = [Math]::Max(0.0, $timeSeconds - [double]$next.startSeconds)');
-    expect(worker).toContain('"-preset", "fast", "-crf", "16"');
+    expect(worker).toContain("function Test-FinalEncoder");
+    expect(worker).toContain("function Get-FinalVideoEncoder");
+    expect(worker).toContain('label = "NVIDIA NVENC H.264"');
+    expect(worker).toContain('label = "AMD AMF H.264"');
+    expect(worker).toContain('label = "Intel Quick Sync H.264"');
+    expect(worker).toContain('label = "CPU libx264 fallback"');
+    expect(worker).toContain('"-c:v", "libx264", "-preset", "fast", "-crf", "16"');
+    expect(worker).toContain('$finalEncoder = Get-FinalVideoEncoder');
+    expect(worker).toContain('Write-Output "ENCODER=$($finalEncoder.label)"');
     expect(worker).toContain('"-g", ($FrameRate * 2).ToString(), "-keyint_min", $FrameRate.ToString()');
     expect(worker).not.toContain("zoompan=");
     expect(worker).not.toContain("perspective=");
