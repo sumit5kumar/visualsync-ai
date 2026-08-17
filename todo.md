@@ -176,3 +176,4 @@
 - [x] Diagnose and repair the Preview page state that remains stuck on loading instead of rendering the selected project workspace.
 - [x] Add an approximate render-time indicator based on the approved real timeline, image count, video duration, and active motion settings.
 - [x] Assess and document the practical processing and local rendering limits for a 40-minute narration with 500 supplied images, including the required scaling safeguards.
+- [x] Diagnose and fix the Projects-page mutation that aborts with the message “signal is aborted without reason,” then add regression coverage for the repaired action.

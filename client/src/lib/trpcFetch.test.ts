@@ -32,6 +32,14 @@ describe("fetchTrpcResponse", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("does not attach the short query deadline to a long-running mutation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ result: { data: { json: true } } }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchTrpcResponse("/api/trpc/project.processGlobalTimeline", { method: "POST" });
+    expect(fetchMock.mock.calls[0][1]?.signal).toBeUndefined();
+  });
+
   it("preserves valid JSON error responses for tRPC's normal error parser", async () => {
     const response = new Response(JSON.stringify({ error: { message: "Invalid key" } }), {
       status: 400,

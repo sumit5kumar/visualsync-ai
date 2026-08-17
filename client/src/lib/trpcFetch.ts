@@ -31,13 +31,13 @@ export async function fetchTrpcResponse(input: RequestInfo | URL, init?: Request
   let timedOut = false;
 
   for (let attempt = 0; attempt < (canRetryGatewayFailure ? MAX_QUERY_GATEWAY_ATTEMPTS : 1); attempt++) {
-    const timeoutController = new AbortController();
-    const timeout = globalThis.setTimeout(() => timeoutController.abort(), QUERY_TIMEOUT_MS);
+    const timeoutController = canRetryGatewayFailure ? new AbortController() : null;
+    const timeout = timeoutController ? globalThis.setTimeout(() => timeoutController.abort(), QUERY_TIMEOUT_MS) : null;
     try {
       const response = await globalThis.fetch(input, {
         ...(init ?? {}),
         credentials: "include",
-        signal: withDeadline(init?.signal, timeoutController),
+        signal: timeoutController ? withDeadline(init?.signal, timeoutController) : init?.signal,
       });
       const contentType = response.headers.get("content-type") ?? "";
       const isGatewayHtml = !response.ok && !contentType.includes("application/json");
@@ -53,10 +53,10 @@ export async function fetchTrpcResponse(input: RequestInfo | URL, init?: Request
       }
       lastGatewayResponse = response;
     } catch (error) {
-      if (!(error instanceof DOMException) || error.name !== "AbortError" || !timeoutController.signal.aborted || !canRetryGatewayFailure || attempt === MAX_QUERY_GATEWAY_ATTEMPTS - 1) throw error;
+      if (!(error instanceof DOMException) || error.name !== "AbortError" || !timeoutController?.signal.aborted || !canRetryGatewayFailure || attempt === MAX_QUERY_GATEWAY_ATTEMPTS - 1) throw error;
       timedOut = true;
     } finally {
-      globalThis.clearTimeout(timeout);
+      if (timeout !== null) globalThis.clearTimeout(timeout);
     }
     await wait(GATEWAY_RETRY_DELAY_MS * (attempt + 1));
   }
