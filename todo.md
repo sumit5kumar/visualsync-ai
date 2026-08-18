@@ -225,4 +225,5 @@
 - [x] Use actual Groq rate-limit and retry headers when available, keep invalid/revoked, client-request, timeout, network, server, and quota failures distinct, and avoid false permanent key unavailability.
 - [x] Show truthful narration-chunk progress, recovery, and actionable long-audio status in the Projects workflow without changing unrelated UI or media systems.
 - [x] Add deterministic short, medium, and 30-minute contract coverage for chunk sizing, timestamp continuity, overlap merging, resumability, and failure classification without rendering a video.
-- [ ] Re-run the real 30-minute Test narration audio-only transcription once Groq’s current 500 provider error recovers; resume from the saved first unfinished 10 MB chunk without analyzing images or rendering video.
+- [x] Preserve the real 30-minute Test narration state after Groq’s current HTTP 500 and defer the next audio-only retry until the user explicitly invokes Retry analysis; retain the saved unfinished 10 MB chunk without analyzing images or rendering video.
+- [x] Honor the user-directed stop: make no further Groq, Gemini, timeline, rendering, UI, or other workflow changes after confirming the current state is safely preserved.
