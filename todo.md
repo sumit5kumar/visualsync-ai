@@ -210,3 +210,4 @@
 - [x] Repair the nonfunctional × clear control for selected narration, image-folder, or output-folder values in project upload setup without changing project upload or rendering behavior.
 - [x] Remove horizontal overflow from the project setup dialog by making the upload picker controls responsive while preserving all selection and cancel behavior.
 - [x] Diagnose and repair the Projects-page mutation that surfaces `fetch failed` during project media upload or timeline processing, without changing project or local-render behavior.
+- [x] Add truthful live large-project processing progress, elapsed time, estimated remaining time, narration status, processed-image counts, and timeline-ready status to the Projects workflow.

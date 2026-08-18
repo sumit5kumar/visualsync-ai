@@ -146,6 +146,9 @@ describe("middle-origin motion rendering", () => {
     expect(projects).toContain("overflow-x-hidden overflow-y-auto");
     expect(projects).toContain('className="mt-3 w-full border-white/10');
     expect(projects).toContain("break-words text-xs leading-5");
+    expect(projects).toContain("LiveProcessingStatus");
+    expect(projects).toContain("processTimeline.mutateAsync");
+    expect(projects).toContain("images.completed");
     expect(providers).toContain("groqActivate.mutate");
     expect(providers).toContain("geminiActivate.mutate");
     expect(timeline).toContain("approve.mutate(input)");

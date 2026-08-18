@@ -71,6 +71,13 @@
       "when": 1786987695911,
       "tag": "0009_mature_silverclaw",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1787067020160,
+      "tag": "0010_green_zodiak",
+      "breakpoints": true
     }
   ]
 }

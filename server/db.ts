@@ -4,6 +4,7 @@ import { geminiApiKeys, groqApiKeys, mediaAssets, projects, timelineApprovals, t
 import { ENV } from "./_core/env";
 import { canEditValidatedTimeline, planImageSubstitution } from "./timelineEditing";
 import { validateTimeline } from "./timelineValidation";
+import { buildProjectProcessingProgress } from "./projectProgress";
 
 let database: ReturnType<typeof drizzle> | null = null;
 
@@ -55,6 +56,7 @@ export async function listUserProjects(userId: number) {
     const narrationAnalyzed = narrationAsset?.analysisState === "analyzed";
     const sourcesAttached = Boolean(project.narrationStorageKey && project.audioDurationMs && narrationAsset && imageAssets.length > 0);
     const semanticAnalysisComplete = sourcesAttached && narrationAnalyzed && analyzedImageCount === imageAssets.length;
+    const processingProgress = buildProjectProcessingProgress({ status: project.status, processingStage: project.processingStage, processingStartedAt: project.processingStartedAt, processingStageStartedAt: project.processingStageStartedAt, totalImageCount: imageAssets.length, completedImageCount: analyzedImageCount, narrationAnalyzed, audioDurationMs: project.audioDurationMs });
     return {
       ...project,
       sourceImageCount: imageAssets.length,
@@ -64,7 +66,8 @@ export async function listUserProjects(userId: number) {
       analyzedImageCount,
       narrationAnalyzed,
       semanticAnalysisComplete,
-      analysisBlocker: project.status === "timeline_ready"
+      processingProgress,
+      analysisBlocker: processingProgress ? null : project.status === "timeline_ready"
         ? "A genuine AI-selected timeline is ready and has passed continuous coverage validation."
         : sourcesAttached && project.status === "ready" && project.workerState === "error" && !hasEligibleGroqKey
           ? "The real narration and images are attached, but every active Groq key is currently rate limited or unavailable. Add another verified Groq key, or wait for a cooldown before retrying; no timeline has been created."
@@ -111,7 +114,7 @@ export async function prepareProjectMediaImport(userId: number, projectId: numbe
     await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId));
     await transaction.delete(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.userId, userId)));
     await transaction.insert(timelineApprovals).values({ projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
-    await transaction.update(projects).set({ narrationStorageKey: null, narrationOriginalName: null, audioDurationMs: null, status: "draft", workerState: "unconfigured" }).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
+    await transaction.update(projects).set({ narrationStorageKey: null, narrationOriginalName: null, audioDurationMs: null, status: "draft", workerState: "unconfigured", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null }).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
   });
   return { success: true } as const;
 }
@@ -124,7 +127,7 @@ export async function saveUploadedProjectMedia(input: { userId: number; projectI
     await transaction.insert(mediaAssets).values({ userId: input.userId, projectId: input.projectId, assetType: input.assetType, originalFilename: input.originalFilename, storageKey: input.storageKey, mimeType: input.mimeType, byteSize: input.byteSize, contentHash: input.contentHash, sequenceNumber: input.sequenceNumber, analysisState: "pending" });
     if (input.assetType === "narration") {
       if (!input.audioDurationMs || !Number.isInteger(input.audioDurationMs) || input.audioDurationMs <= 0) throw new Error("The browser could not measure a valid narration duration.");
-      await transaction.update(projects).set({ narrationStorageKey: input.storageKey, narrationOriginalName: input.originalFilename, audioDurationMs: input.audioDurationMs, status: "ready", workerState: "unconfigured" }).where(and(eq(projects.id, input.projectId), eq(projects.userId, input.userId)));
+      await transaction.update(projects).set({ narrationStorageKey: input.storageKey, narrationOriginalName: input.originalFilename, audioDurationMs: input.audioDurationMs, status: "ready", workerState: "unconfigured", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null }).where(and(eq(projects.id, input.projectId), eq(projects.userId, input.userId)));
     } else {
       await transaction.update(projects).set({ status: "ready", workerState: "unconfigured" }).where(and(eq(projects.id, input.projectId), eq(projects.userId, input.userId)));
     }

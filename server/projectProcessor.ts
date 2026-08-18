@@ -35,7 +35,8 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
   const narration = assets.find(asset => asset.assetType === "narration");
   const images = assets.filter(asset => asset.assetType === "image").sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0));
   if (!narration || !images.length) throw new Error("Select and upload one narration and at least one image before processing.");
-  await db.update(projects).set({ status: "analyzing", workerState: "processing" }).where(eq(projects.id, projectId));
+  const processingStartedAt = new Date();
+  await db.update(projects).set({ status: "analyzing", workerState: "processing", processingStage: "transcribing", processingStartedAt, processingStageStartedAt: processingStartedAt }).where(eq(projects.id, projectId));
   try {
     const narrationUrl = await storageGetSignedUrl(narration.storageKey);
     const narrationResponse = await fetch(narrationUrl);
@@ -45,13 +46,19 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
     const transcription = transcriptionRun.value;
     const transcriptSegments = (transcription.segments ?? []).filter(segment => segment.text.trim());
     if (!transcriptSegments.length) throw new Error("Groq Whisper returned no timestamped narration segments.");
+    await db.transaction(async transaction => {
+      await transaction.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: { provider: "groq", model: GROQ_TRANSCRIPTION_MODEL, providerKeyLabel: transcriptionRun.key.label, providerKeyMasked: transcriptionRun.key.maskedKey, text: transcription.text, language: transcription.language ?? "hi", segments: transcription.segments } }).where(eq(mediaAssets.id, narration.id));
+      await transaction.update(projects).set({ processingStage: "analyzing_images", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
+    });
     const analyzedImageCache = await db.select().from(mediaAssets).where(and(eq(mediaAssets.userId, userId), eq(mediaAssets.assetType, "image"), eq(mediaAssets.analysisState, "analyzed")));
     const analysisByContentHash = new Map(analyzedImageCache.filter(asset => asset.contentHash && asset.analysisJson).map(asset => [asset.contentHash!, asset.analysisJson as Record<string, unknown>]));
     const imageAnalyses = [] as Array<{ image: typeof images[number]; analysis: Record<string, unknown> }>;
     for (const image of images) {
       const cachedAnalysis = image.contentHash ? analysisByContentHash.get(image.contentHash) : null;
       if (cachedAnalysis && typeof cachedAnalysis.sceneDescription === "string" && cachedAnalysis.sceneDescription.trim()) {
-        imageAnalyses.push({ image, analysis: { ...cachedAnalysis, sceneDescription: cachedAnalysis.sceneDescription.trim(), provider: "groq", model: GROQ_VISION_MODEL, reusedByContentHash: true } });
+        const analysis = { ...cachedAnalysis, sceneDescription: cachedAnalysis.sceneDescription.trim(), provider: "groq", model: GROQ_VISION_MODEL, reusedByContentHash: true };
+        imageAnalyses.push({ image, analysis });
+        await db.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: analysis, embeddingSourceText: String(analysis.sceneDescription) }).where(eq(mediaAssets.id, image.id));
         continue;
       }
       const imageUrl = await boundedVisionImageUrl(image.storageKey);
@@ -59,8 +66,11 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
       const record = typeof run.value === "object" && run.value ? run.value as Record<string, unknown> : {};
       const sceneDescription = typeof record.sceneDescription === "string" ? record.sceneDescription.trim() : "";
       if (!sceneDescription) throw new Error(`Groq returned no usable scene description for ${image.originalFilename}.`);
-      imageAnalyses.push({ image, analysis: { ...record, sceneDescription, provider: "groq", model: GROQ_VISION_MODEL, providerKeyLabel: run.key.label, providerKeyMasked: run.key.maskedKey } });
+      const analysis = { ...record, sceneDescription, provider: "groq", model: GROQ_VISION_MODEL, providerKeyLabel: run.key.label, providerKeyMasked: run.key.maskedKey };
+      imageAnalyses.push({ image, analysis });
+      await db.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: analysis, embeddingSourceText: sceneDescription }).where(eq(mediaAssets.id, image.id));
     }
+    await db.update(projects).set({ processingStage: "building_timeline", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
     const fullNarration = transcriptSegments.map(segment => segment.text.trim()).join(" ");
     const narrationDigest = fullNarration.slice(0, MAX_PACING_NARRATION_CHARACTERS);
     const visualCatalog = imageAnalyses.map(({ image, analysis }) => ({ sequence: image.sequenceNumber, scene: String(analysis.sceneDescription).replace(/\s+/g, " ").slice(0, 84) }));
@@ -85,17 +95,16 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
     });
     const validation = validateTimeline(project.audioDurationMs, rebuilt);
     if (!validation.valid || cursor !== project.audioDurationMs) throw new Error(`Generated timeline failed validation: ${validation.issues.join(" ")}`);
+    await db.update(projects).set({ processingStage: "finalizing", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
     await db.transaction(async transaction => {
-      await transaction.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: { provider: "groq", model: GROQ_TRANSCRIPTION_MODEL, providerKeyLabel: transcriptionRun.key.label, providerKeyMasked: transcriptionRun.key.maskedKey, text: transcription.text, language: transcription.language ?? "hi", segments: transcription.segments } }).where(eq(mediaAssets.id, narration.id));
-      for (const { image, analysis } of imageAnalyses) await transaction.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: analysis, embeddingSourceText: String(analysis.sceneDescription) }).where(eq(mediaAssets.id, image.id));
       await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId));
       await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: pacingProviderKey?.label ?? null, pacingProviderKeyMasked: pacingProviderKey?.maskedKey ?? null, allImagesRequired: true, minReadableDurationMs: pacing.minimumDurationMs, pacingMethod: "bounded-global-full-narration-sequence" } })));
       await transaction.insert(timelineApprovals).values({ projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
-      await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, projectId));
+      await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null }).where(eq(projects.id, projectId));
     });
     return { imageCount: rebuilt.length, minimumDurationMs: pacing.minimumDurationMs, validation };
   } catch (error) {
-    await db.update(projects).set({ status: "ready", workerState: "error" }).where(eq(projects.id, projectId));
+    await db.update(projects).set({ status: "ready", workerState: "error", processingStage: "failed", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
     throw error;
   }
 }
