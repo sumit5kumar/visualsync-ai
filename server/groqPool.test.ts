@@ -30,7 +30,7 @@ describe("Groq pool executor", () => {
       operation: async () => { throw new GroqRequestError(`upstream failed with ${rawSecret}`, "quota_limited"); },
     });
 
-    await expect(failure).rejects.toMatchObject({ message: "All currently eligible Groq keys were attempted for this request." });
+    await expect(failure).rejects.toMatchObject({ message: "Every eligible Groq key reached a rate or quota limit. Retry after the displayed cooldown." });
     await failure.catch(error => expect(error.message).not.toContain(rawSecret));
   });
 
@@ -76,5 +76,19 @@ describe("Groq pool executor", () => {
     expect(onFailure).toHaveBeenCalledTimes(1);
     expect(onFailure).toHaveBeenCalledWith({ id: 11 }, expect.objectContaining({ status: "unavailable" }));
     expect(onSuccess).toHaveBeenCalledWith({ id: 12 });
+  });
+
+  it("explains a completed unavailable-key sweep without disclosing the upstream error text", async () => {
+    const rawSecret = "gsk_not_for_the_user";
+    const keys = [{ id: 31 }, { id: 31 }];
+    const result = executeBoundedGroqRotation({
+      reserve: async () => keys.shift()!,
+      onSuccess: async () => undefined,
+      onFailure: async () => undefined,
+      operation: async () => { throw new GroqRequestError(`connection reset ${rawSecret}`, "unavailable"); },
+    });
+
+    await expect(result).rejects.toMatchObject({ message: "Groq could not be reached using any currently eligible key. The keys were temporarily cooled down; retry shortly." });
+    await result.catch(error => expect(error.message).not.toContain(rawSecret));
   });
 });

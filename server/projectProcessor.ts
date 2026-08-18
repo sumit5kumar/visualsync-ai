@@ -4,8 +4,9 @@ import { GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL } from "./groqClient";
 import { getDb } from "./db";
 import { executeWithGroqRotation } from "./groqPool";
 import { buildGlobalReadableImageDurations } from "./readablePacing";
-import { storageGetSignedUrl } from "./storage";
+import { storageGetSignedUrl, storagePut } from "./storage";
 import { validateTimeline } from "./timelineValidation";
+import { splitMp3ForTranscription } from "./audioChunking";
 import sharp from "sharp";
 
 function transcriptForRange(segments: Array<{ start: number; end: number; text: string }>, startMs: number, endMs: number) {
@@ -30,6 +31,36 @@ async function boundedVisionImageUrl(storageKey: string) {
   return `data:image/jpeg;base64,${preview.toString("base64")}`;
 }
 
+type StoredNarrationChunk = { storageKey: string; startMs: number; endMs: number };
+type TimestampedTranscript = { text: string; language?: string; segments?: Array<{ id?: number; start: number; end: number; text: string; avg_logprob?: number; no_speech_prob?: number }> };
+
+function storedNarrationChunks(value: unknown): StoredNarrationChunk[] {
+  if (!value || typeof value !== "object" || !Array.isArray((value as Record<string, unknown>).transcriptionChunks)) return [];
+  return ((value as Record<string, unknown>).transcriptionChunks as unknown[]).flatMap(chunk => {
+    if (!chunk || typeof chunk !== "object") return [];
+    const record = chunk as Record<string, unknown>;
+    return typeof record.storageKey === "string" && Number.isFinite(record.startMs) && Number.isFinite(record.endMs)
+      ? [{ storageKey: record.storageKey, startMs: Number(record.startMs), endMs: Number(record.endMs) }]
+      : [];
+  });
+}
+
+export async function prepareNarrationChunks(projectId: number, narration: typeof mediaAssets.$inferSelect, db: Exclude<Awaited<ReturnType<typeof getDb>>, null>): Promise<StoredNarrationChunk[]> {
+  const cached = storedNarrationChunks(narration.analysisJson);
+  if (cached.length) return cached;
+  if ((narration.byteSize ?? 0) <= 23 * 1024 * 1024) return [{ storageKey: narration.storageKey, startMs: 0, endMs: 0 }];
+  if (narration.mimeType !== "audio/mpeg" && !narration.storageKey.toLowerCase().endsWith(".mp3")) throw new Error("This narration exceeds Groq’s 25 MB limit and must be uploaded as MP3 for safe frame-aware transcription chunking.");
+  const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey));
+  if (!sourceResponse.ok) throw new Error("The oversized narration could not be retrieved from secure storage for transcription chunking.");
+  const chunks = splitMp3ForTranscription(new Uint8Array(await sourceResponse.arrayBuffer()));
+  const storedChunks = await Promise.all(chunks.map(async (chunk, index) => {
+    const stored = await storagePut(`projects/${projectId}/transcription-chunks/${narration.id}-part-${index + 1}.mp3`, chunk.bytes, "audio/mpeg");
+    return { storageKey: stored.key, startMs: chunk.startMs, endMs: chunk.endMs };
+  }));
+  await db.update(mediaAssets).set({ analysisJson: { ...(narration.analysisJson && typeof narration.analysisJson === "object" ? narration.analysisJson as Record<string, unknown> : {}), transcriptionChunks: storedChunks } }).where(eq(mediaAssets.id, narration.id));
+  return storedChunks;
+}
+
 export async function processProjectWithGlobalReadablePacing(userId: number, projectId: number, publicOrigin?: string) {
   const db = await getDb();
   if (!db) throw new Error("Database storage is not available.");
@@ -42,13 +73,19 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
   const processingStartedAt = new Date();
   await db.update(projects).set({ status: "analyzing", workerState: "processing", processingStage: "transcribing", processingStartedAt, processingStageStartedAt: processingStartedAt }).where(eq(projects.id, projectId));
   try {
-    const narrationUrl = publicOrigin ? buildPublicManagedStorageUrl(publicOrigin, narration.storageKey) : await storageGetSignedUrl(narration.storageKey);
-    const transcriptionRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ url: narrationUrl, language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers." }), key }));
-    const transcription = transcriptionRun.value;
+    const narrationChunks = await prepareNarrationChunks(projectId, narration, db);
+    const transcriptionRuns: Array<{ value: TimestampedTranscript; key: { label: string; maskedKey: string } }> = [];
+    for (const chunk of narrationChunks) {
+      const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ url: await storageGetSignedUrl(chunk.storageKey), language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers." }), key }));
+      transcriptionRuns.push({ value: { ...run.value, segments: (run.value.segments ?? []).map(segment => ({ ...segment, start: segment.start + chunk.startMs / 1000, end: segment.end + chunk.startMs / 1000 })) }, key: run.key });
+    }
+    const transcriptionRun = transcriptionRuns[0];
+    if (!transcriptionRun) throw new Error("No narration chunks were available for Groq transcription.");
+    const transcription: TimestampedTranscript = { text: transcriptionRuns.map(run => run.value.text.trim()).filter(Boolean).join(" "), language: transcriptionRuns.find(run => run.value.language)?.value.language, segments: transcriptionRuns.flatMap(run => run.value.segments ?? []) };
     const transcriptSegments = (transcription.segments ?? []).filter(segment => segment.text.trim());
     if (!transcriptSegments.length) throw new Error("Groq Whisper returned no timestamped narration segments.");
     await db.transaction(async transaction => {
-      await transaction.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: { provider: "groq", model: GROQ_TRANSCRIPTION_MODEL, providerKeyLabel: transcriptionRun.key.label, providerKeyMasked: transcriptionRun.key.maskedKey, text: transcription.text, language: transcription.language ?? "hi", segments: transcription.segments } }).where(eq(mediaAssets.id, narration.id));
+      await transaction.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: { provider: "groq", model: GROQ_TRANSCRIPTION_MODEL, providerKeyLabel: transcriptionRun.key.label, providerKeyMasked: transcriptionRun.key.maskedKey, transcriptionChunks: narrationChunks, text: transcription.text, language: transcription.language ?? "hi", segments: transcription.segments } }).where(eq(mediaAssets.id, narration.id));
       await transaction.update(projects).set({ processingStage: "analyzing_images", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
     });
     const analyzedImageCache = await db.select().from(mediaAssets).where(and(eq(mediaAssets.userId, userId), eq(mediaAssets.assetType, "image"), eq(mediaAssets.analysisState, "analyzed")));

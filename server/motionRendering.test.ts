@@ -152,8 +152,9 @@ describe("middle-origin motion rendering", () => {
     expect(projects).toContain("Retry analysis");
     expect(projects).toContain("retryAnalysis");
     const processor = readFileSync(resolve(projectRoot, "server/projectProcessor.ts"), "utf8");
-    expect(processor).toContain("transcribeAudio({ url: narrationUrl");
-    expect(processor).toContain("buildPublicManagedStorageUrl");
+    expect(processor).toContain("prepareNarrationChunks");
+    expect(processor).toContain("splitMp3ForTranscription");
+    expect(processor).toContain("transcribeAudio({ url: await storageGetSignedUrl(chunk.storageKey)");
     expect(providers).toContain("groqActivate.mutate");
     expect(providers).toContain("geminiActivate.mutate");
     expect(timeline).toContain("approve.mutate(input)");

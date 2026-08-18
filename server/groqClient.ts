@@ -9,12 +9,17 @@ export class GroqRequestError extends Error {
   constructor(message: string, readonly status: GroqKeyStatus) { super(message); }
 }
 
+function safeGroqMessage(message: string) {
+  return message.replace(/gsk_[A-Za-z0-9_-]+/g, "[redacted key]").replace(/https?:\/\/\S+/gi, "[secure URL]").trim();
+}
+
 function classifyGroqError(statusCode: number, message: string) {
   if (statusCode === 401 || statusCode === 403) return new GroqRequestError("Groq rejected this API key.", "invalid");
   if (/request too large|requested \d+|reduce your message size|tokens per minute/i.test(message)) return new GroqRequestError("The Groq request is too large for the selected model limit. Reduce the prompt payload and retry with the same eligible key pool.", "request_too_large");
   if (/failed to validate json|failed_generation|adjust your prompt/i.test(message)) return new GroqRequestError("Groq rejected the requested JSON response format. Adjust the prompt and retry with the same eligible key pool.", "prompt_error");
   if (statusCode === 429) return new GroqRequestError("This Groq API key has reached a quota or rate limit.", "quota_limited");
-  return new GroqRequestError(message || "Groq is currently unavailable.", "unavailable");
+  if (statusCode >= 400 && statusCode < 500) return new GroqRequestError(`Groq rejected this request${message ? `: ${safeGroqMessage(message)}` : "."}`, "prompt_error");
+  return new GroqRequestError(safeGroqMessage(message) || "Groq is currently unavailable.", "unavailable");
 }
 
 function parseGeneratedJsonObject(content: string, malformedMessage: string) {

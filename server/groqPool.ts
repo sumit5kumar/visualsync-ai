@@ -11,6 +11,12 @@ export class GroqPoolExhaustedError extends Error {
   constructor(message = "No eligible Groq keys are available. Add a verified key or wait for a rate-limited key cooldown to expire.") { super(message); }
 }
 
+function exhaustedPoolMessage(lastStatus?: GroqRequestError["status"]) {
+  if (lastStatus === "quota_limited") return "Every eligible Groq key reached a rate or quota limit. Retry after the displayed cooldown.";
+  if (lastStatus === "unavailable") return "Groq could not be reached using any currently eligible key. The keys were temporarily cooled down; retry shortly.";
+  return "No eligible Groq keys are available. Add a verified key or wait for a rate-limited key cooldown to expire.";
+}
+
 export function publicGroqPoolMetadata(key: { id: number; label: string; keyPrefix: string; keySuffix: string }) {
   return { id: key.id, label: key.label, maskedKey: `${key.keyPrefix}••••••••${key.keySuffix}` };
 }
@@ -22,10 +28,11 @@ export async function executeBoundedGroqRotation<T, Key extends { id: number }>(
   operation: (key: Key) => Promise<T>;
 }) {
   const attemptedIds = new Set<number>();
+  let lastRetryableStatus: GroqRequestError["status"] | undefined;
   while (true) {
     let key: Key;
-    try { key = await input.reserve(); } catch (error) { if (error instanceof GroqPoolExhaustedError) throw new GroqPoolExhaustedError(); throw error; }
-    if (attemptedIds.has(key.id)) throw new GroqPoolExhaustedError("All currently eligible Groq keys were attempted for this request.");
+    try { key = await input.reserve(); } catch (error) { if (error instanceof GroqPoolExhaustedError) throw new GroqPoolExhaustedError(exhaustedPoolMessage(lastRetryableStatus)); throw error; }
+    if (attemptedIds.has(key.id)) throw new GroqPoolExhaustedError(exhaustedPoolMessage(lastRetryableStatus));
     attemptedIds.add(key.id);
     try {
       const result = await input.operation(key);
@@ -34,7 +41,10 @@ export async function executeBoundedGroqRotation<T, Key extends { id: number }>(
     } catch (error) {
       if (!(error instanceof GroqRequestError)) throw error;
       await input.onFailure(key, error);
-      if (error.status === "invalid" || error.status === "quota_limited" || error.status === "unavailable") continue;
+      if (error.status === "invalid" || error.status === "quota_limited" || error.status === "unavailable") {
+        lastRetryableStatus = error.status;
+        continue;
+      }
       throw error;
     }
   }

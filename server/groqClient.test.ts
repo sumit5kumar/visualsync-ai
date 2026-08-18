@@ -59,6 +59,15 @@ describe("GroqClient", () => {
     await expect(new GroqClient("gsk_test").completeText({ prompt: "large" })).rejects.toMatchObject({ status: "request_too_large" });
   });
 
+  it("keeps a non-auth client rejection out of the retry pool and redacts secure URLs", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "Invalid URL https://storage.example.test/private?signature=secret" } }), { status: 400 }));
+    global.fetch = fetchMock;
+
+    const request = new GroqClient("gsk_test").transcribeAudio({ url: "https://storage.example.test/narration.mp3" });
+
+    await expect(request).rejects.toMatchObject({ status: "prompt_error", message: "Groq rejected this request: Invalid URL [secure URL]" });
+  });
+
   it("converts a native transcription fetch failure into a rotation-safe unavailable error without leaking details", async () => {
     const rawTransportDetail = "gsk_transport_failure_must_not_surface";
     global.fetch = vi.fn().mockRejectedValue(new TypeError(`fetch failed: ${rawTransportDetail}`));

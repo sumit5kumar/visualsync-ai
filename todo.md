@@ -218,3 +218,5 @@
 - [x] Trace and repair the remaining live Groq transcription failure after the secure narration-URL route, so the Test project retry does not exhaust its key pool.
 - [x] Hibernate the user’s laptop after completing and validating the active Groq retry repair.
 - [x] Capture and repair the exact Groq request failure that still exhausts the Test project key pool after the public managed-storage URL routing change.
+- [x] Capture and repair the exact Groq response behind the repeated Test-project pool-exhaustion error, so the UI surfaces the actionable root cause rather than a misleading eligibility message.
+- [x] Split oversized MP3 narration into secure sub-25 MB S3-backed Groq transcription chunks and offset returned timestamps without fabricating timeline content.
