@@ -199,3 +199,6 @@
 - [x] Create a separately named deterministic CPU zoom experiment that leaves the approved production renderer untouched and preserves the same output, FPS, variable timeline, zoom settings, and narration contract.
 - [x] Benchmark the experiment against the current GEQ zoom using representative Finance images and durations, including CPU/GPU telemetry and frame-stability checks for jitter, crop jumps, and resets.
 - [x] Report the isolated experiment’s timing, speed difference, media contract, visual-stability findings, and quality trade-offs before requesting any production-change approval.
+- [x] Audit the RTX 3050/FFmpeg CUDA filter path and define an isolated GPU-resident zoom experiment using the same Finance benchmark clips, without modifying any production renderer.
+- [x] Attempt GPU-resident dynamic zoom with the available FFmpeg CUDA filters and reject it when `scale_cuda` lacks per-frame geometry evaluation and the build lacks a CUDA crop/warp primitive; retain the completed GEQ and deterministic CPU baseline telemetry as the valid comparison.
+- [x] Report whether a technically sound GPU zoom implementation exists in this FFmpeg build, leaving all experiments and production integration pending user approval.
