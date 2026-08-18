@@ -206,3 +206,4 @@
 - [x] Run focused representative Finance validation of zoom timing, 1920×1080/30 FPS output, audio sync, crop stability, crossfade preservation, and NVENC/CPU encoder fallback without a full production render.
 - [x] Defer the server-side render queue design until the local Windows production workflow is fully stabilized, as directed by the user.
 - [x] Defer all server-side, mobile, Docker, cloud-worker, queue, and architecture changes; retain local Windows PowerShell + FFmpeg as the only active production rendering system.
+- [x] Apply a UI-only VisualSync design-system cleanup across frontend layout, hierarchy, wording, status presentation, and responsiveness without changing any existing behavior, backend route, database, AI provider, timeline, worker, or local-rendering logic.

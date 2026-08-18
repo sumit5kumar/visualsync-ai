@@ -59,7 +59,7 @@ export default function Preview() {
   };
   return <div className="vs-page-enter mx-auto max-w-6xl space-y-6">
     <Hero />
-    <select value={project?.id ?? ""} onChange={event => setProjectId(Number(event.target.value))} className="h-11 w-full rounded-xl border border-white/10 bg-[#101827] px-3 text-sm text-slate-200">
+    <select value={project?.id ?? ""} onChange={event => setProjectId(Number(event.target.value))} className="vs-field w-full px-3 text-sm">
       <option value="" disabled>Select project</option>
       {projects.data?.map(item => <option key={item.id} value={item.id}>{item.name} · {item.status.replaceAll("_", " ")}</option>)}
     </select>
@@ -70,12 +70,12 @@ export default function Preview() {
             <TimelinePlayer narrationUrl={review.data?.narrationUrl ?? null} segments={review.data?.segments ?? []} zoom={selectedZoom} />
           </div>
         </div>
-        <aside className="rounded-[1.5rem] border border-white/[.07] bg-[#101827] p-6">
-          <p className="text-xs font-semibold uppercase tracking-[.14em] text-cyan-200">Timeline preview</p>
-          <h2 className="mt-3 text-lg font-semibold text-white">Watch with narration before rendering</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">This browser preview follows approved image boundaries and the original narration. Your final MP4 stays directly in the saved local output folder.</p>
+        <aside className="vs-surface rounded-[1.5rem] p-6">
+          <p className="vs-kicker">Timeline preview</p>
+          <h2 className="mt-3 text-lg font-semibold text-white">Check the story with narration</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500">Preview the approved image boundaries with the original audio before creating the final local MP4.</p>
           <Button onClick={download} disabled={!approved || !handoff.data} className="mt-5 w-full bg-cyan-200 text-slate-950 hover:bg-cyan-100"><Download className="mr-2 h-4 w-4" />Download handoff</Button>
-          <div className="mt-5 rounded-xl border border-cyan-200/[.12] bg-cyan-200/[.04] p-3 text-xs leading-5 text-slate-400"><span className="font-semibold text-cyan-100">Simple local workflow.</span> Download the approved worker and handoff, then run the saved command. Importing the completed MP4 back into this app is not required.</div>
+          <div className="mt-5 rounded-xl border border-cyan-200/[.12] bg-cyan-200/[.04] p-3 text-xs leading-5 text-slate-400"><span className="font-semibold text-cyan-100">Local workflow.</span> Download the approved handoff, run the saved command in Windows PowerShell, and find the completed MP4 in the project output folder.</div>
         </aside>
       </section>
       <ZoomControls zoom={selectedZoom} saving={updateZoom.isPending} onChange={saveZoom} />
@@ -174,5 +174,5 @@ function WorkflowStep({ number, title, text }: { number: string; title: string; 
 }
 
 function Hero() {
-  return <section className="rounded-[1.5rem] border border-white/[.07] bg-[radial-gradient(circle_at_80%_10%,rgba(34,211,238,.12),transparent_30%),#101827] p-6 md:p-8"><p className="text-[10px] font-semibold uppercase tracking-[.16em] text-cyan-200/70">Render and review</p><h1 className="mt-2 text-3xl font-semibold tracking-[-.035em] text-white">Preview the timing. Choose your render mode.</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">Use Quality Motion for the accepted centered zoom and narration-centered crossfades, or use Fast Render for static images with direct cuts and a quicker local export.</p><div className="mt-5 flex flex-wrap items-center gap-3"><a href="/api/project-media/latest-worker" download className="inline-flex rounded-lg border border-cyan-200/25 bg-cyan-200/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-200/20">Download approved render worker</a><span className="text-xs text-slate-500">Your final MP4 stays in the saved local output folder.</span></div></section>;
+  return <section className="vs-surface rounded-[1.5rem] bg-[radial-gradient(circle_at_80%_10%,rgba(34,211,238,.12),transparent_30%),#101827] p-6 md:p-8"><p className="vs-kicker">Render and review</p><h1 className="vs-page-title mt-2">Preview, configure, and render locally.</h1><p className="vs-page-copy mt-3 max-w-3xl">Review your narration-led timing, choose quality motion or Fast Render, then use the saved Windows command to create the final MP4 in your selected output folder.</p><div className="mt-5 flex flex-wrap items-center gap-3"><a href="/api/project-media/latest-worker" download className="inline-flex rounded-lg border border-cyan-200/25 bg-cyan-200/10 px-3 py-2 text-xs font-semibold text-cyan-100 hover:bg-cyan-200/20">Download approved render worker</a><span className="text-xs text-slate-500">Final output stays in your local project folder.</span></div></section>;
 }

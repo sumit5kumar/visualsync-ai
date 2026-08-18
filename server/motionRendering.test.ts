@@ -130,4 +130,21 @@ describe("middle-origin motion rendering", () => {
     expect(experiment).toContain("cropPositionReversals");
     expect(experiment).toContain("SPEED_IMPROVEMENT_PERCENT=");
   });
+
+  it("keeps the UI cleanup presentation-only by retaining the existing workflow controls", () => {
+    const projects = readFileSync(resolve(projectRoot, "client/src/pages/Projects.tsx"), "utf8");
+    const providers = readFileSync(resolve(projectRoot, "client/src/pages/Gemini.tsx"), "utf8");
+    const timeline = readFileSync(resolve(projectRoot, "client/src/pages/Timeline.tsx"), "utf8");
+    const preview = readFileSync(resolve(projectRoot, "client/src/pages/Preview.tsx"), "utf8");
+
+    expect(projects).toContain("uploadMediaFile");
+    expect(projects).toContain("processTimeline.mutateAsync");
+    expect(providers).toContain("groqActivate.mutate");
+    expect(providers).toContain("geminiActivate.mutate");
+    expect(timeline).toContain("approve.mutate(input)");
+    expect(timeline).toContain("replace.mutate");
+    expect(preview).toContain("updateZoom.mutate");
+    expect(preview).toContain("buildNativeRenderCommand");
+    expect(preview).toContain("Fast Render");
+  });
 });
