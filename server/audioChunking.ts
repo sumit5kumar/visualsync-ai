@@ -6,7 +6,10 @@ export type AudioTranscriptionChunk = {
   contentEndMs: number;
 };
 
-export const SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES = 1 * 1024 * 1024;
+// The production request converts this MP3 slice to 16 kHz mono WAV. A 128 KiB
+// frame-aligned source slice produces a roughly 260 KiB WAV request that Groq
+// completed successfully on the Free tier; larger measured attachments stalled.
+export const SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES = 128 * 1024;
 
 type Mp3Frame = { offset: number; length: number; durationMs: number; startMs: number; endMs: number };
 

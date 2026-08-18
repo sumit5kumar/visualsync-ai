@@ -9,8 +9,8 @@ function mpeg1Layer3Frame() {
 }
 
 describe("MP3 transcription chunking", () => {
-  it("uses the measured one-minute production chunk cap for responsive Groq WAV transcription", () => {
-    expect(SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES).toBe(1 * 1024 * 1024);
+  it("uses the measured Free-tier source cap for Groq-compatible WAV transcription", () => {
+    expect(SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES).toBe(128 * 1024);
   });
 
   it("splits an approximately five-minute medium narration into bounded frame-aligned requests", () => {

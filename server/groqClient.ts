@@ -73,19 +73,23 @@ export class GroqClient {
     return { Authorization: `Bearer ${this.apiKey}`, ...(contentType ? { "Content-Type": contentType } : {}) };
   }
 
-  private async request(url: string, init: RequestInit) {
+  private async request(url: string, init: RequestInit, timeoutMs = 60_000) {
     const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new DOMException("Groq request timed out.", "TimeoutError")), timeoutMs);
     try {
-      return { response: await fetch(url, init), durationMs: Date.now() - startedAt };
+      return { response: await fetch(url, { ...init, signal: controller.signal }), durationMs: Date.now() - startedAt };
     } catch (error) {
       const category: GroqFailureCategory = error instanceof DOMException && error.name === "TimeoutError" ? "timeout" : "network_failure";
       throw localError(category === "timeout" ? "Groq transcription timed out." : "Groq could not be reached for this request.", "unavailable", category, Date.now() - startedAt);
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
   async testKey(): Promise<GroqKeyTestResult> {
     try {
-      const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/models`, { headers: this.headers("application/json"), signal: AbortSignal.timeout(20_000) });
+      const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/models`, { headers: this.headers("application/json") }, 20_000);
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
         throw classifyGroqError(response, payload?.error?.message ?? "", durationMs);
@@ -111,7 +115,7 @@ export class GroqClient {
     body.append("timestamp_granularities[]", "segment");
     if (input.language) body.append("language", input.language);
     if (input.prompt) body.append("prompt", input.prompt);
-    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/audio/transcriptions`, { method: "POST", headers: this.headers(), body, signal: AbortSignal.timeout(input.timeoutMs ?? 90_000) });
+    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/audio/transcriptions`, { method: "POST", headers: this.headers(), body }, input.timeoutMs ?? 90_000);
     if (!response.ok) {
       const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
       throw classifyGroqError(response, payload?.error?.message ?? "", durationMs);
@@ -121,7 +125,7 @@ export class GroqClient {
   }
 
   async analyzeImage(input: { imageUrl: string; prompt: string }) {
-    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 600, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: [{ type: "text", text: `${input.prompt}\nReply with exactly one compact JSON object and no markdown.` }, { type: "image_url", image_url: { url: input.imageUrl, detail: "low" } }] }] }), signal: AbortSignal.timeout(60_000) });
+    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 600, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: [{ type: "text", text: `${input.prompt}\nReply with exactly one compact JSON object and no markdown.` }, { type: "image_url", image_url: { url: input.imageUrl, detail: "low" } }] }] }) }, 60_000);
     if (!response.ok) { const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null; throw classifyGroqError(response, payload?.error?.message ?? "", durationMs); }
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const content = payload.choices?.[0]?.message?.content?.trim();
@@ -130,7 +134,7 @@ export class GroqClient {
   }
 
   async completeText(input: { prompt: string }) {
-    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, messages: [{ role: "user", content: input.prompt }] }), signal: AbortSignal.timeout(60_000) });
+    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, messages: [{ role: "user", content: input.prompt }] }) }, 60_000);
     if (!response.ok) { const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null; throw classifyGroqError(response, payload?.error?.message ?? "", durationMs); }
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const content = payload.choices?.[0]?.message?.content?.trim();
@@ -139,7 +143,7 @@ export class GroqClient {
   }
 
   async completeJson(input: { prompt: string }) {
-    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 500, reasoning_effort: "none", reasoning_format: "hidden", response_format: { type: "json_object" }, messages: [{ role: "user", content: input.prompt }] }), signal: AbortSignal.timeout(60_000) });
+    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 500, reasoning_effort: "none", reasoning_format: "hidden", response_format: { type: "json_object" }, messages: [{ role: "user", content: input.prompt }] }) }, 60_000);
     if (!response.ok) { const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null; throw classifyGroqError(response, payload?.error?.message ?? "", durationMs); }
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const content = payload.choices?.[0]?.message?.content?.trim();
@@ -148,7 +152,7 @@ export class GroqClient {
   }
 
   async completePacingPlan(input: { prompt: string }) {
-    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 500, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: input.prompt }] }), signal: AbortSignal.timeout(60_000) });
+    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 500, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: input.prompt }] }) }, 60_000);
     if (!response.ok) { const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null; throw classifyGroqError(response, payload?.error?.message ?? "", durationMs); }
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const content = payload.choices?.[0]?.message?.content?.trim();

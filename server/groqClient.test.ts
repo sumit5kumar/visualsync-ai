@@ -94,6 +94,16 @@ describe("GroqClient", () => {
     await request.catch(error => expect(error.message).not.toContain(rawTransportDetail));
   });
 
+  it("enforces the requested transcription deadline when a provider socket stalls", async () => {
+    global.fetch = vi.fn((_url: string, request: RequestInit) => new Promise((_resolve, reject) => {
+      request.signal?.addEventListener("abort", () => reject(request.signal?.reason));
+    }));
+
+    const request = new GroqClient("gsk_test").transcribeAudio({ bytes: new Uint8Array([1, 2, 3]), filename: "narration.wav", mimeType: "audio/wav", timeoutMs: 20 });
+
+    await expect(request).rejects.toMatchObject({ status: "unavailable", metadata: { category: "timeout" } });
+  });
+
   it("uses a secure remote audio URL instead of a multipart attachment when one is supplied", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ text: "Narration", segments: [] }), { status: 200 }));
     global.fetch = fetchMock;

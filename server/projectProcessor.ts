@@ -18,7 +18,20 @@ function transcriptForRange(segments: Array<{ start: number; end: number; text: 
 
 const MAX_PACING_IMAGES_PER_REQUEST = 24;
 const MAX_PACING_NARRATION_CHARACTERS = 3600;
+const NARRATION_CHUNK_STORAGE_CONCURRENCY = 3;
 export function buildBoundedPacingBatches<T>(items: T[], batchSize = MAX_PACING_IMAGES_PER_REQUEST) { const batches: T[][] = []; for (let index = 0; index < items.length; index += batchSize) batches.push(items.slice(index, index + batchSize)); return batches; }
+export async function mapWithConcurrency<T, Result>(items: T[], concurrency: number, operation: (item: T, index: number) => Promise<Result>) {
+  const results = new Array<Result>(items.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await operation(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(items.length, Math.max(1, concurrency)) }, worker));
+  return results;
+}
 export function buildPublicManagedStorageUrl(origin: string, storageKey: string) {
   const safePath = storageKey.split("/").map(segment => encodeURIComponent(segment)).join("/");
   return new URL(`/manus-storage/${safePath}`, origin).toString();
@@ -56,10 +69,10 @@ export async function prepareNarrationChunks(projectId: number, narration: typeo
   const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey));
   if (!sourceResponse.ok) throw new Error("The oversized narration could not be retrieved from secure storage for transcription chunking.");
   const chunks = splitMp3ForTranscription(new Uint8Array(await sourceResponse.arrayBuffer()));
-  const storedChunks: PersistedNarrationChunk[] = await Promise.all(chunks.map(async (chunk, index) => {
+  const storedChunks: PersistedNarrationChunk[] = await mapWithConcurrency(chunks, NARRATION_CHUNK_STORAGE_CONCURRENCY, async (chunk, index) => {
     const stored = await storagePut(`projects/${projectId}/transcription-chunks/${narration.id}-part-${index + 1}.mp3`, chunk.bytes, "audio/mpeg");
     return { storageKey: stored.key, startMs: chunk.startMs, endMs: chunk.endMs, contentStartMs: chunk.contentStartMs, contentEndMs: chunk.contentEndMs, byteSize: chunk.bytes.byteLength, status: "pending", attempts: 0 };
-  }));
+  });
   const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: 4_000, chunks: storedChunks };
   await persistNarrationTranscriptionState(narration, state, db);
   return state;
@@ -77,7 +90,7 @@ export async function transcribePreparedNarrationChunks(userId: number, narratio
     try {
       const bytes = await loadNarrationChunkBytes(chunk.storageKey);
       const wavBytes = await mp3ToMonoWav(bytes);
-      const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes: wavBytes, filename: `narration-part-${index + 1}.wav`, mimeType: "audio/wav", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers.", timeoutMs: 180_000 }), key }));
+      const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes: wavBytes, filename: `narration-part-${index + 1}.wav`, mimeType: "audio/wav", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers.", timeoutMs: 120_000 }), key }));
       transcriptionKey ??= run.key;
       chunk.status = "completed";
       chunk.transcript = { text: run.value.text, language: run.value.language, segments: (run.value.segments ?? []).map(segment => ({ ...segment, start: segment.start + chunk.startMs / 1000, end: segment.end + chunk.startMs / 1000 })) };

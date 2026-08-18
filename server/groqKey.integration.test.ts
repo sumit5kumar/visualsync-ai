@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-describe("Groq Cloud server credential", () => {
+describe.runIf(process.env.RUN_LIVE_GROQ_TESTS === "1")("Groq Cloud server credential", () => {
   it("authenticates against the official active-models endpoint without exposing the key", async () => {
     const apiKey = process.env.GROQ_API_KEY;
     expect(apiKey, "GROQ_API_KEY must be available only to server-side tests").toMatch(/^gsk_[A-Za-z0-9_-]{20,}$/);
