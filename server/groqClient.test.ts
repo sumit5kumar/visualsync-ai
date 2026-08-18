@@ -68,4 +68,17 @@ describe("GroqClient", () => {
     await expect(request).rejects.toMatchObject({ status: "unavailable", message: "Groq could not be reached for this request." });
     await request.catch(error => expect(error.message).not.toContain(rawTransportDetail));
   });
+
+  it("uses a secure remote audio URL instead of a multipart attachment when one is supplied", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ text: "Narration", segments: [] }), { status: 200 }));
+    global.fetch = fetchMock;
+
+    await expect(new GroqClient("gsk_test").transcribeAudio({ url: "https://storage.example.test/signed-narration.mp3", language: "hi" })).resolves.toMatchObject({ text: "Narration" });
+
+    const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = request.body as FormData;
+    expect(body.get("url")).toBe("https://storage.example.test/signed-narration.mp3");
+    expect(body.get("file")).toBeNull();
+    expect(body.get("model")).toBe(GROQ_TRANSCRIPTION_MODEL);
+  });
 });

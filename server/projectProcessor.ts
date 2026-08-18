@@ -39,10 +39,7 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
   await db.update(projects).set({ status: "analyzing", workerState: "processing", processingStage: "transcribing", processingStartedAt, processingStageStartedAt: processingStartedAt }).where(eq(projects.id, projectId));
   try {
     const narrationUrl = await storageGetSignedUrl(narration.storageKey);
-    const narrationResponse = await fetch(narrationUrl);
-    if (!narrationResponse.ok) throw new Error("Uploaded narration could not be retrieved from secure storage.");
-    const bytes = new Uint8Array(await narrationResponse.arrayBuffer());
-    const transcriptionRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes, filename: narration.originalFilename, mimeType: narration.mimeType ?? "audio/mpeg", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers." }), key }));
+    const transcriptionRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ url: narrationUrl, language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers." }), key }));
     const transcription = transcriptionRun.value;
     const transcriptSegments = (transcription.segments ?? []).filter(segment => segment.text.trim());
     if (!transcriptSegments.length) throw new Error("Groq Whisper returned no timestamped narration segments.");

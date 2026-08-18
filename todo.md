@@ -213,3 +213,5 @@
 - [x] Add truthful live large-project processing progress, elapsed time, estimated remaining time, narration status, processed-image counts, and timeline-ready status to the Projects workflow.
 - [x] Diagnose why the Test project has no visible Timeline or active progress state after its current media processing attempt, and repair the actionable workflow without fabricating results.
 - [x] Diagnose and repair the exhausted Groq key-pool retry path for the Test project, preserving uploaded media and requiring a genuine Groq timeline result.
+- [x] Diagnose and repair the repeated live “No eligible Groq keys” retry failure for the Test project after expired-unavailable cooldown recovery was added.
+- [x] Route oversized S3-backed narration through Groq’s secure URL transcription parameter instead of direct multipart attachment, preserving genuine timestamped analysis.

@@ -57,10 +57,16 @@ export class GroqClient {
     }
   }
 
-  async transcribeAudio(input: { bytes: Uint8Array; filename: string; mimeType: string; language?: string; prompt?: string }) {
+  async transcribeAudio(input: { bytes?: Uint8Array; filename?: string; mimeType?: string; url?: string; language?: string; prompt?: string }) {
     const body = new FormData();
-    const fileBytes = input.bytes.buffer.slice(input.bytes.byteOffset, input.bytes.byteOffset + input.bytes.byteLength) as ArrayBuffer;
-    body.append("file", new Blob([fileBytes], { type: input.mimeType }), input.filename);
+    if (input.url) {
+      body.append("url", input.url);
+    } else if (input.bytes && input.filename && input.mimeType) {
+      const fileBytes = input.bytes.buffer.slice(input.bytes.byteOffset, input.bytes.byteOffset + input.bytes.byteLength) as ArrayBuffer;
+      body.append("file", new Blob([fileBytes], { type: input.mimeType }), input.filename);
+    } else {
+      throw new GroqRequestError("Provide a secure audio URL or a complete audio attachment for Groq transcription.", "unavailable");
+    }
     body.append("model", GROQ_TRANSCRIPTION_MODEL);
     body.append("response_format", "verbose_json");
     body.append("timestamp_granularities[]", "segment");
