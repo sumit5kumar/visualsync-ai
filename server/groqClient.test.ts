@@ -98,4 +98,14 @@ describe("GroqClient", () => {
     expect(body.get("file")).toBeNull();
     expect(body.get("model")).toBe(GROQ_TRANSCRIPTION_MODEL);
   });
+
+  it("allows the server to extend only a long narration transcription deadline", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ text: "Narration", segments: [] }), { status: 200 }));
+    global.fetch = fetchMock;
+
+    await new GroqClient("gsk_test").transcribeAudio({ bytes: new Uint8Array([1, 2, 3]), filename: "narration.mp3", mimeType: "audio/mpeg", timeoutMs: 180_000 });
+
+    const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(request.signal).toBeInstanceOf(AbortSignal);
+  });
 });

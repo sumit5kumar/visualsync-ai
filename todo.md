@@ -227,3 +227,5 @@
 - [x] Add deterministic short, medium, and 30-minute contract coverage for chunk sizing, timestamp continuity, overlap merging, resumability, and failure classification without rendering a video.
 - [x] Preserve the real 30-minute Test narration state after Groq’s current HTTP 500 and defer the next audio-only retry until the user explicitly invokes Retry analysis; retain the saved unfinished 10 MB chunk without analyzing images or rendering video.
 - [x] Honor the user-directed stop: make no further Groq, Gemini, timeline, rendering, UI, or other workflow changes after confirming the current state is safely preserved.
+- [ ] Resume the Test project from its saved narration chunk state, resolve real provider-processing failures safely, and produce a genuine validated Timeline without changing unrelated systems.
+- [ ] Convert the Test narration’s MP3 chunks to a Groq-compatible WAV representation server-side while preserving timestamp offsets and resumable progress.

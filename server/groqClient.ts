@@ -95,7 +95,7 @@ export class GroqClient {
     }
   }
 
-  async transcribeAudio(input: { bytes?: Uint8Array; filename?: string; mimeType?: string; url?: string; language?: string; prompt?: string }): Promise<GroqTranscript> {
+  async transcribeAudio(input: { bytes?: Uint8Array; filename?: string; mimeType?: string; url?: string; language?: string; prompt?: string; timeoutMs?: number }): Promise<GroqTranscript> {
     const body = new FormData();
     if (input.url) body.append("url", input.url);
     else if (input.bytes && input.filename && input.mimeType) {
@@ -107,7 +107,7 @@ export class GroqClient {
     body.append("timestamp_granularities[]", "segment");
     if (input.language) body.append("language", input.language);
     if (input.prompt) body.append("prompt", input.prompt);
-    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/audio/transcriptions`, { method: "POST", headers: this.headers(), body, signal: AbortSignal.timeout(90_000) });
+    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/audio/transcriptions`, { method: "POST", headers: this.headers(), body, signal: AbortSignal.timeout(input.timeoutMs ?? 90_000) });
     if (!response.ok) {
       const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
       throw classifyGroqError(response, payload?.error?.message ?? "", durationMs);

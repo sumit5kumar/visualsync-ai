@@ -30,7 +30,7 @@ describe("Groq pool executor", () => {
       operation: async () => { throw new GroqRequestError(`upstream failed with ${rawSecret}`, "unavailable"); },
     });
 
-    await expect(failure).rejects.toMatchObject({ message: "Groq could not be reached using any currently eligible key. The keys were temporarily cooled down; retry shortly." });
+    await expect(failure).rejects.toMatchObject({ message: "Groq could not complete the request with any currently eligible key. Retry shortly; no key was marked invalid." });
     await failure.catch(error => expect(error.message).not.toContain(rawSecret));
   });
 
@@ -78,18 +78,22 @@ describe("Groq pool executor", () => {
     expect(onSuccess).toHaveBeenCalledWith({ id: 12 });
   });
 
-  it("does not rotate across keys when Groq reports a provider-wide server error", async () => {
-    const reserve = vi.fn(async () => ({ id: 51 }));
+  it("tries another verified key after a provider-wide server error without suppressing the safe metadata", async () => {
+    const keys = [{ id: 51 }, { id: 52 }];
+    const reserve = vi.fn(async () => keys.shift()!);
     const onFailure = vi.fn(async () => undefined);
     const result = executeBoundedGroqRotation({
       reserve,
       onSuccess: async () => undefined,
       onFailure,
-      operation: async () => { throw new GroqRequestError("Groq reported a temporary server error.", "unavailable", { httpStatus: 500, durationMs: 100, category: "server_error" }); },
+      operation: async key => {
+        if (key.id === 51) throw new GroqRequestError("Groq reported a temporary server error.", "unavailable", { httpStatus: 500, durationMs: 100, category: "server_error" });
+        return "processed";
+      },
     });
 
-    await expect(result).rejects.toMatchObject({ metadata: { httpStatus: 500, category: "server_error" } });
-    expect(reserve).toHaveBeenCalledTimes(1);
+    await expect(result).resolves.toBe("processed");
+    expect(reserve).toHaveBeenCalledTimes(2);
     expect(onFailure).toHaveBeenCalledTimes(1);
   });
 
@@ -103,7 +107,7 @@ describe("Groq pool executor", () => {
       operation: async () => { throw new GroqRequestError(`connection reset ${rawSecret}`, "unavailable"); },
     });
 
-    await expect(result).rejects.toMatchObject({ message: "Groq could not be reached using any currently eligible key. The keys were temporarily cooled down; retry shortly." });
+    await expect(result).rejects.toMatchObject({ message: "Groq could not complete the request with any currently eligible key. Retry shortly; no key was marked invalid." });
     await result.catch(error => expect(error.message).not.toContain(rawSecret));
   });
 });

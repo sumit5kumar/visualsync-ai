@@ -9,19 +9,18 @@ function mpeg1Layer3Frame() {
 }
 
 describe("MP3 transcription chunking", () => {
-  it("keeps the production Groq chunk cap within the requested conservative 10–20 MB range", () => {
-    expect(SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES).toBeGreaterThanOrEqual(10 * 1024 * 1024);
-    expect(SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES).toBeLessThanOrEqual(20 * 1024 * 1024);
+  it("uses the measured one-minute production chunk cap for responsive Groq WAV transcription", () => {
+    expect(SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES).toBe(1 * 1024 * 1024);
   });
 
-  it("keeps an approximately five-minute medium narration as a single direct multipart request", () => {
+  it("splits an approximately five-minute medium narration into bounded frame-aligned requests", () => {
     const frame = mpeg1Layer3Frame();
     const source = new Uint8Array(frame.length * 11_485);
     for (let index = 0; index < 11_485; index++) source.set(frame, index * frame.length);
 
     const chunks = splitMp3ForTranscription(source);
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0].bytes.byteLength).toBeLessThan(SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every(chunk => chunk.bytes.byteLength <= SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES)).toBe(true);
   });
 
   it("splits only at MP3 frame boundaries and calculates genuine sequential offsets", () => {

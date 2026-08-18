@@ -7,6 +7,7 @@ import { buildGlobalReadableImageDurations } from "./readablePacing";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { validateTimeline } from "./timelineValidation";
 import { SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription } from "./audioChunking";
+import { mp3ToMonoWav } from "./audioTranscoding";
 import { mergeChunkTranscripts, readNarrationTranscriptionState, summarizeNarrationText, type NarrationTranscriptionState, type PersistedNarrationChunk } from "./narrationTranscription";
 import sharp from "sharp";
 
@@ -75,7 +76,8 @@ export async function transcribePreparedNarrationChunks(userId: number, narratio
     await persistNarrationTranscriptionState(narration, narrationState, db);
     try {
       const bytes = await loadNarrationChunkBytes(chunk.storageKey);
-      const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes, filename: `narration-part-${index + 1}.mp3`, mimeType: "audio/mpeg", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers." }), key }));
+      const wavBytes = await mp3ToMonoWav(bytes);
+      const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes: wavBytes, filename: `narration-part-${index + 1}.wav`, mimeType: "audio/wav", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers.", timeoutMs: 180_000 }), key }));
       transcriptionKey ??= run.key;
       chunk.status = "completed";
       chunk.transcript = { text: run.value.text, language: run.value.language, segments: (run.value.segments ?? []).map(segment => ({ ...segment, start: segment.start + chunk.startMs / 1000, end: segment.end + chunk.startMs / 1000 })) };

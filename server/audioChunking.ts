@@ -6,7 +6,7 @@ export type AudioTranscriptionChunk = {
   contentEndMs: number;
 };
 
-export const SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES = 10 * 1024 * 1024;
+export const SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES = 1 * 1024 * 1024;
 
 type Mp3Frame = { offset: number; length: number; durationMs: number; startMs: number; endMs: number };
 
