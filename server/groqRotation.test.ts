@@ -26,6 +26,15 @@ describe("Groq rotation policy", () => {
     expect(chooseRoundRobinKey([recovered], 0, now)?.id).toBe(10);
   });
 
+  it("returns a transiently unavailable key to the pool only after its cooldown expires", () => {
+    const cooling = key(10, 0, "unavailable", new Date(now.getTime() + 60_000));
+    const recovered = key(11, 1, "unavailable", new Date(now.getTime() - 1));
+
+    expect(isEligibleForGroqRotation(cooling, now)).toBe(false);
+    expect(isEligibleForGroqRotation(recovered, now)).toBe(true);
+    expect(chooseRoundRobinKey([cooling, recovered], 0, now)?.id).toBe(11);
+  });
+
   it("uses bounded exponential cooldowns for repeated rate limits", () => {
     expect(rateLimitCooldownMs(1)).toBe(60_000);
     expect(rateLimitCooldownMs(2)).toBe(120_000);

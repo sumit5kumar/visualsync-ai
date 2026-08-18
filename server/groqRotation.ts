@@ -8,7 +8,7 @@ export type RotationCandidate = {
 };
 
 export function isEligibleForGroqRotation(candidate: RotationCandidate, now: Date) {
-  return candidate.testStatus === "verified" || (candidate.testStatus === "quota_limited" && Boolean(candidate.cooldownUntil && candidate.cooldownUntil <= now));
+  return candidate.testStatus === "verified" || ((candidate.testStatus === "quota_limited" || candidate.testStatus === "unavailable") && Boolean(candidate.cooldownUntil && candidate.cooldownUntil <= now));
 }
 
 export function chooseRoundRobinKey(candidates: RotationCandidate[], nextRotationOrder: number, now: Date) {

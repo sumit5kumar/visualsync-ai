@@ -47,7 +47,7 @@ export async function listUserProjects(userId: number) {
     db.select({ testStatus: groqApiKeys.testStatus, cooldownUntil: groqApiKeys.cooldownUntil }).from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true))),
   ]);
   const now = new Date();
-  const hasEligibleGroqKey = activeGroqKeys.some(key => key.testStatus === "verified" || (key.testStatus === "quota_limited" && Boolean(key.cooldownUntil && key.cooldownUntil <= now)));
+  const hasEligibleGroqKey = activeGroqKeys.some(key => key.testStatus === "verified" || ((key.testStatus === "quota_limited" || key.testStatus === "unavailable") && Boolean(key.cooldownUntil && key.cooldownUntil <= now)));
   return projectRecords.map(project => {
     const projectAssets = assets.filter(asset => asset.projectId === project.id);
     const imageAssets = projectAssets.filter(asset => asset.assetType === "image");
