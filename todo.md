@@ -229,3 +229,4 @@
 - [x] Honor the user-directed stop: make no further Groq, Gemini, timeline, rendering, UI, or other workflow changes after confirming the current state is safely preserved.
 - [ ] Resume the Test project from its saved narration chunk state, resolve real provider-processing failures safely, and produce a genuine validated Timeline without changing unrelated systems.
 - [ ] Convert the Test narration’s MP3 chunks to a Groq-compatible WAV representation server-side while preserving timestamp offsets and resumable progress.
+- [ ] Verify the newly added ninth Groq key, then resume the Test project from its first unfinished chunk using only genuine provider results.

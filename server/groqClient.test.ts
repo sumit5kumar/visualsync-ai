@@ -76,6 +76,14 @@ describe("GroqClient", () => {
     await expect(request).rejects.toMatchObject({ status: "prompt_error", message: "Groq rejected this request: Invalid URL [secure URL]" });
   });
 
+  it("treats a 403 model-permission response as a configuration blocker without invalidating the API key", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "The model whisper-large-v3 is blocked at the project level." } }), { status: 403 }));
+
+    const request = new GroqClient("gsk_test").transcribeAudio({ bytes: new Uint8Array([1, 2, 3]), filename: "narration.wav", mimeType: "audio/wav" });
+
+    await expect(request).rejects.toMatchObject({ status: "prompt_error", metadata: { httpStatus: 403, category: "permission_denied" } });
+  });
+
   it("converts a native transcription fetch failure into a rotation-safe unavailable error without leaking details", async () => {
     const rawTransportDetail = "gsk_transport_failure_must_not_surface";
     global.fetch = vi.fn().mockRejectedValue(new TypeError(`fetch failed: ${rawTransportDetail}`));
