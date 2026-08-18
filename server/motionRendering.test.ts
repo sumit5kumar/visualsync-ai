@@ -109,4 +109,15 @@ describe("middle-origin motion rendering", () => {
     expect(continuousTestRenderer).not.toContain("zoompan=");
     expect(continuousTestRenderer).not.toContain("perspective=");
   });
+
+  it("keeps the deterministic CPU zoom candidate separate from the approved production worker", () => {
+    const experiment = readFileSync(resolve(projectRoot, "native-worker/render-deterministic-cpu-zoom-experiment.ps1"), "utf8");
+    expect(experiment).toContain("separate deterministic CPU zoom candidate");
+    expect(experiment).toContain("function Render-GeqReferenceFrames");
+    expect(experiment).toContain("function Render-DeterministicFrames");
+    expect(experiment).toContain("Get-StabilityMetrics");
+    expect(experiment).toContain("duplicateConsecutiveFramePairs");
+    expect(experiment).toContain("cropPositionReversals");
+    expect(experiment).toContain("SPEED_IMPROVEMENT_PERCENT=");
+  });
 });

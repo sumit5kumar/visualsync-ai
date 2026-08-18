@@ -196,3 +196,6 @@
 - [x] Add a project-level Fast Render setting that disables zoom and crossfade together while preserving the existing normal-quality motion settings.
 - [x] Refine the render-settings interface and make rendered-MP4 import explicitly optional for users who only need a local exported file.
 - [x] Remove the rendered-MP4 import button and imported render-history interface from Preview because the user keeps final MP4 files in the local output folder.
+- [x] Create a separately named deterministic CPU zoom experiment that leaves the approved production renderer untouched and preserves the same output, FPS, variable timeline, zoom settings, and narration contract.
+- [x] Benchmark the experiment against the current GEQ zoom using representative Finance images and durations, including CPU/GPU telemetry and frame-stability checks for jitter, crop jumps, and resets.
+- [x] Report the isolated experiment’s timing, speed difference, media contract, visual-stability findings, and quality trade-offs before requesting any production-change approval.
