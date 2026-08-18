@@ -110,8 +110,18 @@ describe("middle-origin motion rendering", () => {
     expect(continuousTestRenderer).not.toContain("perspective=");
   });
 
-  it("keeps the deterministic CPU zoom candidate separate from the approved production worker", () => {
+  it("uses deterministic CPU zoom by default in production while retaining GEQ as an explicit fallback", () => {
+    const productionWorker = readFileSync(resolve(projectRoot, "native-worker/render-approved-handoff.ps1"), "utf8");
     const experiment = readFileSync(resolve(projectRoot, "native-worker/render-deterministic-cpu-zoom-experiment.ps1"), "utf8");
+
+    expect(productionWorker).toContain('[ValidateSet("DETERMINISTIC", "GEQ")][string]$ZoomRenderer = "DETERMINISTIC"');
+    expect(productionWorker).toContain("function New-NormalizedDeterministicCanvas");
+    expect(productionWorker).toContain("function Render-DeterministicProductionFrames");
+    expect(productionWorker).toContain("function Test-DeterministicProductionFrames");
+    expect(productionWorker).toContain("function Render-GeqFallbackFrames");
+    expect(productionWorker).toContain('DETERMINISTIC_ZOOM_FALLBACK=GEQ');
+    expect(productionWorker).toContain('Write-Output "ZOOM_RENDERER_EFFECTIVE=$($zoomRendererResults -join \',\')"');
+    expect(productionWorker).toContain("zoomRendererRequested = $ZoomRenderer");
     expect(experiment).toContain("separate deterministic CPU zoom candidate");
     expect(experiment).toContain("function Render-GeqReferenceFrames");
     expect(experiment).toContain("function Render-DeterministicFrames");

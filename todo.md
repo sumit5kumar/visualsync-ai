@@ -202,3 +202,7 @@
 - [x] Audit the RTX 3050/FFmpeg CUDA filter path and define an isolated GPU-resident zoom experiment using the same Finance benchmark clips, without modifying any production renderer.
 - [x] Attempt GPU-resident dynamic zoom with the available FFmpeg CUDA filters and reject it when `scale_cuda` lacks per-frame geometry evaluation and the build lacks a CUDA crop/warp primitive; retain the completed GEQ and deterministic CPU baseline telemetry as the valid comparison.
 - [x] Report whether a technically sound GPU zoom implementation exists in this FFmpeg build, leaving all experiments and production integration pending user approval.
+- [x] Make deterministic CPU zoom the default production renderer while retaining the prior GEQ path as an internal fallback/debug implementation only.
+- [x] Run focused representative Finance validation of zoom timing, 1920×1080/30 FPS output, audio sync, crop stability, crossfade preservation, and NVENC/CPU encoder fallback without a full production render.
+- [x] Defer the server-side render queue design until the local Windows production workflow is fully stabilized, as directed by the user.
+- [x] Defer all server-side, mobile, Docker, cloud-worker, queue, and architecture changes; retain local Windows PowerShell + FFmpeg as the only active production rendering system.

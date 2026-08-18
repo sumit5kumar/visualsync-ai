@@ -4,7 +4,8 @@ param(
   [Parameter(Mandatory = $true)][string]$OutputDirectory,
   [string]$FFmpegPath = "ffmpeg",
   [ValidateSet(30, 60)][int]$FrameRate = 30,
-  [ValidateSet("AUTO", "GPU", "CPU")][string]$RenderMode = "AUTO"
+  [ValidateSet("AUTO", "GPU", "CPU")][string]$RenderMode = "AUTO",
+  [ValidateSet("DETERMINISTIC", "GEQ")][string]$ZoomRenderer = "DETERMINISTIC"
 )
 
 $ErrorActionPreference = "Stop"
@@ -143,6 +144,92 @@ function New-SubpixelCenteredZoomFilter([double]$startZoom, [double]$endZoom, [i
   return "$normalize,geq=lum='lum($sourceX,$sourceY)':cb='cb($sourceX,$sourceY)':cr='cr($sourceX,$sourceY)':interpolation=bilinear,scale=$canvasWidth`:$canvasHeight`:flags=lanczos:in_range=pc:out_range=tv,setsar=1,format=yuv420p"
 }
 
+function New-NormalizedDeterministicCanvas([string]$imagePath) {
+  $source = [System.Drawing.Image]::FromFile($imagePath)
+  try {
+    $canvas = New-Object System.Drawing.Bitmap($oversizedWidth, $oversizedHeight, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    $graphics = [System.Drawing.Graphics]::FromImage($canvas)
+    try {
+      $graphics.Clear([System.Drawing.Color]::Black)
+      $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+      $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
+      $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+      $scale = [Math]::Max($oversizedWidth / [double]$source.Width, $oversizedHeight / [double]$source.Height)
+      $drawWidth = $source.Width * $scale
+      $drawHeight = $source.Height * $scale
+      $drawX = ($oversizedWidth - $drawWidth) / 2.0
+      $drawY = ($oversizedHeight - $drawHeight) / 2.0
+      $graphics.DrawImage($source, [System.Drawing.RectangleF]::new([single]$drawX, [single]$drawY, [single]$drawWidth, [single]$drawHeight))
+      return $canvas
+    } finally {
+      $graphics.Dispose()
+    }
+  } finally {
+    $source.Dispose()
+  }
+}
+
+function Render-DeterministicProductionFrames([object]$segment, [System.Drawing.Imaging.ImageCodecInfo]$encoder, [System.Drawing.Imaging.EncoderParameters]$parameters) {
+  $canvas = New-NormalizedDeterministicCanvas $segment.imagePath
+  $cropSamples = @()
+  try {
+    for ($frameIndex = 0; $frameIndex -lt $segment.frameCount; $frameIndex++) {
+      $progress = if ($segment.frameCount -le 1) { 0.0 } else { $frameIndex / [double]($segment.frameCount - 1) }
+      $zoom = $segment.zoomStart + (($segment.zoomEnd - $segment.zoomStart) * $progress)
+      $sourceWidth = $oversizedWidth / $zoom
+      $sourceHeight = $oversizedHeight / $zoom
+      $sourceX = ($oversizedWidth - $sourceWidth) / 2.0
+      $sourceY = ($oversizedHeight - $sourceHeight) / 2.0
+      $cropSamples += [pscustomobject]@{ frame = $frameIndex; sourceX = $sourceX; sourceY = $sourceY; sourceWidth = $sourceWidth; sourceHeight = $sourceHeight }
+      $frame = New-Object System.Drawing.Bitmap($canvasWidth, $canvasHeight, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+      $graphics = [System.Drawing.Graphics]::FromImage($frame)
+      try {
+        $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
+        $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+        $graphics.DrawImage($canvas, [System.Drawing.Rectangle]::new(0, 0, $canvasWidth, $canvasHeight), [single]$sourceX, [single]$sourceY, [single]$sourceWidth, [single]$sourceHeight, [System.Drawing.GraphicsUnit]::Pixel)
+        $frame.Save((Join-Path $segment.frameDirectory ("frame_{0:D6}.jpg" -f $frameIndex)), $encoder, $parameters)
+      } finally {
+        $graphics.Dispose()
+        $frame.Dispose()
+      }
+    }
+  } finally {
+    $canvas.Dispose()
+  }
+  return $cropSamples
+}
+
+function Test-DeterministicProductionFrames([object]$segment, [object[]]$cropSamples) {
+  if ($cropSamples.Count -ne $segment.frameCount) { return $false }
+  if (!(Test-Path (Join-Path $segment.frameDirectory "frame_000000.jpg"))) { return $false }
+  $widthSteps = @()
+  for ($index = 1; $index -lt $cropSamples.Count; $index++) {
+    $widthSteps += ([double]$cropSamples[$index].sourceWidth - [double]$cropSamples[$index - 1].sourceWidth)
+  }
+  $expectedSign = [Math]::Sign([double]$cropSamples[-1].sourceWidth - [double]$cropSamples[0].sourceWidth)
+  $reversals = @($widthSteps | Where-Object { [Math]::Sign($_) -ne 0 -and [Math]::Sign($_) -ne $expectedSign }).Count
+  return $reversals -eq 0
+}
+
+function Render-GeqFallbackFrames([object]$segment) {
+  $filter = New-SubpixelCenteredZoomFilter $segment.zoomStart $segment.zoomEnd $segment.frameCount
+  $arguments = @(
+    "-hide_banner", "-loglevel", "warning",
+    "-loop", "1", "-framerate", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-i", $segment.imagePath,
+    "-vf", $filter,
+    "-frames:v", $segment.frameCount.ToString(),
+    "-c:v", "mjpeg", "-q:v", "2", "-pix_fmt", "yuvj444p",
+    "-start_number", "0", "-y", (Join-Path $segment.frameDirectory "frame_%06d.jpg")
+  )
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  & $FFmpegPath @arguments
+  $exitCode = $LASTEXITCODE
+  $ErrorActionPreference = $previousErrorActionPreference
+  if ($exitCode -ne 0 -or !(Test-Path (Join-Path $segment.frameDirectory "frame_000000.jpg"))) { throw "GEQ fallback failed for $($segment.filename)." }
+}
+
 function Test-FinalEncoder([string[]]$encoderArguments) {
   $probePath = Join-Path $OutputDirectory (".visualsync-encoder-probe-" + [Guid]::NewGuid().ToString("N") + ".mp4")
   try {
@@ -244,6 +331,7 @@ $renderStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $clipTelemetryJob = $null
 $compositionTelemetryJob = $null
 $encodeTelemetryJob = $null
+$zoomRendererResults = @()
 
 try {
   if ($fastRender) {
@@ -314,23 +402,22 @@ try {
   $clipPosition = 0
   foreach ($segment in $segments) {
     New-Item -ItemType Directory -Path $segment.frameDirectory -Force | Out-Null
-    $filter = New-SubpixelCenteredZoomFilter $segment.zoomStart $segment.zoomEnd $segment.frameCount
-    $clipArguments = @(
-      "-hide_banner", "-loglevel", "warning",
-      "-loop", "1", "-framerate", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-i", $segment.imagePath,
-      "-vf", $filter,
-      "-frames:v", $segment.frameCount.ToString(),
-      "-c:v", "mjpeg", "-q:v", "2", "-pix_fmt", "yuvj444p",
-      "-start_number", "0", "-y", (Join-Path $segment.frameDirectory "frame_%06d.jpg")
-    )
     Write-Progress -Activity "Rendering continuous centered zoom clips" -Status "$($segment.filename) ($($segment.zoomDirection), $($zoomAmountPercent)%)" -PercentComplete (($clipPosition / [double]$segments.Count) * 45)
-    $previousErrorActionPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    & $FFmpegPath @clipArguments
-    $clipExitCode = $LASTEXITCODE
-    $ErrorActionPreference = $previousErrorActionPreference
-    if ($clipExitCode -ne 0) { throw "FFmpeg failed while building the continuous zoom clip for $($segment.filename) with exit code $clipExitCode" }
-    if (!(Test-Path (Join-Path $segment.frameDirectory "frame_000000.jpg"))) { throw "FFmpeg did not write the expected continuous zoom frames for $($segment.filename)." }
+    $effectiveZoomRenderer = $ZoomRenderer
+    if ($ZoomRenderer -eq "DETERMINISTIC") {
+      try {
+        $cropSamples = @(Render-DeterministicProductionFrames $segment $jpegEncoder $jpegParameters)
+        if (!(Test-DeterministicProductionFrames $segment $cropSamples)) { throw "Deterministic frame validation failed." }
+      } catch {
+        Remove-Item -Path (Join-Path $segment.frameDirectory "frame_*.jpg") -Force -ErrorAction SilentlyContinue
+        Write-Warning "DETERMINISTIC_ZOOM_FALLBACK=GEQ; segment=$($segment.filename); reason=$($_.Exception.Message)"
+        Render-GeqFallbackFrames $segment
+        $effectiveZoomRenderer = "GEQ_FALLBACK"
+      }
+    } else {
+      Render-GeqFallbackFrames $segment
+    }
+    $zoomRendererResults += $effectiveZoomRenderer
     $clipPosition++
   }
   $clipStopwatch.Stop()
@@ -394,6 +481,8 @@ try {
   Write-Output "RENDER_MODE_REQUESTED=$RenderMode"
   Write-Output "RENDER_MODE_EFFECTIVE=$effectivePipelineMode"
   Write-Output "ENCODER=$($finalEncoder.label)"
+  Write-Output "ZOOM_RENDERER_REQUESTED=$ZoomRenderer"
+  Write-Output "ZOOM_RENDERER_EFFECTIVE=$($zoomRendererResults -join ',')"
   Write-Output "CPU_BOUND_STAGES=continuous centered zoom frame generation; direct-opacity crossfade composition"
   $encodeArguments = @(
     "-hide_banner", "-loglevel", "warning",
@@ -425,6 +514,8 @@ try {
     schemaVersion = 1
     renderModeRequested = $RenderMode
     renderModeEffective = $effectivePipelineMode
+    zoomRendererRequested = $ZoomRenderer
+    zoomRendererEffective = @($zoomRendererResults | Select-Object -Unique)
     encoder = $finalEncoder.label
     cpuBoundStages = @("continuous centered zoom frame generation", "direct-opacity crossfade composition")
     output = [pscustomobject]@{ path = $outputPath; width = $canvasWidth; height = $canvasHeight; frameRate = $FrameRate; frameCount = $outputFrameCount; timelineDurationSeconds = [Math]::Round($timelineDurationSeconds, 3) }
