@@ -104,7 +104,7 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
     });
     return { imageCount: rebuilt.length, minimumDurationMs: pacing.minimumDurationMs, validation };
   } catch (error) {
-    await db.update(projects).set({ status: "ready", workerState: "error", processingStage: "failed", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
+    await db.update(projects).set({ status: "failed", workerState: "error", processingStage: "failed", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
     throw error;
   }
 }

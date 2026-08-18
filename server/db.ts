@@ -69,8 +69,10 @@ export async function listUserProjects(userId: number) {
       processingProgress,
       analysisBlocker: processingProgress ? null : project.status === "timeline_ready"
         ? "A genuine AI-selected timeline is ready and has passed continuous coverage validation."
-        : sourcesAttached && project.status === "ready" && project.workerState === "error" && !hasEligibleGroqKey
-          ? "The real narration and images are attached, but every active Groq key is currently rate limited or unavailable. Add another verified Groq key, or wait for a cooldown before retrying; no timeline has been created."
+        : project.status === "failed" || project.workerState === "error"
+          ? hasEligibleGroqKey
+            ? "The last Groq analysis attempt did not complete, so no timeline was created. Your uploaded narration and images are still attached; retry analysis to continue."
+            : "The last Groq analysis attempt did not complete, and no verified Groq key is currently eligible. Your uploaded narration and images are still attached; wait for a cooldown or add a verified key, then retry analysis."
         : semanticAnalysisComplete && project.status === "analyzing"
           ? "Narration and all source images are analyzed. Provider timeline selection is waiting for available service capacity."
         : sourcesAttached && project.status === "ready" && project.workerState === "unconfigured"

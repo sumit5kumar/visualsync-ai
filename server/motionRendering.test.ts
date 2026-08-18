@@ -149,6 +149,8 @@ describe("middle-origin motion rendering", () => {
     expect(projects).toContain("LiveProcessingStatus");
     expect(projects).toContain("processTimeline.mutateAsync");
     expect(projects).toContain("images.completed");
+    expect(projects).toContain("Retry analysis");
+    expect(projects).toContain("retryAnalysis");
     expect(providers).toContain("groqActivate.mutate");
     expect(providers).toContain("geminiActivate.mutate");
     expect(timeline).toContain("approve.mutate(input)");
