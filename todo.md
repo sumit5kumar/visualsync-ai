@@ -208,3 +208,4 @@
 - [x] Defer all server-side, mobile, Docker, cloud-worker, queue, and architecture changes; retain local Windows PowerShell + FFmpeg as the only active production rendering system.
 - [x] Apply a UI-only VisualSync design-system cleanup across frontend layout, hierarchy, wording, status presentation, and responsiveness without changing any existing behavior, backend route, database, AI provider, timeline, worker, or local-rendering logic.
 - [x] Repair the nonfunctional × clear control for selected narration, image-folder, or output-folder values in project upload setup without changing project upload or rendering behavior.
+- [x] Remove horizontal overflow from the project setup dialog by making the upload picker controls responsive while preserving all selection and cancel behavior.

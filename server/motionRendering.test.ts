@@ -143,6 +143,9 @@ describe("middle-origin motion rendering", () => {
     expect(projects).toContain('setBusyLabel("Cancelling upload…")');
     expect(projects).toContain("onClear={selection.narration ? clearNarration : undefined}");
     expect(projects).toContain('aria-label={busy ? "Cancel upload" : "Close project setup"}');
+    expect(projects).toContain("overflow-x-hidden overflow-y-auto");
+    expect(projects).toContain('className="mt-3 w-full border-white/10');
+    expect(projects).toContain("break-words text-xs leading-5");
     expect(providers).toContain("groqActivate.mutate");
     expect(providers).toContain("geminiActivate.mutate");
     expect(timeline).toContain("approve.mutate(input)");
