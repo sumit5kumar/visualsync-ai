@@ -15,7 +15,13 @@ import { getWorkerCapabilities, workerPayloadSchemas } from "./workerContracts";
 
 const projectInput = z.object({ name: z.string().trim().min(2).max(160), narrationOriginalName: z.string().trim().max(255).optional(), imageSourcePath: z.string().trim().max(2048).optional(), outputPath: z.string().trim().max(2048).optional() });
 const proposedSegment = z.object({ startMs: z.number().finite(), endMs: z.number().finite(), imageAssetId: z.number().int().positive().nullable().optional(), narrationText: z.string(), confidence: z.number(), selectionReason: z.string(), decisionType: z.enum(["KEEP", "CHANGE", "SKIP", "FALLBACK"]) });
-function requestPublicOrigin(req: { protocol?: string; get?: (name: string) => string | undefined; headers: Record<string, unknown> }) {
+export function requestPublicOrigin(req: { protocol?: string; get?: (name: string) => string | undefined; headers: Record<string, unknown> }) {
+  const originHeader = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+  const refererHeader = typeof req.headers.referer === "string" ? req.headers.referer : undefined;
+  for (const candidate of [originHeader, refererHeader]) {
+    if (!candidate) continue;
+    try { return new URL(candidate).origin; } catch { /* fall through to forwarded request metadata */ }
+  }
   const forwardedProto = typeof req.headers["x-forwarded-proto"] === "string" ? req.headers["x-forwarded-proto"].split(",")[0].trim() : undefined;
   const forwardedHost = typeof req.headers["x-forwarded-host"] === "string" ? req.headers["x-forwarded-host"].split(",")[0].trim() : undefined;
   const host = forwardedHost || req.get?.("host");

@@ -217,3 +217,4 @@
 - [x] Route oversized S3-backed narration through Groq’s secure URL transcription parameter instead of direct multipart attachment, preserving genuine timestamped analysis.
 - [x] Trace and repair the remaining live Groq transcription failure after the secure narration-URL route, so the Test project retry does not exhaust its key pool.
 - [x] Hibernate the user’s laptop after completing and validating the active Groq retry repair.
+- [x] Capture and repair the exact Groq request failure that still exhausts the Test project key pool after the public managed-storage URL routing change.
