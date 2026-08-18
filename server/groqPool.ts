@@ -2,13 +2,13 @@ import { and, eq } from "drizzle-orm";
 import { groqApiKeys, groqKeyRotationStates } from "../drizzle/schema";
 import { decryptSecret } from "./crypto";
 import { getDb } from "./db";
-import { GroqClient, GroqRequestError } from "./groqClient";
-import { chooseRoundRobinKey, nextRotationCursor, rateLimitCooldownMs } from "./groqRotation";
+import { GroqClient, GroqRequestError, type GroqRequestMetadata } from "./groqClient";
+import { chooseRoundRobinKey, nextRotationCursor, providerRetryDelayMs } from "./groqRotation";
 
 type StoredGroqKey = typeof groqApiKeys.$inferSelect;
 
 export class GroqPoolExhaustedError extends Error {
-  constructor(message = "No eligible Groq keys are available. Add a verified key or wait for a rate-limited key cooldown to expire.") { super(message); }
+  constructor(message = "No eligible Groq keys are available. Add a verified key or wait for a rate-limited key cooldown to expire.", readonly metadata?: GroqRequestMetadata) { super(message); }
 }
 
 function exhaustedPoolMessage(lastStatus?: GroqRequestError["status"]) {
@@ -28,11 +28,11 @@ export async function executeBoundedGroqRotation<T, Key extends { id: number }>(
   operation: (key: Key) => Promise<T>;
 }) {
   const attemptedIds = new Set<number>();
-  let lastRetryableStatus: GroqRequestError["status"] | undefined;
+  let lastRetryableError: GroqRequestError | undefined;
   while (true) {
     let key: Key;
-    try { key = await input.reserve(); } catch (error) { if (error instanceof GroqPoolExhaustedError) throw new GroqPoolExhaustedError(exhaustedPoolMessage(lastRetryableStatus)); throw error; }
-    if (attemptedIds.has(key.id)) throw new GroqPoolExhaustedError(exhaustedPoolMessage(lastRetryableStatus));
+    try { key = await input.reserve(); } catch (error) { if (error instanceof GroqPoolExhaustedError) throw new GroqPoolExhaustedError(exhaustedPoolMessage(lastRetryableError?.status), lastRetryableError?.metadata); throw error; }
+    if (attemptedIds.has(key.id)) throw new GroqPoolExhaustedError(exhaustedPoolMessage(lastRetryableError?.status), lastRetryableError?.metadata);
     attemptedIds.add(key.id);
     try {
       const result = await input.operation(key);
@@ -41,8 +41,9 @@ export async function executeBoundedGroqRotation<T, Key extends { id: number }>(
     } catch (error) {
       if (!(error instanceof GroqRequestError)) throw error;
       await input.onFailure(key, error);
-      if (error.status === "invalid" || error.status === "quota_limited" || error.status === "unavailable") {
-        lastRetryableStatus = error.status;
+      if (error.metadata.category === "server_error" || error.metadata.category === "timeout") throw error;
+      if (error.status === "invalid" || error.status === "unavailable") {
+        lastRetryableError = error;
         continue;
       }
       throw error;
@@ -83,14 +84,15 @@ async function recordGroqPoolFailure(userId: number, key: StoredGroqKey, error: 
   if (error.status === "request_too_large" || error.status === "prompt_error") return;
   if (error.status === "quota_limited") {
     const consecutiveRateLimits = key.consecutiveRateLimits + 1;
-    await db.update(groqApiKeys).set({ testStatus: "quota_limited", lastFailureAt: now, cooldownUntil: new Date(now.getTime() + rateLimitCooldownMs(consecutiveRateLimits)), consecutiveRateLimits }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, key.id)));
+    const retryDelayMs = providerRetryDelayMs(error.metadata);
+    await db.update(groqApiKeys).set({ testStatus: "quota_limited", lastFailureAt: now, cooldownUntil: new Date(now.getTime() + (retryDelayMs ?? 0)), consecutiveRateLimits }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, key.id)));
     return;
   }
   if (error.status === "invalid") {
     await db.update(groqApiKeys).set({ testStatus: "invalid", isActive: false, lastFailureAt: now }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, key.id)));
     return;
   }
-  await db.update(groqApiKeys).set({ testStatus: "unavailable", lastFailureAt: now, cooldownUntil: new Date(now.getTime() + 120_000) }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, key.id)));
+  await db.update(groqApiKeys).set({ testStatus: "verified", lastFailureAt: now, cooldownUntil: null }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, key.id)));
 }
 
 export async function executeWithGroqRotation<T>(userId: number, operation: (client: GroqClient, key: { id: number; label: string; maskedKey: string }) => Promise<T>) {

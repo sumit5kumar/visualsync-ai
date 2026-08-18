@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseRoundRobinKey, isEligibleForGroqRotation, rateLimitCooldownMs } from "./groqRotation";
+import { chooseRoundRobinKey, isEligibleForGroqRotation, providerRetryDelayMs, rateLimitCooldownMs } from "./groqRotation";
 
 const now = new Date("2026-08-15T00:00:00.000Z");
 const key = (id: number, rotationOrder: number, testStatus: "verified" | "quota_limited" | "invalid" | "unavailable" | "untested" = "verified", cooldownUntil: Date | null = null) => ({ id, rotationOrder, testStatus, cooldownUntil });
@@ -40,5 +40,11 @@ describe("Groq rotation policy", () => {
     expect(rateLimitCooldownMs(2)).toBe(120_000);
     expect(rateLimitCooldownMs(5)).toBe(15 * 60_000);
     expect(rateLimitCooldownMs(12)).toBe(15 * 60_000);
+  });
+
+  it("uses provider retry guidance when it is present and does not invent a delay when it is absent", () => {
+    expect(providerRetryDelayMs({ retryAfterMs: 18_000 })).toBe(18_000);
+    expect(providerRetryDelayMs({ resetAudio: "2.5s" })).toBe(2_500);
+    expect(providerRetryDelayMs({})).toBeNull();
   });
 });

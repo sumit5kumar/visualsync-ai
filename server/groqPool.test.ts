@@ -3,7 +3,7 @@ import { GroqRequestError } from "./groqClient";
 import { executeBoundedGroqRotation, GroqPoolExhaustedError, publicGroqPoolMetadata } from "./groqPool";
 
 describe("Groq pool executor", () => {
-  it("stops after each eligible key has been attempted and returns a bounded exhausted-pool error", async () => {
+  it("surfaces a provider rate limit immediately instead of rotating to bypass the provider limit", async () => {
     const keys = [{ id: 1 }, { id: 2 }, { id: 1 }];
     const reserve = vi.fn(async () => keys.shift()!);
     const onFailure = vi.fn(async () => undefined);
@@ -13,10 +13,10 @@ describe("Groq pool executor", () => {
       onSuccess: async () => undefined,
       onFailure,
       operation: async () => { throw new GroqRequestError("rate limit", "quota_limited"); },
-    })).rejects.toBeInstanceOf(GroqPoolExhaustedError);
+    })).rejects.toMatchObject({ status: "quota_limited" });
 
-    expect(reserve).toHaveBeenCalledTimes(3);
-    expect(onFailure).toHaveBeenCalledTimes(2);
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(onFailure).toHaveBeenCalledTimes(1);
   });
 
   it("does not disclose raw failure text or API-key-shaped values when the pool is exhausted", async () => {
@@ -27,10 +27,10 @@ describe("Groq pool executor", () => {
       reserve: async () => keys.shift()!,
       onSuccess: async () => undefined,
       onFailure: async () => undefined,
-      operation: async () => { throw new GroqRequestError(`upstream failed with ${rawSecret}`, "quota_limited"); },
+      operation: async () => { throw new GroqRequestError(`upstream failed with ${rawSecret}`, "unavailable"); },
     });
 
-    await expect(failure).rejects.toMatchObject({ message: "Every eligible Groq key reached a rate or quota limit. Retry after the displayed cooldown." });
+    await expect(failure).rejects.toMatchObject({ message: "Groq could not be reached using any currently eligible key. The keys were temporarily cooled down; retry shortly." });
     await failure.catch(error => expect(error.message).not.toContain(rawSecret));
   });
 
@@ -76,6 +76,21 @@ describe("Groq pool executor", () => {
     expect(onFailure).toHaveBeenCalledTimes(1);
     expect(onFailure).toHaveBeenCalledWith({ id: 11 }, expect.objectContaining({ status: "unavailable" }));
     expect(onSuccess).toHaveBeenCalledWith({ id: 12 });
+  });
+
+  it("does not rotate across keys when Groq reports a provider-wide server error", async () => {
+    const reserve = vi.fn(async () => ({ id: 51 }));
+    const onFailure = vi.fn(async () => undefined);
+    const result = executeBoundedGroqRotation({
+      reserve,
+      onSuccess: async () => undefined,
+      onFailure,
+      operation: async () => { throw new GroqRequestError("Groq reported a temporary server error.", "unavailable", { httpStatus: 500, durationMs: 100, category: "server_error" }); },
+    });
+
+    await expect(result).rejects.toMatchObject({ metadata: { httpStatus: 500, category: "server_error" } });
+    expect(reserve).toHaveBeenCalledTimes(1);
+    expect(onFailure).toHaveBeenCalledTimes(1);
   });
 
   it("explains a completed unavailable-key sweep without disclosing the upstream error text", async () => {

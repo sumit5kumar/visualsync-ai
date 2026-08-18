@@ -59,6 +59,14 @@ describe("GroqClient", () => {
     await expect(new GroqClient("gsk_test").completeText({ prompt: "large" })).rejects.toMatchObject({ status: "request_too_large" });
   });
 
+  it("records Groq retry guidance and audio-limit metadata without exposing secure media URLs", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "audio quota exceeded for https://private.example.test/audio" } }), { status: 429, headers: { "retry-after": "18", "x-ratelimit-remaining-audio-seconds": "0", "x-ratelimit-reset-audio-seconds": "18s" } }));
+    const request = new GroqClient("gsk_test").transcribeAudio({ url: "https://storage.example.test/narration.mp3" });
+
+    await expect(request).rejects.toMatchObject({ status: "quota_limited", metadata: { category: "audio_quota_exhausted", retryAfterMs: 18_000, remainingAudio: "0", resetAudio: "18s" } });
+    await request.catch(error => expect(error.message).not.toContain("private.example.test"));
+  });
+
   it("keeps a non-auth client rejection out of the retry pool and redacts secure URLs", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "Invalid URL https://storage.example.test/private?signature=secret" } }), { status: 400 }));
     global.fetch = fetchMock;

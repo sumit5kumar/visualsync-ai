@@ -1,6 +1,14 @@
-export type AudioTranscriptionChunk = { bytes: Uint8Array; startMs: number; endMs: number };
+export type AudioTranscriptionChunk = {
+  bytes: Uint8Array;
+  startMs: number;
+  endMs: number;
+  contentStartMs: number;
+  contentEndMs: number;
+};
 
-type Mp3Frame = { offset: number; length: number; durationMs: number };
+export const SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES = 10 * 1024 * 1024;
+
+type Mp3Frame = { offset: number; length: number; durationMs: number; startMs: number; endMs: number };
 
 const BITRATES: Record<string, number[]> = {
   "1-1": [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448],
@@ -39,12 +47,13 @@ function parseMp3Frame(source: Uint8Array, offset: number): Mp3Frame | null {
   const coefficient = layer === 1 ? 12 : layer === 3 && version !== 1 ? 72 : 144;
   const length = (Math.floor((coefficient * bitrateKbps * 1000) / sampleRate) + padding) * (layer === 1 ? 4 : 1);
   if (length <= 4 || offset + length > source.length) return null;
-  return { offset, length, durationMs: (samplesPerFrame * 1000) / sampleRate };
+  return { offset, length, durationMs: (samplesPerFrame * 1000) / sampleRate, startMs: 0, endMs: 0 };
 }
 
 function scanMp3Frames(source: Uint8Array) {
   const frames: Mp3Frame[] = [];
   let offset = id3v2Length(source);
+  let cursorMs = 0;
   while (offset + 4 <= source.length) {
     const frame = parseMp3Frame(source, offset);
     if (!frame) {
@@ -52,34 +61,37 @@ function scanMp3Frames(source: Uint8Array) {
       offset += 1;
       continue;
     }
+    frame.startMs = cursorMs;
+    frame.endMs = cursorMs + frame.durationMs;
     frames.push(frame);
+    cursorMs = frame.endMs;
     offset += frame.length;
   }
   return frames;
 }
 
-export function splitMp3ForTranscription(source: Uint8Array, maxChunkBytes = 23 * 1024 * 1024): AudioTranscriptionChunk[] {
-  if (source.byteLength <= maxChunkBytes) return [{ bytes: source, startMs: 0, endMs: 0 }];
+export function splitMp3ForTranscription(source: Uint8Array, maxChunkBytes = SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, overlapMs = 4_000): AudioTranscriptionChunk[] {
+  if (source.byteLength <= maxChunkBytes) return [{ bytes: source, startMs: 0, endMs: 0, contentStartMs: 0, contentEndMs: 0 }];
   const frames = scanMp3Frames(source);
   if (!frames.length) throw new Error("Oversized narration must be a valid MP3 so it can be split safely for Groq transcription.");
   const chunks: AudioTranscriptionChunk[] = [];
   let frameIndex = 0;
-  let startMs = 0;
   while (frameIndex < frames.length) {
-    const start = frames[frameIndex];
+    const contentStart = frames[frameIndex];
+    let overlapStartIndex = frameIndex;
+    while (overlapStartIndex > 0 && contentStart.startMs - frames[overlapStartIndex - 1].startMs < overlapMs) overlapStartIndex -= 1;
+    const start = frames[overlapStartIndex];
     let endFrameIndex = frameIndex;
-    let durationMs = 0;
     while (endFrameIndex < frames.length) {
       const candidate = frames[endFrameIndex];
       const candidateEnd = candidate.offset + candidate.length;
       if (endFrameIndex > frameIndex && candidateEnd - start.offset > maxChunkBytes) break;
-      durationMs += candidate.durationMs;
       endFrameIndex += 1;
     }
     if (endFrameIndex === frameIndex) throw new Error("A single MP3 frame exceeds the safe Groq transcription chunk size.");
     const endOffset = frames[endFrameIndex - 1].offset + frames[endFrameIndex - 1].length;
-    chunks.push({ bytes: source.slice(start.offset, endOffset), startMs: Math.round(startMs), endMs: Math.round(startMs + durationMs) });
-    startMs += durationMs;
+    const contentEnd = frames[endFrameIndex - 1];
+    chunks.push({ bytes: source.slice(start.offset, endOffset), startMs: Math.round(start.startMs), endMs: Math.round(contentEnd.endMs), contentStartMs: Math.round(contentStart.startMs), contentEndMs: Math.round(contentEnd.endMs) });
     frameIndex = endFrameIndex;
   }
   return chunks;

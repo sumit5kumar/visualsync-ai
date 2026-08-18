@@ -5,6 +5,7 @@ import { ENV } from "./_core/env";
 import { canEditValidatedTimeline, planImageSubstitution } from "./timelineEditing";
 import { validateTimeline } from "./timelineValidation";
 import { buildProjectProcessingProgress } from "./projectProgress";
+import { narrationTranscriptionSummary } from "./narrationTranscription";
 
 let database: ReturnType<typeof drizzle> | null = null;
 
@@ -43,7 +44,7 @@ export async function listUserProjects(userId: number) {
   const db = await requireDb();
   const [projectRecords, assets, activeGroqKeys] = await Promise.all([
     db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.updatedAt)),
-    db.select({ projectId: mediaAssets.projectId, assetType: mediaAssets.assetType, byteSize: mediaAssets.byteSize, analysisState: mediaAssets.analysisState }).from(mediaAssets).where(eq(mediaAssets.userId, userId)),
+    db.select({ projectId: mediaAssets.projectId, assetType: mediaAssets.assetType, byteSize: mediaAssets.byteSize, analysisState: mediaAssets.analysisState, analysisJson: mediaAssets.analysisJson }).from(mediaAssets).where(eq(mediaAssets.userId, userId)),
     db.select({ testStatus: groqApiKeys.testStatus, cooldownUntil: groqApiKeys.cooldownUntil }).from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true))),
   ]);
   const now = new Date();
@@ -54,9 +55,10 @@ export async function listUserProjects(userId: number) {
     const narrationAsset = projectAssets.find(asset => asset.assetType === "narration");
     const analyzedImageCount = imageAssets.filter(asset => asset.analysisState === "analyzed").length;
     const narrationAnalyzed = narrationAsset?.analysisState === "analyzed";
+    const narrationChunks = narrationTranscriptionSummary(narrationAsset?.analysisJson);
     const sourcesAttached = Boolean(project.narrationStorageKey && project.audioDurationMs && narrationAsset && imageAssets.length > 0);
     const semanticAnalysisComplete = sourcesAttached && narrationAnalyzed && analyzedImageCount === imageAssets.length;
-    const processingProgress = buildProjectProcessingProgress({ status: project.status, processingStage: project.processingStage, processingStartedAt: project.processingStartedAt, processingStageStartedAt: project.processingStageStartedAt, totalImageCount: imageAssets.length, completedImageCount: analyzedImageCount, narrationAnalyzed, audioDurationMs: project.audioDurationMs });
+    const processingProgress = buildProjectProcessingProgress({ status: project.status, processingStage: project.processingStage, processingStartedAt: project.processingStartedAt, processingStageStartedAt: project.processingStageStartedAt, totalImageCount: imageAssets.length, completedImageCount: analyzedImageCount, narrationAnalyzed, audioDurationMs: project.audioDurationMs, narrationChunks });
     return {
       ...project,
       sourceImageCount: imageAssets.length,
@@ -70,9 +72,11 @@ export async function listUserProjects(userId: number) {
       analysisBlocker: processingProgress ? null : project.status === "timeline_ready"
         ? "A genuine AI-selected timeline is ready and has passed continuous coverage validation."
         : project.status === "failed" || project.workerState === "error"
-          ? hasEligibleGroqKey
-            ? "The last Groq analysis attempt did not complete, so no timeline was created. Your uploaded narration and images are still attached; retry analysis to continue."
-            : "The last Groq analysis attempt did not complete, and no verified Groq key is currently eligible. Your uploaded narration and images are still attached; wait for a cooldown or add a verified key, then retry analysis."
+          ? narrationChunks?.lastError
+            ? `${narrationChunks.lastError.message} ${narrationChunks.completedChunks} of ${narrationChunks.totalChunks} narration chunks are saved; retry analysis resumes at chunk ${narrationChunks.activeChunkIndex}.`
+            : hasEligibleGroqKey
+              ? "The last Groq analysis attempt did not complete, so no timeline was created. Your uploaded narration and images are still attached; retry analysis to continue."
+              : "The last Groq analysis attempt did not complete. Check the recorded provider status, then retry analysis; uploaded media remains attached."
         : semanticAnalysisComplete && project.status === "analyzing"
           ? "Narration and all source images are analyzed. Provider timeline selection is waiting for available service capacity."
         : sourcesAttached && project.status === "ready" && project.workerState === "unconfigured"

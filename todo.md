@@ -220,3 +220,9 @@
 - [x] Capture and repair the exact Groq request failure that still exhausts the Test project key pool after the public managed-storage URL routing change.
 - [x] Capture and repair the exact Groq response behind the repeated Test-project pool-exhaustion error, so the UI surfaces the actionable root cause rather than a misleading eligibility message.
 - [x] Split oversized MP3 narration into secure sub-25 MB S3-backed Groq transcription chunks and offset returned timestamps without fabricating timeline content.
+- [x] Persist per-chunk Groq transcription progress, results, retry state, and safe provider response metadata so long audio can resume after a retry or application restart.
+- [x] Add small timestamp overlaps between MP3 chunks and merge timestamped transcripts without duplicate boundary fragments.
+- [x] Use actual Groq rate-limit and retry headers when available, keep invalid/revoked, client-request, timeout, network, server, and quota failures distinct, and avoid false permanent key unavailability.
+- [x] Show truthful narration-chunk progress, recovery, and actionable long-audio status in the Projects workflow without changing unrelated UI or media systems.
+- [x] Add deterministic short, medium, and 30-minute contract coverage for chunk sizing, timestamp continuity, overlap merging, resumability, and failure classification without rendering a video.
+- [ ] Re-run the real 30-minute Test narration audio-only transcription once Groq’s current 500 provider error recovers; resume from the saved first unfinished 10 MB chunk without analyzing images or rendering video.

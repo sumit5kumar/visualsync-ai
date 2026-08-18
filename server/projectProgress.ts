@@ -9,6 +9,7 @@ type ProgressInput = {
   completedImageCount: number;
   narrationAnalyzed: boolean;
   audioDurationMs: number | null;
+  narrationChunks?: { totalChunks: number; completedChunks: number; activeChunkIndex: number; chunkOverlapMs: number; state: "processing" | "waiting" | "completed"; lastError: { category: string; message: string; retryAfterMs?: number; httpStatus?: number; requestDurationMs: number } | null } | null;
   now?: Date;
 };
 
@@ -45,9 +46,15 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
   let message = "Preparing the verified Groq processing workflow.";
 
   if (stage === "transcribing") {
-    completedPercent = 8;
-    label = "Analyzing narration";
-    message = "Groq returns narration transcription as one completed result, so partial audio minutes are not fabricated.";
+    const chunkProgress = input.narrationChunks;
+    const chunkFraction = chunkProgress?.totalChunks ? chunkProgress.completedChunks / chunkProgress.totalChunks : 0;
+    completedPercent = 8 + Math.round(chunkFraction * 12);
+    label = chunkProgress?.state === "waiting" ? "Groq transcription is waiting" : "Transcribing narration";
+    message = chunkProgress
+      ? chunkProgress.state === "waiting"
+        ? `${chunkProgress.lastError?.message ?? "Groq rate limit reached."}${chunkProgress.lastError?.retryAfterMs ? ` Waiting ${Math.ceil(chunkProgress.lastError.retryAfterMs / 1000)} seconds before you retry chunk ${chunkProgress.activeChunkIndex} of ${chunkProgress.totalChunks}.` : ` Resume from chunk ${chunkProgress.activeChunkIndex} of ${chunkProgress.totalChunks} when the provider is ready.`}`
+        : `Transcribing narration — chunk ${chunkProgress.activeChunkIndex} of ${chunkProgress.totalChunks}. Completed chunks are saved and will not be restarted.`
+      : "Preparing timestamped Groq narration transcription.";
   } else if (stage === "analyzing_images") {
     completedPercent = totalImageCount ? 12 + Math.round((completedImageCount / totalImageCount) * 78) : 12;
     label = "Analyzing source images";
@@ -80,7 +87,7 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
     label,
     message,
     completedPercent: clamp(completedPercent, 0, 100),
-    narration: { status: input.narrationAnalyzed ? "completed" as const : stage === "transcribing" ? "processing" as const : "pending" as const, durationMs: input.audioDurationMs },
+    narration: { status: input.narrationAnalyzed ? "completed" as const : stage === "transcribing" ? "processing" as const : "pending" as const, durationMs: input.audioDurationMs, chunks: input.narrationChunks ?? null },
     images: { completed: completedImageCount, total: totalImageCount },
     elapsedMs,
     startedAtMs: startedAt.getTime(),

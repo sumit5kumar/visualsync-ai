@@ -1,12 +1,13 @@
 import { and, eq } from "drizzle-orm";
 import { mediaAssets, projects, timelineApprovals, timelineSegments } from "../drizzle/schema";
-import { GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL } from "./groqClient";
+import { GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL, GroqRequestError } from "./groqClient";
 import { getDb } from "./db";
-import { executeWithGroqRotation } from "./groqPool";
+import { executeWithGroqRotation, GroqPoolExhaustedError } from "./groqPool";
 import { buildGlobalReadableImageDurations } from "./readablePacing";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { validateTimeline } from "./timelineValidation";
-import { splitMp3ForTranscription } from "./audioChunking";
+import { SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription } from "./audioChunking";
+import { mergeChunkTranscripts, readNarrationTranscriptionState, summarizeNarrationText, type NarrationTranscriptionState, type PersistedNarrationChunk } from "./narrationTranscription";
 import sharp from "sharp";
 
 function transcriptForRange(segments: Array<{ start: number; end: number; text: string }>, startMs: number, endMs: number) {
@@ -31,34 +32,66 @@ async function boundedVisionImageUrl(storageKey: string) {
   return `data:image/jpeg;base64,${preview.toString("base64")}`;
 }
 
-type StoredNarrationChunk = { storageKey: string; startMs: number; endMs: number };
-type TimestampedTranscript = { text: string; language?: string; segments?: Array<{ id?: number; start: number; end: number; text: string; avg_logprob?: number; no_speech_prob?: number }> };
-
-function storedNarrationChunks(value: unknown): StoredNarrationChunk[] {
-  if (!value || typeof value !== "object" || !Array.isArray((value as Record<string, unknown>).transcriptionChunks)) return [];
-  return ((value as Record<string, unknown>).transcriptionChunks as unknown[]).flatMap(chunk => {
-    if (!chunk || typeof chunk !== "object") return [];
-    const record = chunk as Record<string, unknown>;
-    return typeof record.storageKey === "string" && Number.isFinite(record.startMs) && Number.isFinite(record.endMs)
-      ? [{ storageKey: record.storageKey, startMs: Number(record.startMs), endMs: Number(record.endMs) }]
-      : [];
-  });
+async function loadNarrationChunkBytes(storageKey: string) {
+  const response = await fetch(await storageGetSignedUrl(storageKey));
+  if (!response.ok) throw new Error("Prepared narration chunk could not be retrieved from secure storage.");
+  return new Uint8Array(await response.arrayBuffer());
 }
 
-export async function prepareNarrationChunks(projectId: number, narration: typeof mediaAssets.$inferSelect, db: Exclude<Awaited<ReturnType<typeof getDb>>, null>): Promise<StoredNarrationChunk[]> {
-  const cached = storedNarrationChunks(narration.analysisJson);
-  if (cached.length) return cached;
-  if ((narration.byteSize ?? 0) <= 23 * 1024 * 1024) return [{ storageKey: narration.storageKey, startMs: 0, endMs: 0 }];
+async function persistNarrationTranscriptionState(narration: typeof mediaAssets.$inferSelect, state: NarrationTranscriptionState, db: Exclude<Awaited<ReturnType<typeof getDb>>, null>) {
+  await db.update(mediaAssets).set({ analysisJson: { ...(narration.analysisJson && typeof narration.analysisJson === "object" ? narration.analysisJson as Record<string, unknown> : {}), transcriptionState: state } }).where(eq(mediaAssets.id, narration.id));
+}
+
+export async function prepareNarrationChunks(projectId: number, narration: typeof mediaAssets.$inferSelect, db: Exclude<Awaited<ReturnType<typeof getDb>>, null>): Promise<NarrationTranscriptionState> {
+  const cached = readNarrationTranscriptionState(narration.analysisJson);
+  if (cached?.chunks.every(chunk => chunk.byteSize <= SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES)) return cached;
+  const byteSize = narration.byteSize ?? 0;
+  if (byteSize <= SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES) {
+    const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: 0, chunks: [{ storageKey: narration.storageKey, startMs: 0, endMs: 0, contentStartMs: 0, contentEndMs: 0, byteSize, status: "pending", attempts: 0 }] };
+    await persistNarrationTranscriptionState(narration, state, db);
+    return state;
+  }
   if (narration.mimeType !== "audio/mpeg" && !narration.storageKey.toLowerCase().endsWith(".mp3")) throw new Error("This narration exceeds Groq’s 25 MB limit and must be uploaded as MP3 for safe frame-aware transcription chunking.");
   const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey));
   if (!sourceResponse.ok) throw new Error("The oversized narration could not be retrieved from secure storage for transcription chunking.");
   const chunks = splitMp3ForTranscription(new Uint8Array(await sourceResponse.arrayBuffer()));
-  const storedChunks = await Promise.all(chunks.map(async (chunk, index) => {
+  const storedChunks: PersistedNarrationChunk[] = await Promise.all(chunks.map(async (chunk, index) => {
     const stored = await storagePut(`projects/${projectId}/transcription-chunks/${narration.id}-part-${index + 1}.mp3`, chunk.bytes, "audio/mpeg");
-    return { storageKey: stored.key, startMs: chunk.startMs, endMs: chunk.endMs };
+    return { storageKey: stored.key, startMs: chunk.startMs, endMs: chunk.endMs, contentStartMs: chunk.contentStartMs, contentEndMs: chunk.contentEndMs, byteSize: chunk.bytes.byteLength, status: "pending", attempts: 0 };
   }));
-  await db.update(mediaAssets).set({ analysisJson: { ...(narration.analysisJson && typeof narration.analysisJson === "object" ? narration.analysisJson as Record<string, unknown> : {}), transcriptionChunks: storedChunks } }).where(eq(mediaAssets.id, narration.id));
-  return storedChunks;
+  const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: 4_000, chunks: storedChunks };
+  await persistNarrationTranscriptionState(narration, state, db);
+  return state;
+}
+
+export async function transcribePreparedNarrationChunks(userId: number, narration: typeof mediaAssets.$inferSelect, narrationState: NarrationTranscriptionState, db: Exclude<Awaited<ReturnType<typeof getDb>>, null>) {
+  let transcriptionKey: { label: string; maskedKey: string } | null = null;
+  for (let index = 0; index < narrationState.chunks.length; index += 1) {
+    const chunk = narrationState.chunks[index];
+    if (chunk.status === "completed" && chunk.transcript) continue;
+    chunk.status = "processing";
+    chunk.attempts += 1;
+    narrationState.lastError = undefined;
+    await persistNarrationTranscriptionState(narration, narrationState, db);
+    try {
+      const bytes = await loadNarrationChunkBytes(chunk.storageKey);
+      const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes, filename: `narration-part-${index + 1}.mp3`, mimeType: "audio/mpeg", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers." }), key }));
+      transcriptionKey ??= run.key;
+      chunk.status = "completed";
+      chunk.transcript = { text: run.value.text, language: run.value.language, segments: (run.value.segments ?? []).map(segment => ({ ...segment, start: segment.start + chunk.startMs / 1000, end: segment.end + chunk.startMs / 1000 })) };
+      chunk.provider = { maskedKey: run.key.maskedKey, model: GROQ_TRANSCRIPTION_MODEL, durationMs: run.value.requestMetadata.durationMs, httpStatus: run.value.requestMetadata.httpStatus, category: run.value.requestMetadata.category };
+      await persistNarrationTranscriptionState(narration, narrationState, db);
+    } catch (error) {
+      const safeError = error instanceof GroqRequestError || error instanceof GroqPoolExhaustedError ? error : null;
+      const metadata = safeError?.metadata;
+      chunk.status = error instanceof GroqRequestError && error.status === "quota_limited" ? "waiting" : "failed";
+      chunk.provider = { maskedKey: transcriptionKey?.maskedKey ?? "Groq key", model: GROQ_TRANSCRIPTION_MODEL, durationMs: metadata?.durationMs ?? 0, httpStatus: metadata?.httpStatus, category: metadata?.category ?? "unknown" };
+      narrationState.lastError = { category: metadata?.category ?? "unknown", message: safeError?.message ?? "Narration chunk transcription did not complete.", retryAfterMs: metadata?.retryAfterMs, httpStatus: metadata?.httpStatus, errorCode: metadata?.errorCode, remainingRequests: metadata?.remainingRequests, remainingAudio: metadata?.remainingAudio, resetAudio: metadata?.resetAudio, requestDurationMs: metadata?.durationMs ?? 0, occurredAtMs: Date.now() };
+      await persistNarrationTranscriptionState(narration, narrationState, db);
+      throw error;
+    }
+  }
+  return { narrationState, transcriptionKey, transcription: { text: summarizeNarrationText(narrationState.chunks), language: narrationState.chunks.find(chunk => chunk.transcript?.language)?.transcript?.language, segments: mergeChunkTranscripts(narrationState.chunks) } };
 }
 
 export async function processProjectWithGlobalReadablePacing(userId: number, projectId: number, publicOrigin?: string) {
@@ -73,19 +106,13 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
   const processingStartedAt = new Date();
   await db.update(projects).set({ status: "analyzing", workerState: "processing", processingStage: "transcribing", processingStartedAt, processingStageStartedAt: processingStartedAt }).where(eq(projects.id, projectId));
   try {
-    const narrationChunks = await prepareNarrationChunks(projectId, narration, db);
-    const transcriptionRuns: Array<{ value: TimestampedTranscript; key: { label: string; maskedKey: string } }> = [];
-    for (const chunk of narrationChunks) {
-      const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ url: await storageGetSignedUrl(chunk.storageKey), language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers." }), key }));
-      transcriptionRuns.push({ value: { ...run.value, segments: (run.value.segments ?? []).map(segment => ({ ...segment, start: segment.start + chunk.startMs / 1000, end: segment.end + chunk.startMs / 1000 })) }, key: run.key });
-    }
-    const transcriptionRun = transcriptionRuns[0];
-    if (!transcriptionRun) throw new Error("No narration chunks were available for Groq transcription.");
-    const transcription: TimestampedTranscript = { text: transcriptionRuns.map(run => run.value.text.trim()).filter(Boolean).join(" "), language: transcriptionRuns.find(run => run.value.language)?.value.language, segments: transcriptionRuns.flatMap(run => run.value.segments ?? []) };
+    const narrationState = await prepareNarrationChunks(projectId, narration, db);
+    const narrationResult = await transcribePreparedNarrationChunks(userId, narration, narrationState, db);
+    const { transcription, transcriptionKey } = narrationResult;
     const transcriptSegments = (transcription.segments ?? []).filter(segment => segment.text.trim());
     if (!transcriptSegments.length) throw new Error("Groq Whisper returned no timestamped narration segments.");
     await db.transaction(async transaction => {
-      await transaction.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: { provider: "groq", model: GROQ_TRANSCRIPTION_MODEL, providerKeyLabel: transcriptionRun.key.label, providerKeyMasked: transcriptionRun.key.maskedKey, transcriptionChunks: narrationChunks, text: transcription.text, language: transcription.language ?? "hi", segments: transcription.segments } }).where(eq(mediaAssets.id, narration.id));
+      await transaction.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: { provider: "groq", model: GROQ_TRANSCRIPTION_MODEL, providerKeyLabel: transcriptionKey?.label ?? null, providerKeyMasked: transcriptionKey?.maskedKey ?? null, transcriptionState: narrationState, text: transcription.text, language: transcription.language ?? "hi", segments: transcription.segments } }).where(eq(mediaAssets.id, narration.id));
       await transaction.update(projects).set({ processingStage: "analyzing_images", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
     });
     const analyzedImageCache = await db.select().from(mediaAssets).where(and(eq(mediaAssets.userId, userId), eq(mediaAssets.assetType, "image"), eq(mediaAssets.analysisState, "analyzed")));

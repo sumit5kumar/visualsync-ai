@@ -154,7 +154,8 @@ describe("middle-origin motion rendering", () => {
     const processor = readFileSync(resolve(projectRoot, "server/projectProcessor.ts"), "utf8");
     expect(processor).toContain("prepareNarrationChunks");
     expect(processor).toContain("splitMp3ForTranscription");
-    expect(processor).toContain("transcribeAudio({ url: await storageGetSignedUrl(chunk.storageKey)");
+    expect(processor).toContain("loadNarrationChunkBytes(chunk.storageKey)");
+    expect(processor).toContain("transcribeAudio({ bytes, filename: `narration-part-${index + 1}.mp3`");
     expect(providers).toContain("groqActivate.mutate");
     expect(providers).toContain("geminiActivate.mutate");
     expect(timeline).toContain("approve.mutate(input)");
