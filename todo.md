@@ -215,3 +215,5 @@
 - [x] Diagnose and repair the exhausted Groq key-pool retry path for the Test project, preserving uploaded media and requiring a genuine Groq timeline result.
 - [x] Diagnose and repair the repeated live “No eligible Groq keys” retry failure for the Test project after expired-unavailable cooldown recovery was added.
 - [x] Route oversized S3-backed narration through Groq’s secure URL transcription parameter instead of direct multipart attachment, preserving genuine timestamped analysis.
+- [x] Trace and repair the remaining live Groq transcription failure after the secure narration-URL route, so the Test project retry does not exhaust its key pool.
+- [ ] Hibernate the user’s laptop after completing and validating the active Groq retry repair.

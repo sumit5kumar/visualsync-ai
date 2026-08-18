@@ -16,6 +16,10 @@ function transcriptForRange(segments: Array<{ start: number; end: number; text: 
 const MAX_PACING_IMAGES_PER_REQUEST = 24;
 const MAX_PACING_NARRATION_CHARACTERS = 3600;
 export function buildBoundedPacingBatches<T>(items: T[], batchSize = MAX_PACING_IMAGES_PER_REQUEST) { const batches: T[][] = []; for (let index = 0; index < items.length; index += batchSize) batches.push(items.slice(index, index + batchSize)); return batches; }
+export function buildPublicManagedStorageUrl(origin: string, storageKey: string) {
+  const safePath = storageKey.split("/").map(segment => encodeURIComponent(segment)).join("/");
+  return new URL(`/manus-storage/${safePath}`, origin).toString();
+}
 
 async function boundedVisionImageUrl(storageKey: string) {
   const url = await storageGetSignedUrl(storageKey);
@@ -26,7 +30,7 @@ async function boundedVisionImageUrl(storageKey: string) {
   return `data:image/jpeg;base64,${preview.toString("base64")}`;
 }
 
-export async function processProjectWithGlobalReadablePacing(userId: number, projectId: number) {
+export async function processProjectWithGlobalReadablePacing(userId: number, projectId: number, publicOrigin?: string) {
   const db = await getDb();
   if (!db) throw new Error("Database storage is not available.");
   const [project] = await db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1);
@@ -38,7 +42,7 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
   const processingStartedAt = new Date();
   await db.update(projects).set({ status: "analyzing", workerState: "processing", processingStage: "transcribing", processingStartedAt, processingStageStartedAt: processingStartedAt }).where(eq(projects.id, projectId));
   try {
-    const narrationUrl = await storageGetSignedUrl(narration.storageKey);
+    const narrationUrl = publicOrigin ? buildPublicManagedStorageUrl(publicOrigin, narration.storageKey) : await storageGetSignedUrl(narration.storageKey);
     const transcriptionRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ url: narrationUrl, language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers." }), key }));
     const transcription = transcriptionRun.value;
     const transcriptSegments = (transcription.segments ?? []).filter(segment => segment.text.trim());
