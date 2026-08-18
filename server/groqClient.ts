@@ -30,9 +30,20 @@ export class GroqClient {
     return { Authorization: `Bearer ${this.apiKey}`, ...(contentType ? { "Content-Type": contentType } : {}) };
   }
 
+  private async request(url: string, init: RequestInit) {
+    try {
+      return await fetch(url, init);
+    } catch {
+      // Native fetch failures (for example, a temporary upstream socket reset) do not
+      // have an HTTP status. Convert them into the state understood by the rotation
+      // pool so it can cool down this key and try the next eligible one.
+      throw new GroqRequestError("Groq could not be reached for this request.", "unavailable");
+    }
+  }
+
   async testKey(): Promise<GroqKeyTestResult> {
     try {
-      const response = await fetch(`${GROQ_API_BASE_URL}/models`, { headers: this.headers("application/json"), signal: AbortSignal.timeout(20_000) });
+      const response = await this.request(`${GROQ_API_BASE_URL}/models`, { headers: this.headers("application/json"), signal: AbortSignal.timeout(20_000) });
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
         throw classifyGroqError(response.status, payload?.error?.message ?? "");
@@ -55,7 +66,7 @@ export class GroqClient {
     body.append("timestamp_granularities[]", "segment");
     if (input.language) body.append("language", input.language);
     if (input.prompt) body.append("prompt", input.prompt);
-    const response = await fetch(`${GROQ_API_BASE_URL}/audio/transcriptions`, { method: "POST", headers: this.headers(), body, signal: AbortSignal.timeout(90_000) });
+    const response = await this.request(`${GROQ_API_BASE_URL}/audio/transcriptions`, { method: "POST", headers: this.headers(), body, signal: AbortSignal.timeout(90_000) });
     if (!response.ok) {
       const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
       throw classifyGroqError(response.status, payload?.error?.message ?? "");
@@ -64,7 +75,7 @@ export class GroqClient {
   }
 
   async analyzeImage(input: { imageUrl: string; prompt: string }) {
-    const response = await fetch(`${GROQ_API_BASE_URL}/chat/completions`, {
+    const response = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: this.headers("application/json"),
       body: JSON.stringify({
@@ -88,7 +99,7 @@ export class GroqClient {
   }
 
   async completeText(input: { prompt: string }) {
-    const response = await fetch(`${GROQ_API_BASE_URL}/chat/completions`, {
+    const response = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: this.headers("application/json"),
       body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, messages: [{ role: "user", content: input.prompt }] }),
@@ -105,7 +116,7 @@ export class GroqClient {
   }
 
   async completeJson(input: { prompt: string }) {
-    const response = await fetch(`${GROQ_API_BASE_URL}/chat/completions`, {
+    const response = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: this.headers("application/json"),
       body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 500, reasoning_effort: "none", reasoning_format: "hidden", response_format: { type: "json_object" }, messages: [{ role: "user", content: input.prompt }] }),
@@ -122,7 +133,7 @@ export class GroqClient {
   }
 
   async completePacingPlan(input: { prompt: string }) {
-    const response = await fetch(`${GROQ_API_BASE_URL}/chat/completions`, {
+    const response = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, {
       method: "POST",
       headers: this.headers("application/json"),
       body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 500, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: input.prompt }] }),

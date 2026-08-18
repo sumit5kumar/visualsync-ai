@@ -209,3 +209,4 @@
 - [x] Apply a UI-only VisualSync design-system cleanup across frontend layout, hierarchy, wording, status presentation, and responsiveness without changing any existing behavior, backend route, database, AI provider, timeline, worker, or local-rendering logic.
 - [x] Repair the nonfunctional × clear control for selected narration, image-folder, or output-folder values in project upload setup without changing project upload or rendering behavior.
 - [x] Remove horizontal overflow from the project setup dialog by making the upload picker controls responsive while preserving all selection and cancel behavior.
+- [x] Diagnose and repair the Projects-page mutation that surfaces `fetch failed` during project media upload or timeline processing, without changing project or local-render behavior.

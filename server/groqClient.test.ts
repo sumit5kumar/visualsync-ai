@@ -58,4 +58,14 @@ describe("GroqClient", () => {
 
     await expect(new GroqClient("gsk_test").completeText({ prompt: "large" })).rejects.toMatchObject({ status: "request_too_large" });
   });
+
+  it("converts a native transcription fetch failure into a rotation-safe unavailable error without leaking details", async () => {
+    const rawTransportDetail = "gsk_transport_failure_must_not_surface";
+    global.fetch = vi.fn().mockRejectedValue(new TypeError(`fetch failed: ${rawTransportDetail}`));
+
+    const request = new GroqClient("gsk_test").transcribeAudio({ bytes: new Uint8Array([1, 2, 3]), filename: "narration.mp3", mimeType: "audio/mpeg" });
+
+    await expect(request).rejects.toMatchObject({ status: "unavailable", message: "Groq could not be reached for this request." });
+    await request.catch(error => expect(error.message).not.toContain(rawTransportDetail));
+  });
 });

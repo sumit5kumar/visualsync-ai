@@ -56,4 +56,25 @@ describe("Groq pool executor", () => {
     await expect(result).rejects.toBeInstanceOf(GroqPoolExhaustedError);
     await result.catch(error => expect(`${error.name}:${error.message}`).not.toContain(rawSecret));
   });
+
+  it("retries the next eligible key after a transport-level Groq unavailable error", async () => {
+    const keys = [{ id: 11 }, { id: 12 }];
+    const onSuccess = vi.fn(async () => undefined);
+    const onFailure = vi.fn(async () => undefined);
+
+    const result = await executeBoundedGroqRotation({
+      reserve: async () => keys.shift()!,
+      onSuccess,
+      onFailure,
+      operation: async key => {
+        if (key.id === 11) throw new GroqRequestError("Groq could not be reached for this request.", "unavailable");
+        return "processed";
+      },
+    });
+
+    expect(result).toBe("processed");
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onFailure).toHaveBeenCalledWith({ id: 11 }, expect.objectContaining({ status: "unavailable" }));
+    expect(onSuccess).toHaveBeenCalledWith({ id: 12 });
+  });
 });
