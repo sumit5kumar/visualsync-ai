@@ -254,3 +254,5 @@
 - [x] Diagnose the production Groq transcription 403 against the working development configuration without changing code, keys, processing, or rendering.
 - [x] Audit non-secret Groq key rotation history to identify the working and failing key associations that the persisted application records can establish.
 - [x] Add a read-only Groq key provenance indicator distinguishing the key verified in Default Project from keys whose issuing project is externally unverified, without changing key behavior.
+- [x] Add a reversible Default Project-verified Groq eligibility rule for the authorized controlled retry, retaining all external keys encrypted and stored without deletion or disabling.
+- [ ] Retry the preserved short-WAV Timeline job using only the verified Default Project key and verify its durable production progress without rendering.

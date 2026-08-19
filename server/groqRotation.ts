@@ -1,4 +1,5 @@
 export type GroqPoolStatus = "untested" | "verified" | "quota_limited" | "invalid" | "permission_restricted" | "unavailable";
+export type GroqProjectVerification = "unverified" | "default_project_verified" | "externally_verified";
 
 export type RotationCandidate = {
   id: number;
@@ -6,6 +7,10 @@ export type RotationCandidate = {
   testStatus: GroqPoolStatus;
   cooldownUntil: Date | null;
 };
+
+export function isProjectVerifiedForAutomaticRotation(candidate: { projectVerification: GroqProjectVerification }) {
+  return candidate.projectVerification !== "unverified";
+}
 
 export function isEligibleForGroqRotation(candidate: RotationCandidate, now: Date) {
   return candidate.testStatus === "verified" || ((candidate.testStatus === "quota_limited" || candidate.testStatus === "unavailable") && Boolean(candidate.cooldownUntil && candidate.cooldownUntil <= now));

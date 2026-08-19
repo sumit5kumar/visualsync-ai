@@ -45,11 +45,11 @@ export async function listUserProjects(userId: number) {
   const [projectRecords, assets, activeGroqKeys, generationJobs] = await Promise.all([
     db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.updatedAt)),
     db.select({ projectId: mediaAssets.projectId, assetType: mediaAssets.assetType, byteSize: mediaAssets.byteSize, analysisState: mediaAssets.analysisState, analysisJson: mediaAssets.analysisJson }).from(mediaAssets).where(eq(mediaAssets.userId, userId)),
-    db.select({ testStatus: groqApiKeys.testStatus, cooldownUntil: groqApiKeys.cooldownUntil }).from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true))),
+    db.select({ testStatus: groqApiKeys.testStatus, cooldownUntil: groqApiKeys.cooldownUntil, projectVerification: groqApiKeys.projectVerification }).from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true))),
     db.select().from(timelineGenerationJobs).where(eq(timelineGenerationJobs.userId, userId)),
   ]);
   const now = new Date();
-  const hasEligibleGroqKey = activeGroqKeys.some(key => key.testStatus === "verified" || ((key.testStatus === "quota_limited" || key.testStatus === "unavailable") && Boolean(key.cooldownUntil && key.cooldownUntil <= now)));
+  const hasEligibleGroqKey = activeGroqKeys.some(key => key.projectVerification !== "unverified" && (key.testStatus === "verified" || ((key.testStatus === "quota_limited" || key.testStatus === "unavailable") && Boolean(key.cooldownUntil && key.cooldownUntil <= now))));
   return projectRecords.map(project => {
     const projectAssets = assets.filter(asset => asset.projectId === project.id);
     const imageAssets = projectAssets.filter(asset => asset.assetType === "image");
@@ -188,7 +188,7 @@ export async function removeGeminiKey(userId: number, keyId: number) {
 
 export async function listVisibleGroqKeys(userId: number) {
   const db = await requireDb();
-  return (await db.select().from(groqApiKeys).where(eq(groqApiKeys.userId, userId)).orderBy(groqApiKeys.rotationOrder, groqApiKeys.id)).map(record => ({ id: record.id, label: record.label, maskedKey: `${record.keyPrefix}••••••••${record.keySuffix}`, isActive: record.isActive, rotationOrder: record.rotationOrder, testStatus: record.testStatus, lastTestedAt: record.lastTestedAt, lastUsedAt: record.lastUsedAt, lastFailureAt: record.lastFailureAt, cooldownUntil: record.cooldownUntil, consecutiveRateLimits: record.consecutiveRateLimits, createdAt: record.createdAt }));
+  return (await db.select().from(groqApiKeys).where(eq(groqApiKeys.userId, userId)).orderBy(groqApiKeys.rotationOrder, groqApiKeys.id)).map(record => ({ id: record.id, label: record.label, maskedKey: `${record.keyPrefix}••••••••${record.keySuffix}`, isActive: record.isActive, rotationOrder: record.rotationOrder, projectVerification: record.projectVerification, testStatus: record.testStatus, lastTestedAt: record.lastTestedAt, lastUsedAt: record.lastUsedAt, lastFailureAt: record.lastFailureAt, cooldownUntil: record.cooldownUntil, consecutiveRateLimits: record.consecutiveRateLimits, createdAt: record.createdAt }));
 }
 
 export async function getStoredGroqKey(userId: number, keyId: number) {

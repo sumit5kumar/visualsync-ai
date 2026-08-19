@@ -5,6 +5,7 @@ import { decryptSecret } from "./crypto";
 import { GroqClient, GroqRequestError, type GroqRequestMetadata } from "./groqClient";
 import { GroqPoolExhaustedError } from "./groqPool";
 import { processProjectTimelineSlice, type TimelineGenerationSliceResult } from "./projectProcessor";
+import { isProjectVerifiedForAutomaticRotation } from "./groqRotation";
 
 export const TIMELINE_JOB_CRON = "0 */2 * * * *";
 export const DEFAULT_TIMELINE_RETRY_MS = 120_000;
@@ -97,13 +98,15 @@ async function preflightGroqTimelineJob(userId: number) {
   const db = await requireDb();
   const keys = await db.select().from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true))).orderBy(groqApiKeys.rotationOrder, groqApiKeys.id);
   if (!keys.length) throw new GroqRequestError("No active Groq key is configured. Add and verify a Groq key before starting Timeline Generation.", "prompt_error", { durationMs: 0, category: "client_request" });
-  const eligible = keys.filter(key => key.testStatus !== "invalid" && key.testStatus !== "permission_restricted" && (!key.cooldownUntil || key.cooldownUntil <= new Date()));
+  const projectVerifiedKeys = keys.filter(isProjectVerifiedForAutomaticRotation);
+  const eligible = projectVerifiedKeys.filter(key => key.testStatus !== "invalid" && key.testStatus !== "permission_restricted" && (!key.cooldownUntil || key.cooldownUntil <= new Date()));
   if (!eligible.length) {
-    if (keys.length > 0 && keys.every(key => key.testStatus === "permission_restricted")) throw new GroqRequestError("Groq model permission denied for every configured key. Correct the Groq organization or project model permissions, then use Retry analysis.", "permission_restricted", { durationMs: 0, category: "permission_denied" });
-    if (keys.length > 0 && keys.every(key => key.testStatus === "invalid")) throw new GroqRequestError("Every configured Groq key is invalid or revoked. Add a replacement key, then use Retry analysis.", "invalid", { durationMs: 0, category: "invalid_key" });
-    const retryAtMs = Math.min(...keys.filter(key => key.cooldownUntil && key.cooldownUntil > new Date()).map(key => key.cooldownUntil!.getTime()));
+    if (!projectVerifiedKeys.length) throw new GroqRequestError("No project-verified Groq key is configured for automatic processing. Verify a key’s issuing Groq project before retrying.", "permission_restricted", { durationMs: 0, category: "permission_denied" });
+    if (projectVerifiedKeys.every(key => key.testStatus === "permission_restricted")) throw new GroqRequestError("Groq model permission denied for every project-verified key. Correct that Groq project’s model permissions, then use Retry analysis.", "permission_restricted", { durationMs: 0, category: "permission_denied" });
+    if (projectVerifiedKeys.every(key => key.testStatus === "invalid")) throw new GroqRequestError("Every project-verified Groq key is invalid or revoked. Add a replacement key, then use Retry analysis.", "invalid", { durationMs: 0, category: "invalid_key" });
+    const retryAtMs = Math.min(...projectVerifiedKeys.filter(key => key.cooldownUntil && key.cooldownUntil > new Date()).map(key => key.cooldownUntil!.getTime()));
     if (Number.isFinite(retryAtMs)) throw new GroqRequestError("All configured Groq keys are temporarily rate-limited or unavailable. The Timeline job will retry automatically.", "quota_limited", { durationMs: 0, category: "rate_limited", retryAfterMs: Math.max(0, retryAtMs - Date.now()) });
-    throw new GroqRequestError("No configured Groq key is currently eligible. Add a verified key or correct the displayed provider configuration.", "unavailable", { durationMs: 0, category: "unknown" });
+    throw new GroqRequestError("No project-verified Groq key is currently eligible. Verify the issuing Groq project before using another stored key.", "unavailable", { durationMs: 0, category: "unknown" });
   }
   let lastFailure: GroqRequestError | null = null;
   for (const key of eligible) {

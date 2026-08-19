@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseRoundRobinKey, isEligibleForGroqRotation, providerRetryDelayMs, rateLimitCooldownMs } from "./groqRotation";
+import { chooseRoundRobinKey, isEligibleForGroqRotation, isProjectVerifiedForAutomaticRotation, providerRetryDelayMs, rateLimitCooldownMs } from "./groqRotation";
 
 const now = new Date("2026-08-15T00:00:00.000Z");
 const key = (id: number, rotationOrder: number, testStatus: "verified" | "quota_limited" | "invalid" | "unavailable" | "untested" = "verified", cooldownUntil: Date | null = null) => ({ id, rotationOrder, testStatus, cooldownUntil });
@@ -46,5 +46,11 @@ describe("Groq rotation policy", () => {
     expect(providerRetryDelayMs({ retryAfterMs: 18_000 })).toBe(18_000);
     expect(providerRetryDelayMs({ resetAudio: "2.5s" })).toBe(2_500);
     expect(providerRetryDelayMs({})).toBeNull();
+  });
+
+  it("excludes externally unverified stored keys from automatic rotation without changing their active state", () => {
+    expect(isProjectVerifiedForAutomaticRotation({ projectVerification: "default_project_verified" })).toBe(true);
+    expect(isProjectVerifiedForAutomaticRotation({ projectVerification: "externally_verified" })).toBe(true);
+    expect(isProjectVerifiedForAutomaticRotation({ projectVerification: "unverified" })).toBe(false);
   });
 });

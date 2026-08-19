@@ -1,0 +1,1 @@
+ALTER TABLE `groqApiKeys` ADD `projectVerification` enum('unverified','default_project_verified','externally_verified') DEFAULT 'unverified' NOT NULL;

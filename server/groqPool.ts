@@ -3,7 +3,7 @@ import { groqApiKeys, groqKeyRotationStates } from "../drizzle/schema";
 import { decryptSecret } from "./crypto";
 import { getDb } from "./db";
 import { GroqClient, GroqRequestError, type GroqRequestMetadata } from "./groqClient";
-import { chooseRoundRobinKey, nextRotationCursor, providerRetryDelayMs } from "./groqRotation";
+import { chooseRoundRobinKey, isProjectVerifiedForAutomaticRotation, nextRotationCursor, providerRetryDelayMs } from "./groqRotation";
 
 type StoredGroqKey = typeof groqApiKeys.$inferSelect;
 
@@ -61,7 +61,8 @@ async function reserveNextGroqKey(userId: number) {
   const now = new Date();
   return db.transaction(async transaction => {
     const [state] = await transaction.select().from(groqKeyRotationStates).where(eq(groqKeyRotationStates.userId, userId)).limit(1);
-    const candidates = await transaction.select().from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true)));
+    const storedCandidates = await transaction.select().from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true)));
+    const candidates = storedCandidates.filter(isProjectVerifiedForAutomaticRotation);
     const candidate = chooseRoundRobinKey(candidates, state?.nextRotationOrder ?? 0, now);
     if (!candidate) {
       const coolingKeys = candidates.filter(record => (record.testStatus === "quota_limited" || record.testStatus === "unavailable") && record.cooldownUntil && record.cooldownUntil > now);
@@ -69,6 +70,7 @@ async function reserveNextGroqKey(userId: number) {
         const retryAtMs = Math.min(...coolingKeys.map(record => record.cooldownUntil!.getTime()));
         throw new GroqPoolExhaustedError("All configured Groq keys are temporarily cooling down. The Timeline job will retry automatically.", { durationMs: 0, category: "rate_limited", retryAfterMs: Math.max(0, retryAtMs - now.getTime()) });
       }
+      if (storedCandidates.length) throw new GroqPoolExhaustedError("No project-verified Groq key is eligible for automatic rotation. Verify the issuing Groq project before using another stored key.");
       throw new GroqPoolExhaustedError();
     }
     const selected = candidates.find(record => record.id === candidate.id);
