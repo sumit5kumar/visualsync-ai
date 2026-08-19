@@ -10,6 +10,7 @@ type ProgressInput = {
   narrationAnalyzed: boolean;
   audioDurationMs: number | null;
   narrationChunks?: { totalChunks: number; completedChunks: number; activeChunkIndex: number; chunkOverlapMs: number; state: "processing" | "waiting" | "completed"; lastError: { category: string; message: string; retryAfterMs?: number; httpStatus?: number; requestDurationMs: number } | null } | null;
+  backgroundJob?: { status: "queued" | "processing" | "waiting_for_retry" | "completed" | "failed"; retryAt: Date | null; lastError: { message?: string } | null } | null;
   now?: Date;
 };
 
@@ -80,6 +81,15 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
     label = "Processing needs attention";
     message = "The last processing attempt did not complete. You can retry once the reported issue is resolved.";
     estimatedRemainingMs = 0;
+  }
+
+  if (input.backgroundJob?.status === "queued") {
+    label = "Timeline Generation queued";
+    message = "The hosted job is queued and will continue independently of this browser.";
+  } else if (input.backgroundJob?.status === "waiting_for_retry") {
+    const retryAtMs = input.backgroundJob.retryAt?.getTime();
+    label = "Waiting for Groq — retry scheduled automatically";
+    message = `${input.backgroundJob.lastError?.message ?? "Groq temporarily refused the current work unit."}${retryAtMs ? ` The hosted job will retry automatically in about ${Math.max(0, Math.ceil((retryAtMs - now.getTime()) / 1000))} seconds.` : " The hosted job will retry automatically."}`;
   }
 
   return {

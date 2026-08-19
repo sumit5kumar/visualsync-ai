@@ -24,6 +24,15 @@ describe("project processing progress", () => {
     expect(progress?.message).toContain("Waiting 18 seconds");
   });
 
+  it("restores a server-persisted hosted retry state after the browser returns", () => {
+    const now = new Date("2026-08-18T10:00:00.000Z");
+    const progress = buildProjectProcessingProgress({ status: "analyzing", processingStage: "transcribing", processingStartedAt: new Date("2026-08-18T09:00:00.000Z"), processingStageStartedAt: new Date("2026-08-18T09:30:00.000Z"), totalImageCount: 298, completedImageCount: 0, narrationAnalyzed: false, audioDurationMs: 31 * 60 * 1000, narrationChunks: { totalChunks: 448, completedChunks: 200, activeChunkIndex: 201, chunkOverlapMs: 4_000, state: "waiting", lastError: null }, backgroundJob: { status: "waiting_for_retry", retryAt: new Date("2026-08-18T10:02:00.000Z"), lastError: { message: "Groq audio quota is currently exhausted." } }, now });
+
+    expect(progress?.label).toBe("Waiting for Groq — retry scheduled automatically");
+    expect(progress?.message).toContain("retry automatically in about 120 seconds");
+    expect(progress?.narration.chunks?.completedChunks).toBe(200);
+  });
+
   it("does not invent live progress for projects that are not currently analyzing", () => {
     expect(buildProjectProcessingProgress({ status: "timeline_ready", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null, totalImageCount: 300, completedImageCount: 300, narrationAnalyzed: true, audioDurationMs: 30 * 60 * 1000 })).toBeNull();
   });

@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { geminiApiKeys, groqApiKeys, mediaAssets, projects, timelineApprovals, timelineSegments, type InsertUser, users } from "../drizzle/schema";
+import { geminiApiKeys, groqApiKeys, mediaAssets, projects, timelineApprovals, timelineGenerationJobs, timelineSegments, type InsertUser, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { canEditValidatedTimeline, planImageSubstitution } from "./timelineEditing";
 import { validateTimeline } from "./timelineValidation";
@@ -42,10 +42,11 @@ export async function getUserByOpenId(openId: string) {
 
 export async function listUserProjects(userId: number) {
   const db = await requireDb();
-  const [projectRecords, assets, activeGroqKeys] = await Promise.all([
+  const [projectRecords, assets, activeGroqKeys, generationJobs] = await Promise.all([
     db.select().from(projects).where(eq(projects.userId, userId)).orderBy(desc(projects.updatedAt)),
     db.select({ projectId: mediaAssets.projectId, assetType: mediaAssets.assetType, byteSize: mediaAssets.byteSize, analysisState: mediaAssets.analysisState, analysisJson: mediaAssets.analysisJson }).from(mediaAssets).where(eq(mediaAssets.userId, userId)),
     db.select({ testStatus: groqApiKeys.testStatus, cooldownUntil: groqApiKeys.cooldownUntil }).from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true))),
+    db.select().from(timelineGenerationJobs).where(eq(timelineGenerationJobs.userId, userId)),
   ]);
   const now = new Date();
   const hasEligibleGroqKey = activeGroqKeys.some(key => key.testStatus === "verified" || ((key.testStatus === "quota_limited" || key.testStatus === "unavailable") && Boolean(key.cooldownUntil && key.cooldownUntil <= now)));
@@ -58,7 +59,8 @@ export async function listUserProjects(userId: number) {
     const narrationChunks = narrationTranscriptionSummary(narrationAsset?.analysisJson);
     const sourcesAttached = Boolean(project.narrationStorageKey && project.audioDurationMs && narrationAsset && imageAssets.length > 0);
     const semanticAnalysisComplete = sourcesAttached && narrationAnalyzed && analyzedImageCount === imageAssets.length;
-    const processingProgress = buildProjectProcessingProgress({ status: project.status, processingStage: project.processingStage, processingStartedAt: project.processingStartedAt, processingStageStartedAt: project.processingStageStartedAt, totalImageCount: imageAssets.length, completedImageCount: analyzedImageCount, narrationAnalyzed, audioDurationMs: project.audioDurationMs, narrationChunks });
+    const timelineGenerationJob = generationJobs.find(job => job.projectId === project.id) ?? null;
+    const processingProgress = buildProjectProcessingProgress({ status: project.status, processingStage: project.processingStage, processingStartedAt: project.processingStartedAt, processingStageStartedAt: project.processingStageStartedAt, totalImageCount: imageAssets.length, completedImageCount: analyzedImageCount, narrationAnalyzed, audioDurationMs: project.audioDurationMs, narrationChunks, backgroundJob: timelineGenerationJob ? { status: timelineGenerationJob.status, retryAt: timelineGenerationJob.retryAt, lastError: timelineGenerationJob.lastError as { message?: string } | null } : null });
     return {
       ...project,
       sourceImageCount: imageAssets.length,
@@ -69,6 +71,7 @@ export async function listUserProjects(userId: number) {
       narrationAnalyzed,
       semanticAnalysisComplete,
       processingProgress,
+      timelineGenerationJob: timelineGenerationJob ? { status: timelineGenerationJob.status, currentStage: timelineGenerationJob.currentStage, retryAt: timelineGenerationJob.retryAt?.getTime() ?? null, lastError: timelineGenerationJob.lastError } : null,
       analysisBlocker: processingProgress ? null : project.status === "timeline_ready"
         ? "A genuine AI-selected timeline is ready and has passed continuous coverage validation."
         : project.status === "failed" || project.workerState === "error"

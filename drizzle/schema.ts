@@ -37,6 +37,26 @@ export const projects = mysqlTable("projects", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [index("projects_user_updated_idx").on(table.userId, table.updatedAt)]);
 
+export const timelineGenerationJobs = mysqlTable("timelineGenerationJobs", {
+  id: int("id").autoincrement().primaryKey(),
+  projectId: int("projectId").notNull().unique(),
+  userId: int("userId").notNull(),
+  status: mysqlEnum("status", ["queued", "processing", "waiting_for_retry", "completed", "failed"]).notNull().default("queued"),
+  currentStage: mysqlEnum("currentStage", ["queued", "transcribing", "analyzing_images", "building_timeline", "finalizing", "completed", "failed"]).notNull().default("queued"),
+  attemptCount: int("attemptCount").notNull().default(0),
+  transientFailureCount: int("transientFailureCount").notNull().default(0),
+  retryAt: timestamp("retryAt"),
+  lastError: json("lastError"),
+  workState: json("workState"),
+  scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }),
+  leaseToken: varchar("leaseToken", { length: 64 }),
+  leaseExpiresAt: timestamp("leaseExpiresAt"),
+  startedAt: timestamp("startedAt"),
+  completedAt: timestamp("completedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [index("timeline_generation_jobs_user_status_idx").on(table.userId, table.status), index("timeline_generation_jobs_schedule_uid_idx").on(table.scheduleCronTaskUid)]);
+
 export const geminiApiKeys = mysqlTable("geminiApiKeys", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),

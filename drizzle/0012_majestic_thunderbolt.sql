@@ -1,0 +1,1 @@
+ALTER TABLE `timelineGenerationJobs` ADD `workState` json;

@@ -18,6 +18,7 @@ export type PersistedNarrationChunk = {
   byteSize: number;
   status: NarrationChunkStatus;
   attempts: number;
+  lastAttemptAtMs?: number;
   transcript?: { text: string; language?: string; segments: TimestampedNarrationSegment[] };
   provider?: { maskedKey: string; model: string; durationMs: number; httpStatus?: number; category: string };
 };

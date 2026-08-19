@@ -1,11 +1,13 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
+import { parse as parseCookie } from "cookie";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { activateGeminiKey, activateGroqKey, approveTimeline, createProjectRecord, deleteProjectRecord, getApprovedRenderHandoff, getRenderedProjectVideo, getStoredGeminiKey, getStoredGroqKey, getTimelineReview, listProjectTimeline, listRenderedProjectVideos, listTimelineCandidates, listUserProjects, listVisibleGeminiKeys, listVisibleGroqKeys, prepareProjectMediaImport, recordGeminiKeyTest, recordGroqKeyTest, removeGeminiKey, removeGroqKey, saveValidatedGeminiKey, saveValidatedGroqKey, substituteTimelineImage, updateProjectSetup, updateProjectZoomSettings } from "./db";
-import { processProjectWithGlobalReadablePacing } from "./projectProcessor";
+import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
+import { getTimelineGenerationJob, queueTimelineGenerationJob, setTimelineGenerationSchedule, TIMELINE_JOB_CRON } from "./timelineGenerationJobs";
 import { decryptSecret, describeApiKey, describeGeminiKey, encryptSecret, fingerprintSecret } from "./crypto";
 import { GEMINI_MODEL, GeminiClient } from "./geminiClient";
 import { GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL, GroqClient } from "./groqClient";
@@ -31,7 +33,20 @@ export function requestPublicOrigin(req: { protocol?: string; get?: (name: strin
 export const appRouter = router({
   system: systemRouter,
   auth: router({ me: publicProcedure.query(opts => opts.ctx.user), logout: publicProcedure.mutation(({ ctx }) => { const cookieOptions = getSessionCookieOptions(ctx.req); ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 }); return { success: true } as const; }) }),
-  project: router({ list: protectedProcedure.query(({ ctx }) => listUserProjects(ctx.user.id)), create: protectedProcedure.input(projectInput).mutation(async ({ ctx, input }) => ({ success: true as const, ...(await createProjectRecord(ctx.user.id, input)) })), updateSetup: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), narrationOriginalName: z.string().trim().max(255).optional(), imageSourcePath: z.string().trim().max(2048).optional(), outputPath: z.string().trim().max(2048).optional() })).mutation(({ ctx, input }) => updateProjectSetup(ctx.user.id, input.projectId, input)), updateZoom: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), enabled: z.boolean(), amountPercent: z.union([z.literal(3), z.literal(5), z.literal(8), z.literal(12)]), direction: z.enum(["IN", "OUT", "AUTO"]), crossfadeDurationMs: z.union([z.literal(0), z.literal(300), z.literal(500), z.literal(800), z.literal(1000), z.literal(1200)]) })).mutation(({ ctx, input }) => updateProjectZoomSettings(ctx.user.id, input.projectId, input)), remove: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => deleteProjectRecord(ctx.user.id, input.projectId)), prepareMediaImport: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => prepareProjectMediaImport(ctx.user.id, input.projectId)), processGlobalTimeline: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => processProjectWithGlobalReadablePacing(ctx.user.id, input.projectId, requestPublicOrigin(ctx.req))), readablePacingPolicy: protectedProcedure.query(() => ({ useEverySourceImageInOrder: true, provider: "groq", preferredMinimumDurationMs: 2200, adaptiveMinimum: true, equalDurationFallbackAllowed: false })) }),
+  project: router({ list: protectedProcedure.query(({ ctx }) => listUserProjects(ctx.user.id)), create: protectedProcedure.input(projectInput).mutation(async ({ ctx, input }) => ({ success: true as const, ...(await createProjectRecord(ctx.user.id, input)) })), updateSetup: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), narrationOriginalName: z.string().trim().max(255).optional(), imageSourcePath: z.string().trim().max(2048).optional(), outputPath: z.string().trim().max(2048).optional() })).mutation(({ ctx, input }) => updateProjectSetup(ctx.user.id, input.projectId, input)), updateZoom: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), enabled: z.boolean(), amountPercent: z.union([z.literal(3), z.literal(5), z.literal(8), z.literal(12)]), direction: z.enum(["IN", "OUT", "AUTO"]), crossfadeDurationMs: z.union([z.literal(0), z.literal(300), z.literal(500), z.literal(800), z.literal(1000), z.literal(1200)]) })).mutation(({ ctx, input }) => updateProjectZoomSettings(ctx.user.id, input.projectId, input)), remove: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => deleteProjectRecord(ctx.user.id, input.projectId)), prepareMediaImport: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => prepareProjectMediaImport(ctx.user.id, input.projectId)), processGlobalTimeline: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+    if (process.env.NODE_ENV !== "production") throw new Error("Persistent Timeline Generation is ready in this build. Publish this version before starting a hosted job so its secure callback can be reached.");
+    const previous = await getTimelineGenerationJob(ctx.user.id, input.projectId);
+    const job = await queueTimelineGenerationJob(ctx.user.id, input.projectId);
+    const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
+    if (!sessionToken) throw new Error("Sign in again before starting hosted Timeline Generation.");
+    if (previous?.scheduleCronTaskUid) {
+      await updateHeartbeatJob(previous.scheduleCronTaskUid, { cron: TIMELINE_JOB_CRON, path: "/api/scheduled/timeline-generation", method: "POST", payload: {}, enable: true, description: `Persistent Timeline Generation for project ${input.projectId}` }, sessionToken);
+      return { jobId: job.id, status: "queued" as const, scheduled: true };
+    }
+    const schedule = await createHeartbeatJob({ name: `timeline-generation-${input.projectId}`, cron: TIMELINE_JOB_CRON, path: "/api/scheduled/timeline-generation", method: "POST", payload: {}, description: `Persistent Timeline Generation for project ${input.projectId}` }, sessionToken);
+    await setTimelineGenerationSchedule(ctx.user.id, input.projectId, schedule.taskUid);
+    return { jobId: job.id, status: "queued" as const, scheduled: true, nextExecutionAt: schedule.nextExecutionAt ?? null };
+  }), readablePacingPolicy: protectedProcedure.query(() => ({ useEverySourceImageInOrder: true, provider: "groq", preferredMinimumDurationMs: 2200, adaptiveMinimum: true, equalDurationFallbackAllowed: false })) }),
   gemini: router({
     model: publicProcedure.query(() => GEMINI_MODEL),
     list: protectedProcedure.query(({ ctx }) => listVisibleGeminiKeys(ctx.user.id)),

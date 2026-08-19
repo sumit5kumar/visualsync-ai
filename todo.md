@@ -238,3 +238,6 @@
 - [x] Diagnose the Test project’s missing approved-render handoff file without starting a local render.
 - [x] Preserve the actual selected Windows native source and output paths so future handoff commands do not reconstruct an incorrect Downloads path.
 - [x] Diagnose and repair the Windows Fast Render FFmpeg command-length failure for large approved timelines without changing their timeline or rendering settings.
+- [x] Explain the Test project’s actual hosted versus local execution path and whether the current app guarantees unattended resumable cloud timeline processing, without making implementation changes.
+- [x] Explain the completed Test Fast Render’s actual performance and console warnings from its local render profile without changing the renderer.
+- [ ] Make the existing Groq Free-tier Timeline Generation pipeline a durable hosted background job with persisted job state, automatic transient retry, browser/laptop independence, and unchanged local-only MP4 rendering.
