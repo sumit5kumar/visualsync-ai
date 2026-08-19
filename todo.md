@@ -263,3 +263,4 @@
 - [x] Design a no-secret dual-model Groq project-verification workflow that keeps the current 4/18 job paused and promotes only explicitly verified keys to automatic rotation.
 - [x] Implement secure dual-model Groq project verification that promotes only keys passing real transcription and generation-model probes while preserving the current paused job state.
 - [ ] Fix the dual-verification image probe with a valid multi-pixel PNG, preserve the paused 16/18 job, and rerun the selected key's two real probes.
+- [ ] Diagnose the external Groq key’s dual-verification transcription timeout and repair only the verification timeout path if evidence supports it.

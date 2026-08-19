@@ -79,8 +79,13 @@ function minimalProbeWav() {
 }
 
 const MINIMAL_PROBE_IMAGE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAM0lEQVR42mMUCWj6LxIVwPBm2QYGcmhGjVWX/pOr+c2yDQzMDL8lG0ZdMOqCURcMAhcAAKPbijd7N8g/AAAAAElFTkSuQmCC";
+const PROJECT_PROBE_TRANSCRIPTION_TIMEOUT_MS = 30_000;
+const PROJECT_PROBE_VISION_TIMEOUT_MS = 60_000;
 
-function projectProbeImageFailure(error: GroqRequestError) {
+function projectProbeVisionFailure(error: GroqRequestError) {
+  if (error.metadata.category === "timeout") {
+    return localError("Groq image-analysis/pacing verification probe timed out.", "unavailable", "timeout", error.metadata.durationMs);
+  }
   if (error.status === "prompt_error" && /(image|pixel|png|jpeg|format)/i.test(error.message)) {
     return localError("The dual-verification test image was rejected. This is a probe-asset error, not an API-key or project-permission failure.", "unavailable", "client_request", error.metadata.durationMs);
   }
@@ -127,7 +132,7 @@ export class GroqClient {
   async verifyProjectModels(): Promise<GroqProjectProbeResult> {
     let transcription: GroqProjectProbeResult["transcription"];
     try {
-      await this.transcribeAudio({ bytes: minimalProbeWav(), filename: "visualsync-project-probe.wav", mimeType: "audio/wav", timeoutMs: 30_000 });
+      await this.transcribeAudio({ bytes: minimalProbeWav(), filename: "visualsync-project-probe.wav", mimeType: "audio/wav", timeoutMs: PROJECT_PROBE_TRANSCRIPTION_TIMEOUT_MS });
       transcription = { ok: true, status: "verified", message: `${GROQ_TRANSCRIPTION_MODEL} transcription probe succeeded.` };
     } catch (error) {
       const failure = error instanceof GroqRequestError ? error : localError("Groq could not complete the transcription verification probe.", "unavailable", "unknown");
@@ -135,14 +140,14 @@ export class GroqClient {
     }
 
     try {
-      const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 32, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: [{ type: "text", text: "Reply with exactly {\"ok\":true}." }, { type: "image_url", image_url: { url: MINIMAL_PROBE_IMAGE_DATA_URL, detail: "low" } }] }] }) }, 30_000);
+      const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 32, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: [{ type: "text", text: "Reply with exactly {\"ok\":true}." }, { type: "image_url", image_url: { url: MINIMAL_PROBE_IMAGE_DATA_URL, detail: "low" } }] }] }) }, PROJECT_PROBE_VISION_TIMEOUT_MS);
       if (!response.ok) { const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null; throw classifyGroqError(response, payload?.error?.message ?? "", durationMs); }
       const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
       if (!payload.choices?.[0]?.message?.content?.trim()) throw localError("Groq returned no usable generation-model verification result.", "unavailable", "unknown", durationMs);
       return { status: "verified", message: `Both ${GROQ_TRANSCRIPTION_MODEL} and ${GROQ_VISION_MODEL} project probes succeeded.`, transcription, generation: { ok: true, status: "verified", message: `${GROQ_VISION_MODEL} image-analysis/pacing probe succeeded.` } };
     } catch (error) {
       const originalFailure = error instanceof GroqRequestError ? error : localError("Groq could not complete the generation-model verification probe.", "unavailable", "unknown");
-      const failure = projectProbeImageFailure(originalFailure);
+      const failure = projectProbeVisionFailure(originalFailure);
       return { status: failure.status, message: failure.message, transcription, generation: { ok: false, status: failure.status, message: failure.message } };
     }
   }

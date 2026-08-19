@@ -60,6 +60,18 @@ describe("GroqClient", () => {
     expect(result.message).toContain("not an API-key or project-permission failure");
   });
 
+  it("keeps a successful Whisper verification intact and labels a vision-probe timeout truthfully", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ text: "probe", segments: [] }), { status: 200 }))
+      .mockRejectedValueOnce(new DOMException("Groq request timed out.", "TimeoutError"));
+    global.fetch = fetchMock;
+
+    const result = await new GroqClient("gsk_project_probe").verifyProjectModels();
+
+    expect(result).toMatchObject({ status: "unavailable", transcription: { ok: true, status: "verified" }, generation: { ok: false, status: "unavailable", message: "Groq image-analysis/pacing verification probe timed out." } });
+    expect(result.message).not.toContain("transcription timed out");
+  });
+
   it("submits image analysis without the rejected JSON response mode and parses generated JSON", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '```json\n{"sceneDescription":"hourglass"}\n```' } }] }), { status: 200 }));
     global.fetch = fetchMock;
