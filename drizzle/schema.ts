@@ -86,7 +86,7 @@ export const groqApiKeys = mysqlTable("groqApiKeys", {
   encryptionTag: varchar("encryptionTag", { length: 32 }).notNull(),
   isActive: boolean("isActive").notNull().default(false),
   rotationOrder: int("rotationOrder").notNull().default(0),
-  testStatus: mysqlEnum("testStatus", ["untested", "verified", "invalid", "quota_limited", "unavailable"]).notNull().default("untested"),
+  testStatus: mysqlEnum("testStatus", ["untested", "verified", "invalid", "permission_restricted", "quota_limited", "unavailable"]).notNull().default("untested"),
   lastTestedAt: timestamp("lastTestedAt"),
   lastUsedAt: timestamp("lastUsedAt"),
   lastFailureAt: timestamp("lastFailureAt"),

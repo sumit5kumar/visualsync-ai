@@ -63,7 +63,14 @@ async function reserveNextGroqKey(userId: number) {
     const [state] = await transaction.select().from(groqKeyRotationStates).where(eq(groqKeyRotationStates.userId, userId)).limit(1);
     const candidates = await transaction.select().from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true)));
     const candidate = chooseRoundRobinKey(candidates, state?.nextRotationOrder ?? 0, now);
-    if (!candidate) throw new GroqPoolExhaustedError();
+    if (!candidate) {
+      const coolingKeys = candidates.filter(record => (record.testStatus === "quota_limited" || record.testStatus === "unavailable") && record.cooldownUntil && record.cooldownUntil > now);
+      if (coolingKeys.length) {
+        const retryAtMs = Math.min(...coolingKeys.map(record => record.cooldownUntil!.getTime()));
+        throw new GroqPoolExhaustedError("All configured Groq keys are temporarily cooling down. The Timeline job will retry automatically.", { durationMs: 0, category: "rate_limited", retryAfterMs: Math.max(0, retryAtMs - now.getTime()) });
+      }
+      throw new GroqPoolExhaustedError();
+    }
     const selected = candidates.find(record => record.id === candidate.id);
     if (!selected) throw new GroqPoolExhaustedError("The selected Groq key is no longer available in this rotation pool.");
     await transaction.insert(groqKeyRotationStates).values({ userId, nextRotationOrder: nextRotationCursor(candidate) }).onDuplicateKeyUpdate({ set: { nextRotationOrder: nextRotationCursor(candidate) } });
@@ -89,6 +96,10 @@ async function recordGroqPoolFailure(userId: number, key: StoredGroqKey, error: 
   }
   if (error.status === "invalid") {
     await db.update(groqApiKeys).set({ testStatus: "invalid", isActive: false, lastFailureAt: now }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, key.id)));
+    return;
+  }
+  if (error.status === "permission_restricted") {
+    await db.update(groqApiKeys).set({ testStatus: "permission_restricted", lastFailureAt: now, cooldownUntil: null }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, key.id)));
     return;
   }
   await db.update(groqApiKeys).set({ testStatus: "verified", lastFailureAt: now, cooldownUntil: null }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, key.id)));

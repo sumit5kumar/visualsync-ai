@@ -1,7 +1,8 @@
 import { and, eq } from "drizzle-orm";
-import { timelineGenerationJobs, projects } from "../drizzle/schema";
+import { groqApiKeys, timelineGenerationJobs, projects } from "../drizzle/schema";
 import { getDb } from "./db";
-import { GroqRequestError, type GroqRequestMetadata } from "./groqClient";
+import { decryptSecret } from "./crypto";
+import { GroqClient, GroqRequestError, type GroqRequestMetadata } from "./groqClient";
 import { GroqPoolExhaustedError } from "./groqPool";
 import { processProjectTimelineSlice, type TimelineGenerationSliceResult } from "./projectProcessor";
 
@@ -12,6 +13,15 @@ export const TIMELINE_CALLBACK_WORK_BUDGET_MS = 105_000;
 
 type JobStatus = "queued" | "processing" | "waiting_for_retry" | "completed" | "failed";
 type JobStage = "queued" | "transcribing" | "analyzing_images" | "building_timeline" | "finalizing" | "completed" | "failed";
+
+function preflightCategory(status: "verified" | "invalid" | "permission_restricted" | "quota_limited" | "request_too_large" | "prompt_error" | "unavailable") {
+  if (status === "invalid") return "invalid_key" as const;
+  if (status === "permission_restricted") return "permission_denied" as const;
+  if (status === "quota_limited") return "rate_limited" as const;
+  if (status === "request_too_large") return "file_too_large" as const;
+  if (status === "prompt_error") return "client_request" as const;
+  return "unknown" as const;
+}
 
 function failureMetadata(error: unknown): GroqRequestMetadata | undefined {
   if (error instanceof GroqRequestError || error instanceof GroqPoolExhaustedError) return error.metadata;
@@ -59,7 +69,7 @@ export async function queueTimelineGenerationJob(userId: number, projectId: numb
   const [project] = await db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1);
   if (!project?.audioDurationMs || !project.narrationStorageKey) throw new Error("Upload narration and images before starting Timeline Generation.");
   const now = new Date();
-  await db.insert(timelineGenerationJobs).values({ projectId, userId, status: "queued", currentStage: "queued", attemptCount: 0, transientFailureCount: 0, retryAt: null, lastError: null, workState: {} , startedAt: now, completedAt: null, leaseToken: null, leaseExpiresAt: null }).onDuplicateKeyUpdate({ set: { status: "queued", currentStage: "queued", attemptCount: 0, transientFailureCount: 0, retryAt: null, lastError: null, workState: {}, startedAt: now, completedAt: null, leaseToken: null, leaseExpiresAt: null } });
+  await db.insert(timelineGenerationJobs).values({ projectId, userId, status: "queued", currentStage: "queued", attemptCount: 0, transientFailureCount: 0, retryAt: null, lastError: null, workState: {} , startedAt: now, completedAt: null, leaseToken: null, leaseExpiresAt: null }).onDuplicateKeyUpdate({ set: { status: "queued", transientFailureCount: 0, retryAt: null, lastError: null, startedAt: now, completedAt: null, leaseToken: null, leaseExpiresAt: null } });
   await db.update(projects).set({ status: "analyzing", workerState: "processing", processingStage: "transcribing", processingStartedAt: now, processingStageStartedAt: now }).where(eq(projects.id, projectId));
   return (await db.select().from(timelineGenerationJobs).where(eq(timelineGenerationJobs.projectId, projectId)).limit(1))[0];
 }
@@ -74,6 +84,34 @@ export async function getTimelineGenerationJob(userId: number, projectId: number
   return (await db.select().from(timelineGenerationJobs).where(and(eq(timelineGenerationJobs.projectId, projectId), eq(timelineGenerationJobs.userId, userId))).limit(1))[0] ?? null;
 }
 
+async function preflightGroqTimelineJob(userId: number) {
+  const db = await requireDb();
+  const keys = await db.select().from(groqApiKeys).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.isActive, true))).orderBy(groqApiKeys.rotationOrder, groqApiKeys.id);
+  if (!keys.length) throw new GroqRequestError("No active Groq key is configured. Add and verify a Groq key before starting Timeline Generation.", "prompt_error", { durationMs: 0, category: "client_request" });
+  const eligible = keys.filter(key => key.testStatus !== "invalid" && key.testStatus !== "permission_restricted" && (!key.cooldownUntil || key.cooldownUntil <= new Date()));
+  if (!eligible.length) {
+    if (keys.length > 0 && keys.every(key => key.testStatus === "permission_restricted")) throw new GroqRequestError("Groq model permission denied for every configured key. Correct the Groq organization or project model permissions, then use Retry analysis.", "permission_restricted", { durationMs: 0, category: "permission_denied" });
+    if (keys.length > 0 && keys.every(key => key.testStatus === "invalid")) throw new GroqRequestError("Every configured Groq key is invalid or revoked. Add a replacement key, then use Retry analysis.", "invalid", { durationMs: 0, category: "invalid_key" });
+    const retryAtMs = Math.min(...keys.filter(key => key.cooldownUntil && key.cooldownUntil > new Date()).map(key => key.cooldownUntil!.getTime()));
+    if (Number.isFinite(retryAtMs)) throw new GroqRequestError("All configured Groq keys are temporarily rate-limited or unavailable. The Timeline job will retry automatically.", "quota_limited", { durationMs: 0, category: "rate_limited", retryAfterMs: Math.max(0, retryAtMs - Date.now()) });
+    throw new GroqRequestError("No configured Groq key is currently eligible. Add a verified key or correct the displayed provider configuration.", "unavailable", { durationMs: 0, category: "unknown" });
+  }
+  let lastFailure: GroqRequestError | null = null;
+  for (const key of eligible) {
+    const client = new GroqClient(decryptSecret({ ciphertext: key.encryptedCiphertext, iv: key.encryptionIv, tag: key.encryptionTag }));
+    const result = await client.testKey();
+    if (result.status === "verified") return;
+    const failure = new GroqRequestError(result.message, result.status, { durationMs: 0, category: preflightCategory(result.status) });
+    lastFailure = failure;
+    const now = new Date();
+    if (result.status === "invalid") await db.update(groqApiKeys).set({ testStatus: "invalid", isActive: false, lastFailureAt: now }).where(eq(groqApiKeys.id, key.id));
+    else if (result.status === "permission_restricted") await db.update(groqApiKeys).set({ testStatus: "permission_restricted", lastFailureAt: now, cooldownUntil: null }).where(eq(groqApiKeys.id, key.id));
+    else if (result.status === "quota_limited") await db.update(groqApiKeys).set({ testStatus: "quota_limited", lastFailureAt: now, cooldownUntil: new Date(now.getTime() + DEFAULT_TIMELINE_RETRY_MS) }).where(eq(groqApiKeys.id, key.id));
+    else await db.update(groqApiKeys).set({ testStatus: "unavailable", lastFailureAt: now, cooldownUntil: new Date(now.getTime() + DEFAULT_TIMELINE_RETRY_MS) }).where(eq(groqApiKeys.id, key.id));
+  }
+  throw lastFailure ?? new GroqRequestError("Groq preflight could not validate a configured key.", "unavailable", { durationMs: 0, category: "unknown" });
+}
+
 export async function runTimelineGenerationJob(jobId: number) {
   const db = await requireDb();
   const [job] = await db.select().from(timelineGenerationJobs).where(eq(timelineGenerationJobs.id, jobId)).limit(1);
@@ -85,7 +123,12 @@ export async function runTimelineGenerationJob(jobId: number) {
   await db.update(timelineGenerationJobs).set({ status: "processing", leaseToken: crypto.randomUUID(), leaseExpiresAt, attemptCount: job.attemptCount + 1 }).where(eq(timelineGenerationJobs.id, job.id));
   try {
     const startedAtMs = Date.now();
-    let workState = job.workState;
+    let workState = job.workState as Record<string, unknown> | null;
+    if (!workState?.preflightComplete) {
+      await preflightGroqTimelineJob(job.userId);
+      workState = { ...(workState ?? {}), preflightComplete: true };
+      await db.update(timelineGenerationJobs).set({ workState }).where(eq(timelineGenerationJobs.id, job.id));
+    }
     let latestStage: TimelineGenerationSliceResult["stage"] = job.currentStage === "queued" ? "transcribing" : job.currentStage as Exclude<JobStage, "queued" | "finalizing" | "failed">;
     let unitsCompleted = 0;
     while (Date.now() - startedAtMs < TIMELINE_CALLBACK_WORK_BUDGET_MS) {

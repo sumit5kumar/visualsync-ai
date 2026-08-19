@@ -1,4 +1,4 @@
-export type PersistedKeyStatus = "untested" | "verified" | "invalid" | "quota_limited" | "unavailable";
+export type PersistedKeyStatus = "untested" | "verified" | "invalid" | "permission_restricted" | "quota_limited" | "unavailable";
 
 export function canActivateProviderKey(status: PersistedKeyStatus) {
   return status === "verified";

@@ -81,7 +81,12 @@ describe("GroqClient", () => {
 
     const request = new GroqClient("gsk_test").transcribeAudio({ bytes: new Uint8Array([1, 2, 3]), filename: "narration.wav", mimeType: "audio/wav" });
 
-    await expect(request).rejects.toMatchObject({ status: "prompt_error", metadata: { httpStatus: 403, category: "permission_denied" } });
+    await expect(request).rejects.toMatchObject({ status: "permission_restricted", metadata: { httpStatus: 403, category: "permission_denied" } });
+  });
+
+  it("classifies temporary 503 provider failures as retryable unavailable errors", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "provider temporarily unavailable" } }), { status: 503 }));
+    await expect(new GroqClient("gsk_test").completeText({ prompt: "health" })).rejects.toMatchObject({ status: "unavailable", metadata: { httpStatus: 503, category: "server_error" } });
   });
 
   it("converts a native transcription fetch failure into a rotation-safe unavailable error without leaking details", async () => {

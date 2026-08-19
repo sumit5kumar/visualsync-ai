@@ -2,7 +2,7 @@ export const GROQ_API_BASE_URL = "https://api.groq.com/openai/v1";
 export const GROQ_TRANSCRIPTION_MODEL = "whisper-large-v3";
 export const GROQ_VISION_MODEL = "qwen/qwen3.6-27b";
 
-export type GroqKeyStatus = "verified" | "invalid" | "quota_limited" | "request_too_large" | "prompt_error" | "unavailable";
+export type GroqKeyStatus = "verified" | "invalid" | "permission_restricted" | "quota_limited" | "request_too_large" | "prompt_error" | "unavailable";
 export type GroqKeyTestResult = { status: GroqKeyStatus; message: string };
 export type GroqFailureCategory = "invalid_key" | "permission_denied" | "file_too_large" | "rate_limited" | "audio_quota_exhausted" | "timeout" | "network_failure" | "server_error" | "client_request" | "unknown";
 export type GroqRequestMetadata = { httpStatus?: number; errorCode?: string; retryAfterMs?: number; remainingRequests?: string; remainingAudio?: string; resetAudio?: string; durationMs: number; category: GroqFailureCategory };
@@ -42,7 +42,7 @@ function classifyGroqError(response: Response, message: string, durationMs: numb
   if (statusCode === 401) return new GroqRequestError("Groq rejected this API key.", "invalid", responseMetadata(response, durationMs, "invalid_key"));
   if (statusCode === 403) {
     const detail = safeGroqMessage(message);
-    return new GroqRequestError(`${detail ? `${detail} ` : ""}Groq denied access to the requested model or endpoint. Check the Groq organization and project model permissions before retrying.`, "prompt_error", responseMetadata(response, durationMs, "permission_denied"));
+    return new GroqRequestError(`${detail ? `${detail} ` : ""}Groq denied access to the requested model or endpoint. Check the Groq organization and project model permissions before retrying.`, "permission_restricted", responseMetadata(response, durationMs, "permission_denied"));
   }
   if (/media file too large|file too large|size limit|request too large/i.test(message)) return new GroqRequestError("The narration exceeds Groq’s file-size limit. VisualSync will prepare safe audio chunks before retrying.", "request_too_large", responseMetadata(response, durationMs, "file_too_large"));
   if (/failed to validate json|failed_generation|adjust your prompt/i.test(message)) return new GroqRequestError("Groq rejected the requested JSON response format. Adjust the prompt and retry with the same eligible key pool.", "prompt_error", responseMetadata(response, durationMs, "client_request"));

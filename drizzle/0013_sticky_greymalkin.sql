@@ -1,0 +1,1 @@
+ALTER TABLE `groqApiKeys` MODIFY COLUMN `testStatus` enum('untested','verified','invalid','permission_restricted','quota_limited','unavailable') NOT NULL DEFAULT 'untested';

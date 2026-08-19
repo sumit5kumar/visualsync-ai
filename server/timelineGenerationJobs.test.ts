@@ -26,4 +26,15 @@ describe("durable Timeline Generation retry policy", () => {
     expect(TIMELINE_CALLBACK_WORK_BUDGET_MS).toBeLessThan(120_000);
     expect(TIMELINE_JOB_CRON.split(" ")).toHaveLength(6);
   });
+
+  it("covers 429, 5xx, timeout, network, invalid-key, and permission-restricted production classifications", () => {
+    const rateLimited = new GroqRequestError("429", "quota_limited", { durationMs: 1, category: "rate_limited" });
+    const serverError = new GroqRequestError("503", "unavailable", { durationMs: 1, category: "server_error" });
+    const timeout = new GroqRequestError("timeout", "unavailable", { durationMs: 1, category: "timeout" });
+    const network = new GroqRequestError("network", "unavailable", { durationMs: 1, category: "network_failure" });
+    const invalid = new GroqRequestError("invalid", "invalid", { durationMs: 1, category: "invalid_key" });
+    const restricted = new GroqRequestError("permission", "permission_restricted", { durationMs: 1, category: "permission_denied" });
+    expect([rateLimited, serverError, timeout, network].every(isRetryableTimelineFailure)).toBe(true);
+    expect([invalid, restricted].some(isRetryableTimelineFailure)).toBe(false);
+  });
 });

@@ -1,4 +1,4 @@
-export type GroqPoolStatus = "untested" | "verified" | "quota_limited" | "invalid" | "unavailable";
+export type GroqPoolStatus = "untested" | "verified" | "quota_limited" | "invalid" | "permission_restricted" | "unavailable";
 
 export type RotationCandidate = {
   id: number;

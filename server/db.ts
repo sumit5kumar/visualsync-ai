@@ -204,7 +204,7 @@ export async function saveValidatedGroqKey(userId: number, input: { label: strin
   await db.insert(groqApiKeys).values({ ...input, userId, isActive: true, rotationOrder: (pool[0]?.rotationOrder ?? -1) + 1, testStatus: "verified", lastTestedAt: new Date(), cooldownUntil: null, consecutiveRateLimits: 0 });
 }
 
-export async function recordGroqKeyTest(userId: number, keyId: number, testStatus: "verified" | "invalid" | "quota_limited" | "unavailable") {
+export async function recordGroqKeyTest(userId: number, keyId: number, testStatus: "verified" | "invalid" | "permission_restricted" | "quota_limited" | "unavailable") {
   const db = await requireDb();
   await db.update(groqApiKeys).set({ testStatus, lastTestedAt: new Date(), ...(testStatus === "verified" ? { isActive: true, cooldownUntil: null, consecutiveRateLimits: 0 } : {}) }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, keyId)));
 }

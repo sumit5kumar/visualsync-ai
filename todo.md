@@ -240,4 +240,6 @@
 - [x] Diagnose and repair the Windows Fast Render FFmpeg command-length failure for large approved timelines without changing their timeline or rendering settings.
 - [x] Explain the Test project’s actual hosted versus local execution path and whether the current app guarantees unattended resumable cloud timeline processing, without making implementation changes.
 - [x] Explain the completed Test Fast Render’s actual performance and console warnings from its local render profile without changing the renderer.
-- [ ] Make the existing Groq Free-tier Timeline Generation pipeline a durable hosted background job with persisted job state, automatic transient retry, browser/laptop independence, and unchanged local-only MP4 rendering.
+- [x] Make the existing Groq Free-tier Timeline Generation pipeline a durable hosted background job with persisted job state, automatic transient retry, browser/laptop independence, and unchanged local-only MP4 rendering.
+- [x] Complete final Groq production hardening before publication: provider preflight, precise retry/permanent states, automatic recovery messaging, and production-focused regression coverage.
+- [ ] Publish the hardened checkpoint, then activate and verify the hosted Timeline Generation scheduler against the production callback.
