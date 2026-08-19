@@ -41,8 +41,8 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
   const initialEstimatedTotalMs = estimateInitialProjectProcessingMs({ totalImageCount, audioDurationMs: input.audioDurationMs });
   const stage = input.processingStage === "idle" ? "transcribing" : input.processingStage;
   let completedPercent = 0;
-  let estimatedRemainingMs = Math.max(0, initialEstimatedTotalMs - elapsedMs);
-  let estimateSource: "initial" | "observed" = "initial";
+  let estimatedRemainingMs: number | null = null;
+  let estimateSource: "preparing" | "observed" = "preparing";
   let label = "Preparing project analysis";
   let message = "Preparing the verified Groq processing workflow.";
 
@@ -70,22 +70,20 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
     completedPercent = 92;
     label = "Building the readable timeline";
     message = "All source images are analyzed. Visual durations are now being aligned to the complete narration.";
-    estimatedRemainingMs = Math.max(10_000, Math.ceil(totalImageCount / 24) * 30_000 - stageElapsedMs);
   } else if (stage === "finalizing") {
     completedPercent = 98;
     label = "Validating timeline coverage";
     message = "Checking that every image is ordered and the variable-duration timeline covers the narration continuously.";
-    estimatedRemainingMs = Math.max(5_000, 20_000 - stageElapsedMs);
   } else if (stage === "failed") {
     completedPercent = 0;
     label = "Processing needs attention";
     message = "The last processing attempt did not complete. You can retry once the reported issue is resolved.";
-    estimatedRemainingMs = 0;
   }
 
   if (input.backgroundJob?.status === "queued") {
-    label = "Timeline Generation queued";
-    message = "The hosted job is queued and will continue independently of this browser.";
+    completedPercent = 0;
+    label = "Preparing Timeline Generation";
+    message = "The hosted job is registered and starting now. It will continue independently of this browser.";
   } else if (input.backgroundJob?.status === "waiting_for_retry") {
     const retryAtMs = input.backgroundJob.retryAt?.getTime();
     label = "Waiting for Groq — retry scheduled automatically";
@@ -102,7 +100,7 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
     elapsedMs,
     startedAtMs: startedAt.getTime(),
     estimatedRemainingMs,
-    estimatedRemainingRange: estimateRange(estimatedRemainingMs),
+    estimatedRemainingRange: estimatedRemainingMs === null ? null : estimateRange(estimatedRemainingMs),
     estimatedAtMs: now.getTime(),
     initialEstimatedTotalMs,
     estimateSource,

@@ -9,6 +9,12 @@ describe("project processing progress", () => {
     expect(estimateMs).toBeLessThan(45 * 60 * 1000);
   });
 
+  it("shows preparation without an invented ETA until real work has produced observable timing", () => {
+    const progress = buildProjectProcessingProgress({ status: "analyzing", processingStage: "transcribing", processingStartedAt: new Date("2026-08-19T19:00:00.000Z"), processingStageStartedAt: new Date("2026-08-19T19:00:00.000Z"), totalImageCount: 18, completedImageCount: 0, narrationAnalyzed: false, audioDurationMs: 67_451, backgroundJob: { status: "queued", retryAt: null, lastError: null }, now: new Date("2026-08-19T19:00:30.000Z") });
+
+    expect(progress).toMatchObject({ label: "Preparing Timeline Generation", completedPercent: 0, estimateSource: "preparing", estimatedRemainingMs: null, estimatedRemainingRange: null });
+  });
+
   it("reports truthful image counts and uses observed image speed after real completions", () => {
     const now = new Date("2026-08-18T10:10:00.000Z");
     const progress = buildProjectProcessingProgress({ status: "analyzing", processingStage: "analyzing_images", processingStartedAt: new Date("2026-08-18T10:00:00.000Z"), processingStageStartedAt: new Date("2026-08-18T10:05:00.000Z"), totalImageCount: 300, completedImageCount: 75, narrationAnalyzed: true, audioDurationMs: 30 * 60 * 1000, now });

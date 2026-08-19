@@ -244,3 +244,8 @@
 - [x] Complete final Groq production hardening before publication: provider preflight, precise retry/permanent states, automatic recovery messaging, and production-focused regression coverage.
 - [x] Publish the hardened checkpoint, then activate and verify the hosted Timeline Generation scheduler against the production callback.
 - [x] Activate and verify the published hosted Timeline scheduler without altering the existing completed Test Timeline or starting local rendering.
+- [x] Diagnose the active 1:07 narration and 18-image hosted Timeline job stage by stage without changing implementation or starting rendering.
+- [x] Start newly queued durable Timeline jobs promptly while retaining the two-minute scheduled worker as idempotent recovery and preventing concurrent duplicate processing.
+- [x] Support short WAV narration directly within Groq’s upload limit without changing the proven MP3 long-audio chunking path.
+- [x] Replace the misleading initial processing countdown with truthful preparing/observed-progress messaging.
+- [ ] Add focused tests and production verification for immediate dispatch, duplicate protection, short WAV, retry preservation, and unattended continuation.

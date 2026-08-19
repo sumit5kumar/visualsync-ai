@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, lte, or } from "drizzle-orm";
 import { groqApiKeys, timelineGenerationJobs, projects } from "../drizzle/schema";
 import { getDb } from "./db";
 import { decryptSecret } from "./crypto";
@@ -58,6 +58,13 @@ function mapStage(result: TimelineGenerationSliceResult["stage"]): JobStage {
   return result;
 }
 
+export function timelineJobAvailability(job: { status: JobStatus; retryAt: Date | null; leaseExpiresAt: Date | null }, nowMs = Date.now()) {
+  if (job.status === "completed" || job.status === "failed") return { outcome: "skipped" as const };
+  if (job.retryAt && job.retryAt.getTime() > nowMs) return { outcome: "waiting" as const, retryAt: job.retryAt };
+  if (job.leaseExpiresAt && job.leaseExpiresAt.getTime() > nowMs) return { outcome: "leased" as const };
+  return { outcome: "claimable" as const };
+}
+
 async function requireDb() {
   const db = await getDb();
   if (!db) throw new Error("Database storage is not available.");
@@ -69,6 +76,8 @@ export async function queueTimelineGenerationJob(userId: number, projectId: numb
   const [project] = await db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1);
   if (!project?.audioDurationMs || !project.narrationStorageKey) throw new Error("Upload narration and images before starting Timeline Generation.");
   const now = new Date();
+  const [existing] = await db.select().from(timelineGenerationJobs).where(and(eq(timelineGenerationJobs.projectId, projectId), eq(timelineGenerationJobs.userId, userId))).limit(1);
+  if (existing?.leaseExpiresAt && existing.leaseExpiresAt.getTime() > now.getTime()) return existing;
   await db.insert(timelineGenerationJobs).values({ projectId, userId, status: "queued", currentStage: "queued", attemptCount: 0, transientFailureCount: 0, retryAt: null, lastError: null, workState: {} , startedAt: now, completedAt: null, leaseToken: null, leaseExpiresAt: null }).onDuplicateKeyUpdate({ set: { status: "queued", transientFailureCount: 0, retryAt: null, lastError: null, startedAt: now, completedAt: null, leaseToken: null, leaseExpiresAt: null } });
   await db.update(projects).set({ status: "analyzing", workerState: "processing", processingStage: "transcribing", processingStartedAt: now, processingStageStartedAt: now }).where(eq(projects.id, projectId));
   return (await db.select().from(timelineGenerationJobs).where(eq(timelineGenerationJobs.projectId, projectId)).limit(1))[0];
@@ -115,42 +124,54 @@ async function preflightGroqTimelineJob(userId: number) {
 export async function runTimelineGenerationJob(jobId: number) {
   const db = await requireDb();
   const [job] = await db.select().from(timelineGenerationJobs).where(eq(timelineGenerationJobs.id, jobId)).limit(1);
-  if (!job || job.status === "completed" || job.status === "failed") return { outcome: "skipped" as const };
-  if (job.retryAt && job.retryAt.getTime() > Date.now()) return { outcome: "waiting" as const, retryAt: job.retryAt };
-  if (job.leaseExpiresAt && job.leaseExpiresAt.getTime() > Date.now()) return { outcome: "leased" as const };
+  if (!job) return { outcome: "skipped" as const };
+  const availability = timelineJobAvailability(job);
+  if (availability.outcome !== "claimable") return availability;
 
-  const leaseExpiresAt = new Date(Date.now() + 110_000);
-  await db.update(timelineGenerationJobs).set({ status: "processing", leaseToken: crypto.randomUUID(), leaseExpiresAt, attemptCount: job.attemptCount + 1 }).where(eq(timelineGenerationJobs.id, job.id));
+  const claimStartedAtMs = Date.now();
+  const leaseToken = crypto.randomUUID();
+  const leaseExpiresAt = new Date(claimStartedAtMs + 110_000);
+  await db.update(timelineGenerationJobs).set({ status: "processing", leaseToken, leaseExpiresAt, attemptCount: job.attemptCount + 1 }).where(and(
+    eq(timelineGenerationJobs.id, job.id),
+    or(isNull(timelineGenerationJobs.leaseExpiresAt), lte(timelineGenerationJobs.leaseExpiresAt, new Date(claimStartedAtMs))),
+    or(isNull(timelineGenerationJobs.retryAt), lte(timelineGenerationJobs.retryAt, new Date(claimStartedAtMs))),
+  ));
+  const [claimedJob] = await db.select().from(timelineGenerationJobs).where(and(eq(timelineGenerationJobs.id, job.id), eq(timelineGenerationJobs.leaseToken, leaseToken))).limit(1);
+  if (!claimedJob) {
+    const [latest] = await db.select().from(timelineGenerationJobs).where(eq(timelineGenerationJobs.id, job.id)).limit(1);
+    if (latest?.retryAt && latest.retryAt.getTime() > claimStartedAtMs) return { outcome: "waiting" as const, retryAt: latest.retryAt };
+    return { outcome: "leased" as const };
+  }
   try {
     const startedAtMs = Date.now();
-    let workState = job.workState as Record<string, unknown> | null;
+    let workState: Record<string, unknown> = { ...((claimedJob.workState as Record<string, unknown> | null) ?? {}), firstDispatchAtMs: Number((claimedJob.workState as Record<string, unknown> | null)?.firstDispatchAtMs) || startedAtMs };
     if (!workState?.preflightComplete) {
-      await preflightGroqTimelineJob(job.userId);
+      await preflightGroqTimelineJob(claimedJob.userId);
       workState = { ...(workState ?? {}), preflightComplete: true };
-      await db.update(timelineGenerationJobs).set({ workState }).where(eq(timelineGenerationJobs.id, job.id));
+      await db.update(timelineGenerationJobs).set({ workState }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
     }
-    let latestStage: TimelineGenerationSliceResult["stage"] = job.currentStage === "queued" ? "transcribing" : job.currentStage as Exclude<JobStage, "queued" | "finalizing" | "failed">;
+    let latestStage: TimelineGenerationSliceResult["stage"] = claimedJob.currentStage === "queued" ? "transcribing" : claimedJob.currentStage as Exclude<JobStage, "queued" | "finalizing" | "failed">;
     let unitsCompleted = 0;
     while (Date.now() - startedAtMs < TIMELINE_CALLBACK_WORK_BUDGET_MS) {
-      const result = await processProjectTimelineSlice(job.userId, job.projectId, workState);
+      const result = await processProjectTimelineSlice(claimedJob.userId, claimedJob.projectId, workState);
       latestStage = result.stage;
-      workState = result.workState;
+      workState = { ...result.workState };
       unitsCompleted += 1;
       const completed = result.stage === "completed";
-      await db.update(timelineGenerationJobs).set({ status: completed ? "completed" : "processing", currentStage: mapStage(result.stage), workState, retryAt: null, lastError: null, completedAt: completed ? new Date() : null }).where(eq(timelineGenerationJobs.id, job.id));
+      await db.update(timelineGenerationJobs).set({ status: completed ? "completed" : "processing", currentStage: mapStage(result.stage), workState, retryAt: null, lastError: null, completedAt: completed ? new Date() : null }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
       if (completed) {
-        await db.update(timelineGenerationJobs).set({ leaseToken: null, leaseExpiresAt: null }).where(eq(timelineGenerationJobs.id, job.id));
+        await db.update(timelineGenerationJobs).set({ leaseToken: null, leaseExpiresAt: null }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
         return { outcome: "completed" as const, stage: result.stage, unitsCompleted };
       }
     }
-    await db.update(timelineGenerationJobs).set({ status: "queued", currentStage: mapStage(latestStage), workState, leaseToken: null, leaseExpiresAt: null }).where(eq(timelineGenerationJobs.id, job.id));
+    await db.update(timelineGenerationJobs).set({ status: "queued", currentStage: mapStage(latestStage), workState, leaseToken: null, leaseExpiresAt: null }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
     return { outcome: "advanced" as const, stage: latestStage, unitsCompleted };
   } catch (error) {
-    const transientFailureCount = job.transientFailureCount + 1;
+    const transientFailureCount = claimedJob.transientFailureCount + 1;
     const retryable = isRetryableTimelineFailure(error) && transientFailureCount <= MAX_TIMELINE_TRANSIENT_FAILURES;
     const retryAt = retryable ? resolveTimelineRetryAt(error, transientFailureCount) : null;
-    await db.update(timelineGenerationJobs).set({ status: retryable ? "waiting_for_retry" : "failed", currentStage: retryable ? job.currentStage : "failed", transientFailureCount, retryAt, lastError: safeJobError(error), leaseToken: null, leaseExpiresAt: null }).where(eq(timelineGenerationJobs.id, job.id));
-    if (!retryable) await db.update(projects).set({ status: "failed", workerState: "error", processingStage: "failed", processingStageStartedAt: new Date() }).where(eq(projects.id, job.projectId));
+    await db.update(timelineGenerationJobs).set({ status: retryable ? "waiting_for_retry" : "failed", currentStage: retryable ? claimedJob.currentStage : "failed", transientFailureCount, retryAt, lastError: safeJobError(error), leaseToken: null, leaseExpiresAt: null }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
+    if (!retryable) await db.update(projects).set({ status: "failed", workerState: "error", processingStage: "failed", processingStageStartedAt: new Date() }).where(eq(projects.id, claimedJob.projectId));
     return { outcome: retryable ? "retry_wait" as const : "failed" as const, retryAt, error: safeJobError(error) };
   }
 }

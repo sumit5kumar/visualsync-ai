@@ -10,6 +10,7 @@ export type AudioTranscriptionChunk = {
 // frame-aligned source slice produces a roughly 260 KiB WAV request that Groq
 // completed successfully on the Free tier; larger measured attachments stalled.
 export const SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES = 128 * 1024;
+export const SAFE_GROQ_DIRECT_WAV_BYTES = 24 * 1024 * 1024;
 
 type Mp3Frame = { offset: number; length: number; durationMs: number; startMs: number; endMs: number };
 
@@ -71,6 +72,96 @@ function scanMp3Frames(source: Uint8Array) {
     offset += frame.length;
   }
   return frames;
+}
+
+type PcmWavInfo = {
+  fmtBytes: Uint8Array;
+  dataOffset: number;
+  dataLength: number;
+  blockAlign: number;
+  byteRate: number;
+};
+
+function readAscii(source: Uint8Array, offset: number, length: number) {
+  let value = "";
+  for (let index = 0; index < length; index += 1) value += String.fromCharCode(source[offset + index] ?? 0);
+  return value;
+}
+
+function readPcmWavInfo(source: Uint8Array): PcmWavInfo {
+  if (source.length < 44 || readAscii(source, 0, 4) !== "RIFF" || readAscii(source, 8, 4) !== "WAVE") throw new Error("Oversized WAV narration must use a standard RIFF/WAVE container.");
+  const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
+  let offset = 12;
+  let fmtBytes: Uint8Array | null = null;
+  let blockAlign = 0;
+  let byteRate = 0;
+  let dataOffset = -1;
+  let dataLength = 0;
+  while (offset + 8 <= source.length) {
+    const chunkId = readAscii(source, offset, 4);
+    const chunkLength = view.getUint32(offset + 4, true);
+    const payloadOffset = offset + 8;
+    if (payloadOffset + chunkLength > source.length) break;
+    if (chunkId === "fmt ") {
+      if (chunkLength < 16) throw new Error("WAV narration has an incomplete format chunk.");
+      const audioFormat = view.getUint16(payloadOffset, true);
+      if (audioFormat !== 1) throw new Error("Oversized WAV narration must use PCM audio for automatic chunking.");
+      byteRate = view.getUint32(payloadOffset + 8, true);
+      blockAlign = view.getUint16(payloadOffset + 12, true);
+      if (!byteRate || !blockAlign) throw new Error("WAV narration has invalid PCM timing metadata.");
+      fmtBytes = source.slice(payloadOffset, payloadOffset + chunkLength);
+    } else if (chunkId === "data") {
+      dataOffset = payloadOffset;
+      dataLength = chunkLength;
+      break;
+    }
+    offset = payloadOffset + chunkLength + (chunkLength % 2);
+  }
+  if (!fmtBytes || dataOffset < 0 || !dataLength) throw new Error("WAV narration is missing PCM audio data.");
+  return { fmtBytes, dataOffset, dataLength, blockAlign, byteRate };
+}
+
+function makePcmWavChunk(fmtBytes: Uint8Array, pcmBytes: Uint8Array) {
+  const bytes = new Uint8Array(12 + 8 + fmtBytes.length + 8 + pcmBytes.length);
+  const view = new DataView(bytes.buffer);
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+  view.setUint32(4, bytes.length - 8, true);
+  bytes.set([0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20], 8);
+  view.setUint32(16, fmtBytes.length, true);
+  bytes.set(fmtBytes, 20);
+  const dataHeaderOffset = 20 + fmtBytes.length;
+  bytes.set([0x64, 0x61, 0x74, 0x61], dataHeaderOffset);
+  view.setUint32(dataHeaderOffset + 4, pcmBytes.length, true);
+  bytes.set(pcmBytes, dataHeaderOffset + 8);
+  return bytes;
+}
+
+export function splitPcmWavForTranscription(source: Uint8Array, maxChunkBytes = SAFE_GROQ_DIRECT_WAV_BYTES, overlapMs = 4_000): AudioTranscriptionChunk[] {
+  if (source.byteLength <= maxChunkBytes) return [{ bytes: source, startMs: 0, endMs: 0, contentStartMs: 0, contentEndMs: 0 }];
+  const info = readPcmWavInfo(source);
+  const headerBytes = 28 + info.fmtBytes.length;
+  const maximumPayload = Math.floor((maxChunkBytes - headerBytes) / info.blockAlign) * info.blockAlign;
+  if (maximumPayload <= 0) throw new Error("WAV transcription chunk limit is too small for this PCM format.");
+  const overlapBytes = Math.floor((info.byteRate * overlapMs) / 1000 / info.blockAlign) * info.blockAlign;
+  const chunks: AudioTranscriptionChunk[] = [];
+  let contentOffset = 0;
+  while (contentOffset < info.dataLength) {
+    const startOffset = Math.max(0, contentOffset - overlapBytes);
+    const remaining = info.dataLength - contentOffset;
+    const contentLength = Math.min(maximumPayload - (contentOffset > 0 ? Math.min(overlapBytes, contentOffset) : 0), remaining);
+    const alignedContentLength = Math.max(info.blockAlign, Math.floor(contentLength / info.blockAlign) * info.blockAlign);
+    const endOffset = Math.min(info.dataLength, contentOffset + alignedContentLength);
+    const pcmBytes = source.slice(info.dataOffset + startOffset, info.dataOffset + endOffset);
+    chunks.push({
+      bytes: makePcmWavChunk(info.fmtBytes, pcmBytes),
+      startMs: Math.round((startOffset / info.byteRate) * 1000),
+      endMs: Math.round((endOffset / info.byteRate) * 1000),
+      contentStartMs: Math.round((contentOffset / info.byteRate) * 1000),
+      contentEndMs: Math.round((endOffset / info.byteRate) * 1000),
+    });
+    contentOffset = endOffset;
+  }
+  return chunks;
 }
 
 export function splitMp3ForTranscription(source: Uint8Array, maxChunkBytes = SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, overlapMs = 4_000): AudioTranscriptionChunk[] {

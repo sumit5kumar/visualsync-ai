@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TIMELINE_RETRY_MS, isRetryableTimelineFailure, resolveTimelineRetryAt, TIMELINE_CALLBACK_WORK_BUDGET_MS, TIMELINE_JOB_CRON } from "./timelineGenerationJobs";
+import { DEFAULT_TIMELINE_RETRY_MS, isRetryableTimelineFailure, resolveTimelineRetryAt, TIMELINE_CALLBACK_WORK_BUDGET_MS, TIMELINE_JOB_CRON, timelineJobAvailability } from "./timelineGenerationJobs";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { GroqRequestError } from "./groqClient";
 
 describe("durable Timeline Generation retry policy", () => {
@@ -36,5 +38,20 @@ describe("durable Timeline Generation retry policy", () => {
     const restricted = new GroqRequestError("permission", "permission_restricted", { durationMs: 1, category: "permission_denied" });
     expect([rateLimited, serverError, timeout, network].every(isRetryableTimelineFailure)).toBe(true);
     expect([invalid, restricted].some(isRetryableTimelineFailure)).toBe(false);
+  });
+
+  it("blocks a second concurrent worker on an active lease but allows scheduler recovery after lease expiry", () => {
+    const now = 10_000;
+    expect(timelineJobAvailability({ status: "processing", retryAt: null, leaseExpiresAt: new Date(now + 1) }, now)).toMatchObject({ outcome: "leased" });
+    expect(timelineJobAvailability({ status: "queued", retryAt: new Date(now + 1), leaseExpiresAt: null }, now)).toMatchObject({ outcome: "waiting" });
+    expect(timelineJobAvailability({ status: "queued", retryAt: null, leaseExpiresAt: new Date(now - 1) }, now)).toMatchObject({ outcome: "claimable" });
+  });
+
+  it("performs immediate protected dispatch after schedule persistence while retaining the cron recovery path", () => {
+    const routerSource = readFileSync(resolve(process.cwd(), "server/routers.ts"), "utf8");
+    const jobSource = readFileSync(resolve(process.cwd(), "server/timelineGenerationJobs.ts"), "utf8");
+    expect(routerSource).toContain("await setTimelineGenerationSchedule(ctx.user.id, input.projectId, schedule.taskUid);");
+    expect(routerSource).toContain("const dispatch = await runTimelineGenerationJob(job.id);");
+    expect(jobSource).toContain("eq(timelineGenerationJobs.leaseToken, leaseToken)");
   });
 });

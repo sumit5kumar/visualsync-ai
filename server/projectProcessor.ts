@@ -6,7 +6,7 @@ import { executeWithGroqRotation, GroqPoolExhaustedError } from "./groqPool";
 import { buildGlobalReadableImageDurations } from "./readablePacing";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { validateTimeline } from "./timelineValidation";
-import { SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription } from "./audioChunking";
+import { SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription, splitPcmWavForTranscription } from "./audioChunking";
 import { mp3ToMonoWav } from "./audioTranscoding";
 import { mergeChunkTranscripts, readNarrationTranscriptionState, summarizeNarrationText, type NarrationTranscriptionState, type PersistedNarrationChunk } from "./narrationTranscription";
 import sharp from "sharp";
@@ -56,21 +56,34 @@ async function persistNarrationTranscriptionState(narration: typeof mediaAssets.
   await db.update(mediaAssets).set({ analysisJson: { ...(narration.analysisJson && typeof narration.analysisJson === "object" ? narration.analysisJson as Record<string, unknown> : {}), transcriptionState: state } }).where(eq(mediaAssets.id, narration.id));
 }
 
+export function isWavNarration(narration: Pick<typeof mediaAssets.$inferSelect, "mimeType" | "storageKey">) {
+  return narration.mimeType === "audio/wav" || narration.mimeType === "audio/x-wav" || narration.storageKey.toLowerCase().endsWith(".wav");
+}
+
+function isMp3Narration(narration: Pick<typeof mediaAssets.$inferSelect, "mimeType" | "storageKey">) {
+  return narration.mimeType === "audio/mpeg" || narration.storageKey.toLowerCase().endsWith(".mp3");
+}
+
 export async function prepareNarrationChunks(projectId: number, narration: typeof mediaAssets.$inferSelect, db: Exclude<Awaited<ReturnType<typeof getDb>>, null>): Promise<NarrationTranscriptionState> {
   const cached = readNarrationTranscriptionState(narration.analysisJson);
-  if (cached?.chunks.every(chunk => chunk.byteSize <= SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES)) return cached;
+  const wavNarration = isWavNarration(narration);
+  const directLimit = wavNarration ? SAFE_GROQ_DIRECT_WAV_BYTES : SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES;
+  if (cached?.chunks.every(chunk => chunk.byteSize <= directLimit)) return cached;
   const byteSize = narration.byteSize ?? 0;
-  if (byteSize <= SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES) {
+  if (byteSize <= directLimit) {
     const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: 0, chunks: [{ storageKey: narration.storageKey, startMs: 0, endMs: 0, contentStartMs: 0, contentEndMs: 0, byteSize, status: "pending", attempts: 0 }] };
     await persistNarrationTranscriptionState(narration, state, db);
     return state;
   }
-  if (narration.mimeType !== "audio/mpeg" && !narration.storageKey.toLowerCase().endsWith(".mp3")) throw new Error("This narration exceeds Groq’s 25 MB limit and must be uploaded as MP3 for safe frame-aware transcription chunking.");
+  if (!isMp3Narration(narration) && !wavNarration) throw new Error("This narration exceeds Groq’s direct-upload limit and must be uploaded as WAV or MP3 for automatic safe transcription chunking.");
   const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey));
   if (!sourceResponse.ok) throw new Error("The oversized narration could not be retrieved from secure storage for transcription chunking.");
-  const chunks = splitMp3ForTranscription(new Uint8Array(await sourceResponse.arrayBuffer()));
+  const source = new Uint8Array(await sourceResponse.arrayBuffer());
+  const chunks = wavNarration ? splitPcmWavForTranscription(source) : splitMp3ForTranscription(source);
+  const chunkMimeType = wavNarration ? "audio/wav" : "audio/mpeg";
+  const chunkExtension = wavNarration ? "wav" : "mp3";
   const storedChunks: PersistedNarrationChunk[] = await mapWithConcurrency(chunks, NARRATION_CHUNK_STORAGE_CONCURRENCY, async (chunk, index) => {
-    const stored = await storagePut(`projects/${projectId}/transcription-chunks/${narration.id}-part-${index + 1}.mp3`, chunk.bytes, "audio/mpeg");
+    const stored = await storagePut(`projects/${projectId}/transcription-chunks/${narration.id}-part-${index + 1}.${chunkExtension}`, chunk.bytes, chunkMimeType);
     return { storageKey: stored.key, startMs: chunk.startMs, endMs: chunk.endMs, contentStartMs: chunk.contentStartMs, contentEndMs: chunk.contentEndMs, byteSize: chunk.bytes.byteLength, status: "pending", attempts: 0 };
   });
   const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: 4_000, chunks: storedChunks };
@@ -89,7 +102,7 @@ export async function transcribePreparedNarrationChunks(userId: number, narratio
     await persistNarrationTranscriptionState(narration, narrationState, db);
     try {
       const bytes = await loadNarrationChunkBytes(chunk.storageKey);
-      const wavBytes = await mp3ToMonoWav(bytes);
+      const wavBytes = isMp3Narration(narration) ? await mp3ToMonoWav(bytes) : bytes;
       const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes: wavBytes, filename: `narration-part-${index + 1}.wav`, mimeType: "audio/wav", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers.", timeoutMs: 120_000 }), key }));
       transcriptionKey ??= run.key;
       chunk.status = "completed";
@@ -190,6 +203,8 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
 }
 
 export type TimelineGenerationWorkState = {
+  preflightComplete?: boolean;
+  firstDispatchAtMs?: number;
   pacingWeights?: number[];
   nextPacingBatch?: number;
   pacingProviderKeyLabel?: string | null;
@@ -205,6 +220,8 @@ function asTimelineGenerationWorkState(value: unknown): TimelineGenerationWorkSt
   if (!value || typeof value !== "object") return {};
   const record = value as Record<string, unknown>;
   return {
+    preflightComplete: record.preflightComplete === true,
+    firstDispatchAtMs: Number.isFinite(record.firstDispatchAtMs) ? Number(record.firstDispatchAtMs) : undefined,
     pacingWeights: Array.isArray(record.pacingWeights) ? record.pacingWeights.map(Number).filter(Number.isFinite) : [],
     nextPacingBatch: Number.isInteger(record.nextPacingBatch) && Number(record.nextPacingBatch) >= 0 ? Number(record.nextPacingBatch) : 0,
     pacingProviderKeyLabel: typeof record.pacingProviderKeyLabel === "string" ? record.pacingProviderKeyLabel : null,
@@ -240,7 +257,7 @@ export async function processProjectTimelineSlice(userId: number, projectId: num
       await persistNarrationTranscriptionState(narration, narrationState, db);
       try {
         const bytes = await loadNarrationChunkBytes(chunk.storageKey);
-        const wavBytes = await mp3ToMonoWav(bytes);
+        const wavBytes = isMp3Narration(narration) ? await mp3ToMonoWav(bytes) : bytes;
         const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes: wavBytes, filename: `narration-part-${nextChunkIndex + 1}.wav`, mimeType: "audio/wav", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers.", timeoutMs: 120_000 }), key }));
         chunk.status = "completed";
         chunk.transcript = { text: run.value.text, language: run.value.language, segments: (run.value.segments ?? []).map(segment => ({ ...segment, start: segment.start + chunk.startMs / 1000, end: segment.end + chunk.startMs / 1000 })) };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPublicManagedStorageUrl, mapWithConcurrency } from "./projectProcessor";
+import { buildPublicManagedStorageUrl, isWavNarration, mapWithConcurrency } from "./projectProcessor";
 
 describe("public managed narration URLs", () => {
   it("keeps the managed storage path public and safely encodes every storage-key segment", () => {
@@ -19,5 +19,10 @@ describe("public managed narration URLs", () => {
 
     expect(results).toEqual([0, 2, 4, 6, 8, 10, 12]);
     expect(maximumActive).toBeLessThanOrEqual(3);
+  });
+
+  it("recognizes common WAV uploads so short narration is sent directly instead of entering the MP3-only conversion path", () => {
+    expect(isWavNarration({ mimeType: "audio/wav", storageKey: "projects/1/narration.wav" })).toBe(true);
+    expect(isWavNarration({ mimeType: "audio/mpeg", storageKey: "projects/1/narration.mp3" })).toBe(false);
   });
 });
