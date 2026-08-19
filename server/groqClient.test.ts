@@ -32,7 +32,9 @@ describe("GroqClient", () => {
     expect((transcriptionRequest.body as FormData).get("model")).toBe(GROQ_TRANSCRIPTION_MODEL);
     const [generationUrl, generationRequest] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(generationUrl).toBe("https://api.groq.com/openai/v1/chat/completions");
-    expect(JSON.parse(String(generationRequest.body))).toMatchObject({ model: GROQ_VISION_MODEL });
+    const generationBody = JSON.parse(String(generationRequest.body));
+    expect(generationBody).toMatchObject({ model: GROQ_VISION_MODEL });
+    expect(generationBody.messages[0].content[1].image_url.url).toContain("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQ");
   });
 
   it("does not promote a project key when the real Whisper probe is denied and does not spend a generation-model request", async () => {
@@ -43,6 +45,19 @@ describe("GroqClient", () => {
 
     expect(result).toMatchObject({ status: "permission_restricted", transcription: { ok: false, status: "permission_restricted" }, generation: { ok: false } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a rejected verification image as a probe-asset error rather than a key or permission failure", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ text: "probe", segments: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "Image must have at least 2 pixels in each dimension" } }), { status: 400 }));
+    global.fetch = fetchMock;
+
+    const result = await new GroqClient("gsk_project_probe").verifyProjectModels();
+
+    expect(result).toMatchObject({ status: "unavailable", transcription: { ok: true }, generation: { ok: false, status: "unavailable" } });
+    expect(result.message).toContain("probe-asset error");
+    expect(result.message).toContain("not an API-key or project-permission failure");
   });
 
   it("submits image analysis without the rejected JSON response mode and parses generated JSON", async () => {

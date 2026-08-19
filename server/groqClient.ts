@@ -78,7 +78,14 @@ function minimalProbeWav() {
   return bytes;
 }
 
-const MINIMAL_PROBE_IMAGE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+const MINIMAL_PROBE_IMAGE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAM0lEQVR42mMUCWj6LxIVwPBm2QYGcmhGjVWX/pOr+c2yDQzMDL8lG0ZdMOqCURcMAhcAAKPbijd7N8g/AAAAAElFTkSuQmCC";
+
+function projectProbeImageFailure(error: GroqRequestError) {
+  if (error.status === "prompt_error" && /(image|pixel|png|jpeg|format)/i.test(error.message)) {
+    return localError("The dual-verification test image was rejected. This is a probe-asset error, not an API-key or project-permission failure.", "unavailable", "client_request", error.metadata.durationMs);
+  }
+  return error;
+}
 
 export class GroqClient {
   constructor(private readonly apiKey: string) {}
@@ -134,7 +141,8 @@ export class GroqClient {
       if (!payload.choices?.[0]?.message?.content?.trim()) throw localError("Groq returned no usable generation-model verification result.", "unavailable", "unknown", durationMs);
       return { status: "verified", message: `Both ${GROQ_TRANSCRIPTION_MODEL} and ${GROQ_VISION_MODEL} project probes succeeded.`, transcription, generation: { ok: true, status: "verified", message: `${GROQ_VISION_MODEL} image-analysis/pacing probe succeeded.` } };
     } catch (error) {
-      const failure = error instanceof GroqRequestError ? error : localError("Groq could not complete the generation-model verification probe.", "unavailable", "unknown");
+      const originalFailure = error instanceof GroqRequestError ? error : localError("Groq could not complete the generation-model verification probe.", "unavailable", "unknown");
+      const failure = projectProbeImageFailure(originalFailure);
       return { status: failure.status, message: failure.message, transcription, generation: { ok: false, status: failure.status, message: failure.message } };
     }
   }
