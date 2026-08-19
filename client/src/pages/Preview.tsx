@@ -9,6 +9,7 @@ import { Clapperboard, Clipboard, Download, Pause, Play, Zap } from "lucide-reac
 import { toast } from "sonner";
 
 const handoffName = (name: string) => `${name.replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || "project"}-approved-render-handoff.json`;
+const isWindowsDirectory = (value: string | null | undefined) => Boolean(value && /^(?:[A-Za-z]:\\|\\\\)/.test(value.trim()));
 
 type ZoomSettings = { enabled: boolean; amountPercent: 3 | 5 | 8 | 12; direction: "IN" | "OUT" | "AUTO"; crossfadeDurationMs: 0 | 300 | 500 | 800 | 1000 | 1200 };
 
@@ -27,6 +28,8 @@ export default function Preview() {
   const review = trpc.timeline.review.useQuery(input, { enabled: Boolean(project) });
   const approved = review.data?.approval.status === "approved";
   const handoff = trpc.worker.renderHandoff.useQuery(input, { enabled: Boolean(project && approved), retry: false });
+  const [nativeSourceDirectory, setNativeSourceDirectory] = useState("");
+  const [nativeOutputDirectory, setNativeOutputDirectory] = useState("");
   const updateZoom = trpc.project.updateZoom.useMutation({
     onSuccess: async () => {
       await Promise.all([utils.project.list.invalidate(), utils.timeline.review.invalidate(input), utils.worker.renderHandoff.invalidate(input)]);
@@ -34,6 +37,17 @@ export default function Preview() {
     },
     onError: error => toast.error(error.message || "Zoom settings could not be saved."),
   });
+  const updateNativePaths = trpc.project.updateSetup.useMutation({
+    onSuccess: async () => {
+      await Promise.all([utils.project.list.invalidate(), utils.worker.renderHandoff.invalidate(input)]);
+      toast.success("Exact Windows render paths saved for this project.");
+    },
+    onError: error => toast.error(error.message || "Windows render paths could not be saved."),
+  });
+  useEffect(() => {
+    setNativeSourceDirectory(isWindowsDirectory(project?.imageSourcePath) ? project!.imageSourcePath! : "");
+    setNativeOutputDirectory(isWindowsDirectory(project?.outputPath) ? project!.outputPath! : "");
+  }, [project?.id, project?.imageSourcePath, project?.outputPath]);
   const command = buildNativeRenderCommand(project?.name ?? "project", project?.imageSourcePath, project?.outputPath);
 
   if (!isAuthenticated) return <div className="mx-auto max-w-6xl"><Hero /><AuthPrompt noun="video preview" /></div>;
@@ -47,6 +61,14 @@ export default function Preview() {
   const saveZoom = (next: ZoomSettings) => {
     if (!project) return;
     updateZoom.mutate({ projectId: project.id, ...next });
+  };
+  const saveNativePaths = () => {
+    if (!project) return;
+    if (!isWindowsDirectory(nativeSourceDirectory) || !isWindowsDirectory(nativeOutputDirectory)) {
+      toast.error("Enter full Windows paths, for example D:\\Test, for both source and output folders.");
+      return;
+    }
+    updateNativePaths.mutate({ projectId: project.id, imageSourcePath: nativeSourceDirectory.trim(), outputPath: nativeOutputDirectory.trim() });
   };
   const download = () => {
     if (!handoff.data || !project) return;
@@ -80,6 +102,13 @@ export default function Preview() {
       </section>
       <ZoomControls zoom={selectedZoom} saving={updateZoom.isPending} onChange={saveZoom} />
       <RenderEstimate durationMs={project.audioDurationMs ?? review.data?.segments.at(-1)?.endMs ?? 0} imageCount={review.data?.segments.length ?? 0} zoom={selectedZoom} />
+      <section className="rounded-[1.5rem] border border-cyan-200/[.14] bg-[#101827] p-6">
+        <p className="text-xs font-semibold uppercase tracking-[.14em] text-cyan-200">Saved Windows render folders</p>
+        <h2 className="mt-2 text-lg font-semibold text-white">Use the exact local drive paths</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">Browsers intentionally do not reveal a selected folder’s full Windows path. Paste it once here—for example <code className="text-cyan-100">D:\\Test</code>—and future handoff commands will use that exact path instead of guessing a Downloads folder.</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2"><label className="grid gap-1.5 text-xs font-medium text-slate-400">Source folder<input aria-label="Windows source folder path" value={nativeSourceDirectory} onChange={event => setNativeSourceDirectory(event.target.value)} placeholder="D:\\Test" className="vs-field w-full px-3 text-sm placeholder:text-slate-600" /></label><label className="grid gap-1.5 text-xs font-medium text-slate-400">Output folder<input aria-label="Windows output folder path" value={nativeOutputDirectory} onChange={event => setNativeOutputDirectory(event.target.value)} placeholder="D:\\Test" className="vs-field w-full px-3 text-sm placeholder:text-slate-600" /></label></div>
+        <Button type="button" disabled={updateNativePaths.isPending} onClick={saveNativePaths} className="mt-4 bg-cyan-200 text-slate-950 hover:bg-cyan-100">Save exact Windows paths</Button>
+      </section>
       <section className="rounded-[1.5rem] border border-white/[.07] bg-[#101827] p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[.14em] text-cyan-200">Native render</p><h2 className="mt-2 font-semibold text-white">Three clear steps</h2><p className="mt-1 text-sm leading-6 text-slate-500">The command uses your saved folders and applies the approved timeline with the motion mode selected above.</p></div><Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(command).then(() => toast.success("Command copied."))} className="border-white/10 text-slate-200"><Clipboard className="mr-2 h-3.5 w-3.5" />Copy command</Button></div>
         <div className="mt-5 grid gap-3 md:grid-cols-3"><WorkflowStep number="1" title="Download worker" text="Use the current approved worker only." /><WorkflowStep number="2" title="Download handoff" text="Keep its project-specific file name." /><WorkflowStep number="3" title="Paste and render" text="Run the copied command in the saved output folder." /></div>

@@ -92,15 +92,19 @@ export async function createProjectRecord(userId: number, input: { name: string;
   return { projectId: Number(result[0].insertId) };
 }
 
+export function projectSetupUpdateValues(input: { narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string }) {
+  const values: { narrationOriginalName?: string | null; imageSourcePath?: string | null; outputPath?: string | null } = {};
+  if (input.narrationOriginalName !== undefined) values.narrationOriginalName = input.narrationOriginalName.trim() || null;
+  if (input.imageSourcePath !== undefined) values.imageSourcePath = input.imageSourcePath.trim() || null;
+  if (input.outputPath !== undefined) values.outputPath = input.outputPath.trim() || null;
+  return values;
+}
+
 export async function updateProjectSetup(userId: number, projectId: number, input: { narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string }) {
   const db = await requireDb();
   const project = await getUserProject(userId, projectId);
   if (!project) throw new Error("Project not found.");
-  await db.update(projects).set({
-    narrationOriginalName: input.narrationOriginalName?.trim() || null,
-    imageSourcePath: input.imageSourcePath?.trim() || null,
-    outputPath: input.outputPath?.trim() || null,
-  }).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
+  await db.update(projects).set(projectSetupUpdateValues(input)).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
   return { success: true } as const;
 }
 

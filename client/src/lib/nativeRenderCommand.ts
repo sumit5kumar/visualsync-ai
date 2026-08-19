@@ -1,9 +1,11 @@
 function quotePowerShell(value: string) { return `'${value.replace(/'/g, "''")}'`; }
 
+export function isAbsoluteWindowsDirectory(value: string | null | undefined) {
+  return Boolean(value && /^(?:[A-Za-z]:\\|\\\\)/.test(value.trim()));
+}
+
 export function outputFolderSeed(savedOutputPath: string | null | undefined) {
-  const selectedName = savedOutputPath?.match(/^Native (?:source|output) folder selected:\s*(.+)$/i)?.[1]?.trim();
-  if (selectedName) return `Join-Path $env:USERPROFILE ${quotePowerShell(`Downloads\\${selectedName.replace(/[\\/]/g, "_")}`)}`;
-  if (savedOutputPath && /^[A-Za-z]:\\/.test(savedOutputPath)) return quotePowerShell(savedOutputPath);
+  if (isAbsoluteWindowsDirectory(savedOutputPath)) return quotePowerShell(savedOutputPath!.trim());
   return null;
 }
 

@@ -235,3 +235,5 @@
 - [x] Persist the larger measured-safe Test narration chunk plan with bounded storage concurrency so transient storage connections are not overwhelmed.
 - [x] Apply a reliable bounded deadline to the small Free-tier WAV transcription request so a stalled provider socket persists a classified retry state rather than blocking all later chunks.
 - [x] Keep the routine local regression suite deterministic by making the separate live Groq credential smoke test explicitly opt-in.
+- [x] Diagnose the Test project’s missing approved-render handoff file without starting a local render.
+- [x] Preserve the actual selected Windows native source and output paths so future handoff commands do not reconstruct an incorrect Downloads path.
