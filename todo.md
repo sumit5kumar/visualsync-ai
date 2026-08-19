@@ -249,3 +249,4 @@
 - [x] Support short WAV narration directly within Groq’s upload limit without changing the proven MP3 long-audio chunking path.
 - [x] Replace the misleading initial processing countdown with truthful preparing/observed-progress messaging.
 - [ ] Add focused tests and production verification for immediate dispatch, duplicate protection, short WAV, retry preservation, and unattended continuation.
+- [x] Fix the Projects-page hosted Timeline start guard that incorrectly blocks the current development preview after the implementation has been published.

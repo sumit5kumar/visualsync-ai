@@ -54,4 +54,11 @@ describe("durable Timeline Generation retry policy", () => {
     expect(routerSource).toContain("const dispatch = await runTimelineGenerationJob(job.id);");
     expect(jobSource).toContain("eq(timelineGenerationJobs.leaseToken, leaseToken)");
   });
+
+  it("allows the authenticated preview workflow to start the already-published hosted job instead of blocking on NODE_ENV", () => {
+    const routerSource = readFileSync(resolve(process.cwd(), "server/routers.ts"), "utf8");
+    expect(routerSource).not.toContain('process.env.NODE_ENV !== "production"');
+    expect(routerSource).toContain('path: "/api/scheduled/timeline-generation"');
+    expect(routerSource).toContain('if (!sessionToken) throw new Error("Sign in again before starting hosted Timeline Generation.")');
+  });
 });
