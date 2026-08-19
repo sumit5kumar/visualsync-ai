@@ -251,3 +251,6 @@
 - [ ] Add focused tests and production verification for immediate dispatch, duplicate protection, short WAV, retry preservation, and unattended continuation.
 - [x] Fix the Projects-page hosted Timeline start guard that incorrectly blocks the current development preview after the implementation has been published.
 - [ ] Preserve first-dispatch telemetry across all hosted Timeline processing slices and complete the timed short-WAV production acceptance check.
+- [x] Diagnose the production Groq transcription 403 against the working development configuration without changing code, keys, processing, or rendering.
+- [x] Audit non-secret Groq key rotation history to identify the working and failing key associations that the persisted application records can establish.
+- [x] Add a read-only Groq key provenance indicator distinguishing the key verified in Default Project from keys whose issuing project is externally unverified, without changing key behavior.
