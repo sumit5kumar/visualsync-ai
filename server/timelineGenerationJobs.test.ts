@@ -53,6 +53,8 @@ describe("durable Timeline Generation retry policy", () => {
     expect(routerSource).toContain("await setTimelineGenerationSchedule(ctx.user.id, input.projectId, schedule.taskUid);");
     expect(routerSource).toContain("const dispatch = await runTimelineGenerationJob(job.id);");
     expect(jobSource).toContain("eq(timelineGenerationJobs.leaseToken, leaseToken)");
+    expect(jobSource).toContain("firstDispatchAtMs");
+    expect(jobSource).toContain("await db.update(timelineGenerationJobs).set({ workState }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)))");
   });
 
   it("allows the authenticated preview workflow to start the already-published hosted job instead of blocking on NODE_ENV", () => {

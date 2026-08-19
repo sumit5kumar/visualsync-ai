@@ -145,6 +145,7 @@ export async function runTimelineGenerationJob(jobId: number) {
   try {
     const startedAtMs = Date.now();
     let workState: Record<string, unknown> = { ...((claimedJob.workState as Record<string, unknown> | null) ?? {}), firstDispatchAtMs: Number((claimedJob.workState as Record<string, unknown> | null)?.firstDispatchAtMs) || startedAtMs };
+    await db.update(timelineGenerationJobs).set({ workState }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
     if (!workState?.preflightComplete) {
       await preflightGroqTimelineJob(claimedJob.userId);
       workState = { ...(workState ?? {}), preflightComplete: true };
