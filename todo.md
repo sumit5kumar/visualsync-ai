@@ -256,3 +256,9 @@
 - [x] Add a read-only Groq key provenance indicator distinguishing the key verified in Default Project from keys whose issuing project is externally unverified, without changing key behavior.
 - [x] Add a reversible Default Project-verified Groq eligibility rule for the authorized controlled retry, retaining all external keys encrypted and stored without deletion or disabling.
 - [ ] Retry the preserved short-WAV Timeline job using only the verified Default Project key and verify its durable production progress without rendering.
+- [x] Ensure the Default Project-only eligibility rule applies to every automatic Groq operation, including image analysis and pacing, before any further controlled retry.
+- [ ] Verify the deployment timing behind the completed short-WAV run and preserve its Timeline unless the user explicitly authorizes a second Default Project-only retry.
+- [ ] Rebuild the preserved short-WAV Timeline using only the Default Project key ending in …Ws5z and verify exclusive provider-key usage across transcription, image analysis, and pacing.
+- [x] Preserve the verified-key-only retry state and stop passive waiting after the user requested a clear timing decision.
+- [x] Design a no-secret dual-model Groq project-verification workflow that keeps the current 4/18 job paused and promotes only explicitly verified keys to automatic rotation.
+- [x] Implement secure dual-model Groq project verification that promotes only keys passing real transcription and generation-model probes while preserving the current paused job state.

@@ -188,7 +188,7 @@ export async function removeGeminiKey(userId: number, keyId: number) {
 
 export async function listVisibleGroqKeys(userId: number) {
   const db = await requireDb();
-  return (await db.select().from(groqApiKeys).where(eq(groqApiKeys.userId, userId)).orderBy(groqApiKeys.rotationOrder, groqApiKeys.id)).map(record => ({ id: record.id, label: record.label, maskedKey: `${record.keyPrefix}••••••••${record.keySuffix}`, isActive: record.isActive, rotationOrder: record.rotationOrder, projectVerification: record.projectVerification, testStatus: record.testStatus, lastTestedAt: record.lastTestedAt, lastUsedAt: record.lastUsedAt, lastFailureAt: record.lastFailureAt, cooldownUntil: record.cooldownUntil, consecutiveRateLimits: record.consecutiveRateLimits, createdAt: record.createdAt }));
+  return (await db.select().from(groqApiKeys).where(eq(groqApiKeys.userId, userId)).orderBy(groqApiKeys.rotationOrder, groqApiKeys.id)).map(record => ({ id: record.id, label: record.label, maskedKey: `${record.keyPrefix}••••••••${record.keySuffix}`, isActive: record.isActive, rotationOrder: record.rotationOrder, projectVerification: record.projectVerification, transcriptionProbeAt: record.transcriptionProbeAt, generationProbeAt: record.generationProbeAt, projectVerifiedAt: record.projectVerifiedAt, projectVerificationError: record.projectVerificationError, testStatus: record.testStatus, lastTestedAt: record.lastTestedAt, lastUsedAt: record.lastUsedAt, lastFailureAt: record.lastFailureAt, cooldownUntil: record.cooldownUntil, consecutiveRateLimits: record.consecutiveRateLimits, createdAt: record.createdAt }));
 }
 
 export async function getStoredGroqKey(userId: number, keyId: number) {
@@ -207,6 +207,27 @@ export async function saveValidatedGroqKey(userId: number, input: { label: strin
 export async function recordGroqKeyTest(userId: number, keyId: number, testStatus: "verified" | "invalid" | "permission_restricted" | "quota_limited" | "unavailable") {
   const db = await requireDb();
   await db.update(groqApiKeys).set({ testStatus, lastTestedAt: new Date(), ...(testStatus === "verified" ? { isActive: true, cooldownUntil: null, consecutiveRateLimits: 0 } : {}) }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, keyId)));
+}
+
+export async function recordGroqProjectVerification(userId: number, keyId: number, input: { status: "verified" | "invalid" | "permission_restricted" | "quota_limited" | "unavailable"; transcription: { ok: boolean; status: string; message: string }; generation: { ok: boolean; status: string; message: string } }) {
+  const db = await requireDb();
+  const key = await getStoredGroqKey(userId, keyId);
+  if (!key) throw new Error("Groq key not found.");
+  const now = new Date();
+  const verified = input.transcription.ok && input.generation.ok;
+  const projectVerification = verified ? (key.projectVerification === "default_project_verified" ? "default_project_verified" : "externally_verified") : key.projectVerification === "default_project_verified" ? "default_project_verified" : "unverified";
+  const safeError = verified ? null : JSON.stringify({ transcription: { status: input.transcription.status, message: input.transcription.message }, generation: { status: input.generation.status, message: input.generation.message } });
+  await db.update(groqApiKeys).set({
+    testStatus: input.status,
+    projectVerification,
+    transcriptionProbeAt: now,
+    generationProbeAt: input.generation.message.startsWith("Generation-model probe was not run") ? null : now,
+    projectVerifiedAt: verified ? now : key.projectVerification === "default_project_verified" ? key.projectVerifiedAt : null,
+    projectVerificationError: safeError,
+    lastTestedAt: now,
+    ...(input.status === "verified" ? { isActive: true, cooldownUntil: null, consecutiveRateLimits: 0 } : {}),
+  }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, keyId)));
+  return { verified, projectVerification } as const;
 }
 
 export async function activateGroqKey(userId: number, keyId: number) {

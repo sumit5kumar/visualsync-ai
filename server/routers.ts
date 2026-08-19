@@ -5,7 +5,7 @@ import { parse as parseCookie } from "cookie";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { activateGeminiKey, activateGroqKey, approveTimeline, createProjectRecord, deleteProjectRecord, getApprovedRenderHandoff, getRenderedProjectVideo, getStoredGeminiKey, getStoredGroqKey, getTimelineReview, listProjectTimeline, listRenderedProjectVideos, listTimelineCandidates, listUserProjects, listVisibleGeminiKeys, listVisibleGroqKeys, prepareProjectMediaImport, recordGeminiKeyTest, recordGroqKeyTest, removeGeminiKey, removeGroqKey, saveValidatedGeminiKey, saveValidatedGroqKey, substituteTimelineImage, updateProjectSetup, updateProjectZoomSettings } from "./db";
+import { activateGeminiKey, activateGroqKey, approveTimeline, createProjectRecord, deleteProjectRecord, getApprovedRenderHandoff, getRenderedProjectVideo, getStoredGeminiKey, getStoredGroqKey, getTimelineReview, listProjectTimeline, listRenderedProjectVideos, listTimelineCandidates, listUserProjects, listVisibleGeminiKeys, listVisibleGroqKeys, prepareProjectMediaImport, recordGeminiKeyTest, recordGroqKeyTest, recordGroqProjectVerification, removeGeminiKey, removeGroqKey, saveValidatedGeminiKey, saveValidatedGroqKey, substituteTimelineImage, updateProjectSetup, updateProjectZoomSettings } from "./db";
 import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { getTimelineGenerationJob, queueTimelineGenerationJob, runTimelineGenerationJob, setTimelineGenerationSchedule, TIMELINE_JOB_CRON } from "./timelineGenerationJobs";
 import { decryptSecret, describeApiKey, describeGeminiKey, encryptSecret, fingerprintSecret } from "./crypto";
@@ -70,6 +70,13 @@ export const appRouter = router({
       const storedKey = await getStoredGroqKey(ctx.user.id, input.keyId); if (!storedKey) throw new TRPCError({ code: "NOT_FOUND", message: "Groq key not found." });
       const testResult = await new GroqClient(decryptSecret({ ciphertext: storedKey.encryptedCiphertext, iv: storedKey.encryptionIv, tag: storedKey.encryptionTag })).testKey();
       await recordGroqKeyTest(ctx.user.id, input.keyId, testResult.status === "request_too_large" || testResult.status === "prompt_error" ? "unavailable" : testResult.status); return testResult;
+    }),
+    verifyProject: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const storedKey = await getStoredGroqKey(ctx.user.id, input.keyId); if (!storedKey) throw new TRPCError({ code: "NOT_FOUND", message: "Groq key not found." });
+      const probe = await new GroqClient(decryptSecret({ ciphertext: storedKey.encryptedCiphertext, iv: storedKey.encryptionIv, tag: storedKey.encryptionTag })).verifyProjectModels();
+      const normalizedStatus = probe.status === "request_too_large" || probe.status === "prompt_error" ? "unavailable" : probe.status;
+      const persisted = await recordGroqProjectVerification(ctx.user.id, input.keyId, { ...probe, status: normalizedStatus });
+      return { ...probe, ...persisted };
     }),
     activate: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       const key = await getStoredGroqKey(ctx.user.id, input.keyId); if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "Groq key not found." });

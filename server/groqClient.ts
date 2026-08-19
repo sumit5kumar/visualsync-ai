@@ -4,6 +4,7 @@ export const GROQ_VISION_MODEL = "qwen/qwen3.6-27b";
 
 export type GroqKeyStatus = "verified" | "invalid" | "permission_restricted" | "quota_limited" | "request_too_large" | "prompt_error" | "unavailable";
 export type GroqKeyTestResult = { status: GroqKeyStatus; message: string };
+export type GroqProjectProbeResult = { status: GroqKeyStatus; message: string; transcription: { ok: boolean; status: GroqKeyStatus; message: string }; generation: { ok: boolean; status: GroqKeyStatus; message: string } };
 export type GroqFailureCategory = "invalid_key" | "permission_denied" | "file_too_large" | "rate_limited" | "audio_quota_exhausted" | "timeout" | "network_failure" | "server_error" | "client_request" | "unknown";
 export type GroqRequestMetadata = { httpStatus?: number; errorCode?: string; retryAfterMs?: number; remainingRequests?: string; remainingAudio?: string; resetAudio?: string; durationMs: number; category: GroqFailureCategory };
 export type GroqTranscript = { text: string; language?: string; segments?: Array<{ id?: number; start: number; end: number; text: string; avg_logprob?: number; no_speech_prob?: number }>; requestMetadata: GroqRequestMetadata };
@@ -66,6 +67,19 @@ function parseGeneratedJsonObject(content: string, malformedMessage: string, dur
   try { return JSON.parse(objectText) as unknown; } catch { throw localError(malformedMessage, "prompt_error", "client_request", durationMs); }
 }
 
+function minimalProbeWav() {
+  const sampleRate = 16_000;
+  const sampleCount = sampleRate;
+  const bytes = new Uint8Array(44 + sampleCount * 2);
+  const view = new DataView(bytes.buffer);
+  const writeText = (offset: number, value: string) => { for (let index = 0; index < value.length; index += 1) bytes[offset + index] = value.charCodeAt(index); };
+  writeText(0, "RIFF"); view.setUint32(4, 36 + sampleCount * 2, true); writeText(8, "WAVEfmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); writeText(36, "data"); view.setUint32(40, sampleCount * 2, true);
+  for (let index = 0; index < sampleCount; index += 1) view.setInt16(44 + index * 2, Math.round(Math.sin((index / sampleRate) * Math.PI * 2 * 440) * 1_500), true);
+  return bytes;
+}
+
+const MINIMAL_PROBE_IMAGE_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
 export class GroqClient {
   constructor(private readonly apiKey: string) {}
 
@@ -100,6 +114,28 @@ export class GroqClient {
     } catch (error) {
       if (error instanceof GroqRequestError) return { status: error.status, message: error.message };
       return { status: "unavailable", message: "Groq could not be reached for this key test." };
+    }
+  }
+
+  async verifyProjectModels(): Promise<GroqProjectProbeResult> {
+    let transcription: GroqProjectProbeResult["transcription"];
+    try {
+      await this.transcribeAudio({ bytes: minimalProbeWav(), filename: "visualsync-project-probe.wav", mimeType: "audio/wav", timeoutMs: 30_000 });
+      transcription = { ok: true, status: "verified", message: `${GROQ_TRANSCRIPTION_MODEL} transcription probe succeeded.` };
+    } catch (error) {
+      const failure = error instanceof GroqRequestError ? error : localError("Groq could not complete the transcription verification probe.", "unavailable", "unknown");
+      return { status: failure.status, message: failure.message, transcription: { ok: false, status: failure.status, message: failure.message }, generation: { ok: false, status: "unavailable", message: "Generation-model probe was not run because transcription verification did not succeed." } };
+    }
+
+    try {
+      const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 32, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: [{ type: "text", text: "Reply with exactly {\"ok\":true}." }, { type: "image_url", image_url: { url: MINIMAL_PROBE_IMAGE_DATA_URL, detail: "low" } }] }] }) }, 30_000);
+      if (!response.ok) { const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null; throw classifyGroqError(response, payload?.error?.message ?? "", durationMs); }
+      const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      if (!payload.choices?.[0]?.message?.content?.trim()) throw localError("Groq returned no usable generation-model verification result.", "unavailable", "unknown", durationMs);
+      return { status: "verified", message: `Both ${GROQ_TRANSCRIPTION_MODEL} and ${GROQ_VISION_MODEL} project probes succeeded.`, transcription, generation: { ok: true, status: "verified", message: `${GROQ_VISION_MODEL} image-analysis/pacing probe succeeded.` } };
+    } catch (error) {
+      const failure = error instanceof GroqRequestError ? error : localError("Groq could not complete the generation-model verification probe.", "unavailable", "unknown");
+      return { status: failure.status, message: failure.message, transcription, generation: { ok: false, status: failure.status, message: failure.message } };
     }
   }
 

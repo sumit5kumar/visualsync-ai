@@ -18,6 +18,33 @@ describe("GroqClient", () => {
     expect(url).not.toContain("gsk_");
   });
 
+  it("requires both a real Whisper transcription probe and an image-analysis/pacing model probe before project verification succeeds", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ text: "probe", segments: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }), { status: 200 }));
+    global.fetch = fetchMock;
+
+    const result = await new GroqClient("gsk_project_probe").verifyProjectModels();
+
+    expect(result).toMatchObject({ status: "verified", transcription: { ok: true, status: "verified" }, generation: { ok: true, status: "verified" } });
+    const [transcriptionUrl, transcriptionRequest] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(transcriptionUrl).toBe("https://api.groq.com/openai/v1/audio/transcriptions");
+    expect((transcriptionRequest.body as FormData).get("model")).toBe(GROQ_TRANSCRIPTION_MODEL);
+    const [generationUrl, generationRequest] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(generationUrl).toBe("https://api.groq.com/openai/v1/chat/completions");
+    expect(JSON.parse(String(generationRequest.body))).toMatchObject({ model: GROQ_VISION_MODEL });
+  });
+
+  it("does not promote a project key when the real Whisper probe is denied and does not spend a generation-model request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "whisper model blocked" } }), { status: 403 }));
+    global.fetch = fetchMock;
+
+    const result = await new GroqClient("gsk_project_probe").verifyProjectModels();
+
+    expect(result).toMatchObject({ status: "permission_restricted", transcription: { ok: false, status: "permission_restricted" }, generation: { ok: false } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("submits image analysis without the rejected JSON response mode and parses generated JSON", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '```json\n{"sceneDescription":"hourglass"}\n```' } }] }), { status: 200 }));
     global.fetch = fetchMock;
