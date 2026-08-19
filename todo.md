@@ -237,3 +237,4 @@
 - [x] Keep the routine local regression suite deterministic by making the separate live Groq credential smoke test explicitly opt-in.
 - [x] Diagnose the Test project’s missing approved-render handoff file without starting a local render.
 - [x] Preserve the actual selected Windows native source and output paths so future handoff commands do not reconstruct an incorrect Downloads path.
+- [x] Diagnose and repair the Windows Fast Render FFmpeg command-length failure for large approved timelines without changing their timeline or rendering settings.

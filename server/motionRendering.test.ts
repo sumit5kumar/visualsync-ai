@@ -56,7 +56,11 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain('if ($crossfadeDurationMs -notin @(0, 300, 500, 800, 1000, 1200))');
     expect(worker).toContain('$fastRender = !$zoomEnabled -and $crossfadeDurationMs -eq 0');
     expect(worker).toContain('if ($fastRender) {');
-    expect(worker).toContain('concat=n=$($segments.Count):v=1:a=0[fastvideo]');
+    expect(worker).toContain('$fastConcatPath = Join-Path $clipRoot "fast-render.ffconcat"');
+    expect(worker).toContain('@("-hide_banner", "-loglevel", "warning", "-f", "concat", "-safe", "0", "-i", $fastConcatPath');
+    expect(worker).toContain('Repeat the last file because ffconcat applies the preceding duration');
+    expect(worker).not.toContain('concat=n=$($segments.Count):v=1:a=0[fastvideo]');
+    expect(worker).toContain('if ($renderedOutputPath) { Write-Output "RENDERED=$renderedOutputPath" }');
     expect(worker).toContain('CPU_BOUND_STAGES=none (Fast Render bypasses continuous zoom and alpha crossfade)');
     expect(worker).toContain('$transitionSeconds = $crossfadeDurationMs / 1000.0');
     expect(worker).toContain('$transitionHalfSeconds = $transitionSeconds / 2.0');

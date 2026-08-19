@@ -332,6 +332,8 @@ $clipTelemetryJob = $null
 $compositionTelemetryJob = $null
 $encodeTelemetryJob = $null
 $zoomRendererResults = @()
+$fastConcatPath = $null
+$renderedOutputPath = $null
 
 try {
   if ($fastRender) {
@@ -346,20 +348,22 @@ try {
     Write-Output "ENCODER=$($finalEncoder.label)"
     Write-Output "CPU_BOUND_STAGES=none (Fast Render bypasses continuous zoom and alpha crossfade)"
     $fastFilter = "scale=$canvasWidth`:$canvasHeight`:force_original_aspect_ratio=increase:flags=lanczos,crop=$canvasWidth`:$canvasHeight,setsar=1,format=yuv420p,fps=$FrameRate"
-    $fastArguments = @("-hide_banner", "-loglevel", "warning")
-    $fastChains = @()
-    $fastLabels = @()
+    # Keep the Windows process command short even for hundreds of source images.
+    # A concat manifest carries the long per-image path/duration list outside argv.
+    $fastConcatPath = Join-Path $clipRoot "fast-render.ffconcat"
+    $fastManifestLines = @("ffconcat version 1.0")
     for ($fastIndex = 0; $fastIndex -lt $segments.Count; $fastIndex++) {
       $segment = $segments[$fastIndex]
-      $fastArguments += @("-loop", "1", "-framerate", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-t", (Format-Number $segment.durationSeconds), "-i", $segment.imagePath)
-      $fastChains += "[$fastIndex`:v]$fastFilter[fast$fastIndex]"
-      $fastLabels += "[fast$fastIndex]"
+      $escapedImagePath = $segment.imagePath.Replace("'", "'\''")
+      $fastManifestLines += "file '$escapedImagePath'"
+      $fastManifestLines += "duration $(Format-Number $segment.durationSeconds)"
     }
-    $narrationInputIndex = $segments.Count
-    $fastArguments += @("-i", $narrationPath)
-    $fastFilterGraph = (($fastChains -join ";") + ";" + ($fastLabels -join "") + "concat=n=$($segments.Count):v=1:a=0[fastvideo]")
+    # Repeat the last file because ffconcat applies the preceding duration to a segment boundary.
+    $lastEscapedImagePath = $segments[-1].imagePath.Replace("'", "'\''")
+    $fastManifestLines += "file '$lastEscapedImagePath'"
+    [System.IO.File]::WriteAllLines($fastConcatPath, [string[]]$fastManifestLines, (New-Object System.Text.UTF8Encoding($false)))
     $outputPath = Join-Path $OutputDirectory $handoff.output.filename
-    $fastArguments += @("-filter_complex", $fastFilterGraph, "-map", "[fastvideo]", "-map", "$narrationInputIndex`:a:0") + $finalEncoder.arguments + @(
+    $fastArguments = @("-hide_banner", "-loglevel", "warning", "-f", "concat", "-safe", "0", "-i", $fastConcatPath, "-i", $narrationPath, "-vf", $fastFilter, "-map", "0:v:0", "-map", "1:a:0") + $finalEncoder.arguments + @(
       "-g", ($FrameRate * 2).ToString(), "-keyint_min", $FrameRate.ToString(), "-sc_threshold", "0", "-bf", "2",
       "-pix_fmt", "yuv420p", "-r", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-fps_mode", "cfr",
       "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-shortest", "-y", $outputPath
@@ -376,6 +380,7 @@ try {
     $encodeTelemetryJob = $null
     if ($encodeExitCode -ne 0) { throw "FFmpeg exited with code $encodeExitCode while running Fast Render." }
     if (!(Test-Path $outputPath)) { throw "Fast Render completed without writing the expected MP4." }
+    $renderedOutputPath = $outputPath
     $renderStopwatch.Stop()
     $profilePath = Join-Path $OutputDirectory (([System.IO.Path]::GetFileNameWithoutExtension($handoff.output.filename)) + "-render-profile.json")
     $profile = [pscustomobject]@{
@@ -508,6 +513,7 @@ try {
   $encodeTelemetryJob = $null
   if ($encodeExitCode -ne 0) { throw "FFmpeg exited with code $encodeExitCode" }
   if (!(Test-Path $outputPath)) { throw "FFmpeg completed without writing the expected MP4." }
+  $renderedOutputPath = $outputPath
   $renderStopwatch.Stop()
   $profilePath = Join-Path $OutputDirectory (([System.IO.Path]::GetFileNameWithoutExtension($handoff.output.filename)) + "-render-profile.json")
   $profile = [pscustomobject]@{
@@ -534,9 +540,10 @@ try {
   if ($clipTelemetryJob) { Stop-Job -Job $clipTelemetryJob -ErrorAction SilentlyContinue; Remove-Job -Job $clipTelemetryJob -Force -ErrorAction SilentlyContinue }
   if ($compositionTelemetryJob) { Stop-Job -Job $compositionTelemetryJob -ErrorAction SilentlyContinue; Remove-Job -Job $compositionTelemetryJob -Force -ErrorAction SilentlyContinue }
   if ($encodeTelemetryJob) { Stop-Job -Job $encodeTelemetryJob -ErrorAction SilentlyContinue; Remove-Job -Job $encodeTelemetryJob -Force -ErrorAction SilentlyContinue }
+  if ($fastConcatPath -and (Test-Path $fastConcatPath)) { Remove-Item -Force $fastConcatPath -ErrorAction SilentlyContinue }
   $jpegParameters.Dispose()
   if (Test-Path $clipRoot) { Remove-Item -Recurse -Force $clipRoot }
   if (Test-Path $frameDirectory) { Remove-Item -Recurse -Force $frameDirectory }
 }
 
-Write-Output "RENDERED=$outputPath"
+if ($renderedOutputPath) { Write-Output "RENDERED=$renderedOutputPath" }
