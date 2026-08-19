@@ -242,4 +242,5 @@
 - [x] Explain the completed Test Fast Render’s actual performance and console warnings from its local render profile without changing the renderer.
 - [x] Make the existing Groq Free-tier Timeline Generation pipeline a durable hosted background job with persisted job state, automatic transient retry, browser/laptop independence, and unchanged local-only MP4 rendering.
 - [x] Complete final Groq production hardening before publication: provider preflight, precise retry/permanent states, automatic recovery messaging, and production-focused regression coverage.
-- [ ] Publish the hardened checkpoint, then activate and verify the hosted Timeline Generation scheduler against the production callback.
+- [x] Publish the hardened checkpoint, then activate and verify the hosted Timeline Generation scheduler against the production callback.
+- [x] Activate and verify the published hosted Timeline scheduler without altering the existing completed Test Timeline or starting local rendering.
