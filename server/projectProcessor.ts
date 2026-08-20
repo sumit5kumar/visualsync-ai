@@ -67,17 +67,10 @@ function isMp3Narration(narration: Pick<typeof mediaAssets.$inferSelect, "mimeTy
 export async function prepareNarrationChunks(projectId: number, narration: typeof mediaAssets.$inferSelect, db: Exclude<Awaited<ReturnType<typeof getDb>>, null>): Promise<NarrationTranscriptionState> {
   const cached = readNarrationTranscriptionState(narration.analysisJson);
   const wavNarration = isWavNarration(narration);
-  const directLimit = wavNarration ? SAFE_GROQ_DIRECT_WAV_BYTES : SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES;
-  if (cached?.chunks.every(chunk => chunk.byteSize <= directLimit)) return cached;
-  const byteSize = narration.byteSize ?? 0;
-  if (byteSize <= directLimit) {
-    const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: 0, chunks: [{ storageKey: narration.storageKey, startMs: 0, endMs: 0, contentStartMs: 0, contentEndMs: 0, byteSize, status: "pending", attempts: 0 }] };
-    await persistNarrationTranscriptionState(narration, state, db);
-    return state;
-  }
-  if (!isMp3Narration(narration) && !wavNarration) throw new Error("This narration exceeds Groq’s direct-upload limit and must be uploaded as WAV or MP3 for automatic safe transcription chunking.");
+  if (cached?.sourcePrepared) return cached;
+  if (!isMp3Narration(narration) && !wavNarration) throw new Error("This narration must be uploaded as WAV or MP3 for automatic safe transcription chunking.");
   const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey));
-  if (!sourceResponse.ok) throw new Error("The oversized narration could not be retrieved from secure storage for transcription chunking.");
+  if (!sourceResponse.ok) throw new Error("The narration could not be retrieved from secure storage for transcription preparation.");
   const source = new Uint8Array(await sourceResponse.arrayBuffer());
   const chunks = wavNarration ? splitPcmWavForTranscription(source) : splitMp3ForTranscription(source);
   const chunkMimeType = wavNarration ? "audio/wav" : "audio/mpeg";
@@ -86,7 +79,7 @@ export async function prepareNarrationChunks(projectId: number, narration: typeo
     const stored = await storagePut(`projects/${projectId}/transcription-chunks/${narration.id}-part-${index + 1}.${chunkExtension}`, chunk.bytes, chunkMimeType);
     return { storageKey: stored.key, startMs: chunk.startMs, endMs: chunk.endMs, contentStartMs: chunk.contentStartMs, contentEndMs: chunk.contentEndMs, byteSize: chunk.bytes.byteLength, status: "pending", attempts: 0 };
   });
-  const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: 4_000, chunks: storedChunks };
+  const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: chunks.length > 1 ? 4_000 : 0, sourcePrepared: true, chunks: storedChunks };
   await persistNarrationTranscriptionState(narration, state, db);
   return state;
 }

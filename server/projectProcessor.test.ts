@@ -42,4 +42,11 @@ describe("public managed narration URLs", () => {
     expect(source).toContain("timeoutMs: 20_000");
     expect(source).toContain("{ maxAttempts: 1 }");
   });
+
+  it("uses one persisted source-preparation marker instead of a separate WAV byte-only direct-upload branch", () => {
+    const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
+    expect(source).toContain("if (cached?.sourcePrepared) return cached;");
+    expect(source).toContain("const chunks = wavNarration ? splitPcmWavForTranscription(source) : splitMp3ForTranscription(source);");
+    expect(source).not.toContain("if (byteSize <= directLimit)");
+  });
 });

@@ -26,6 +26,7 @@ export type PersistedNarrationChunk = {
 export type NarrationTranscriptionState = {
   version: 2;
   chunkOverlapMs: number;
+  sourcePrepared?: boolean;
   chunks: PersistedNarrationChunk[];
   lastError?: { category: string; message: string; retryAfterMs?: number; httpStatus?: number; errorCode?: string; remainingRequests?: string; remainingAudio?: string; resetAudio?: string; requestDurationMs: number; occurredAtMs: number };
 };
@@ -39,7 +40,7 @@ export function readNarrationTranscriptionState(value: unknown): NarrationTransc
   const state = candidate as Partial<NarrationTranscriptionState>;
   if (state.version !== 2 || !Array.isArray(state.chunks)) return null;
   const chunks = state.chunks.filter(chunk => chunk && typeof chunk.storageKey === "string" && Number.isFinite(chunk.startMs) && Number.isFinite(chunk.endMs) && Number.isFinite(chunk.contentStartMs) && Number.isFinite(chunk.contentEndMs) && Number.isFinite(chunk.byteSize));
-  return chunks.length === state.chunks.length ? { version: 2, chunkOverlapMs: Number(state.chunkOverlapMs) || 0, chunks, ...(state.lastError ? { lastError: state.lastError } : {}) } : null;
+  return chunks.length === state.chunks.length ? { version: 2, chunkOverlapMs: Number(state.chunkOverlapMs) || 0, sourcePrepared: state.sourcePrepared === true, chunks, ...(state.lastError ? { lastError: state.lastError } : {}) } : null;
 }
 
 export function narrationTranscriptionSummary(value: unknown) {
