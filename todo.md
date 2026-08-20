@@ -274,3 +274,4 @@
 - [x] Version persisted WAV preparation plans so chunk-policy upgrades safely rebuild stale plans instead of reusing them.
 - [x] Harden durable Timeline audio preparation and continuation for short, multi-minute, and multi-hour narration without relying on a one-shot provider request.
 - [x] Reset transient-failure accumulation after each persisted Timeline progress unit so long projects do not exhaust retries after intermittent recovered errors.
+- [ ] Diagnose and recover the ten-minute Timeline request that surfaced a browser “failed to fetch” error without rendering or changing completed projects.

@@ -17,6 +17,8 @@ const statusLabel = (status: string) => status.replaceAll("_", " ");
 const formatDuration = (milliseconds: number | null) => milliseconds === null ? "Duration pending" : `${Math.floor(milliseconds / 60000)}:${String(Math.round(milliseconds / 1000) % 60).padStart(2, "0")} narration`;
 const formatElapsed = (milliseconds: number) => { const seconds = Math.max(0, Math.round(milliseconds / 1000)); const minutes = Math.floor(seconds / 60); return minutes ? `${minutes}m ${String(seconds % 60).padStart(2, "0")}s` : `${seconds}s`; };
 const fileOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+const MEDIA_UPLOAD_MAX_ATTEMPTS = 3;
+const MEDIA_UPLOAD_RETRY_DELAYS_MS = [1_000, 3_000];
 
 function emptySelection(): Selection { return { narration: null, images: [], sourceFolderName: "", outputFolderName: "", nativeSourceDirectory: "", nativeOutputDirectory: "" }; }
 
@@ -32,9 +34,25 @@ async function audioDurationMs(file: File) {
 }
 
 async function uploadMediaFile(projectId: number, assetType: "narration" | "image", file: File, signal: AbortSignal, sequenceNumber?: number, durationMs?: number) {
-  const response = await fetch("/api/project-media/upload", { method: "POST", credentials: "include", signal, headers: { "content-type": file.type || "application/octet-stream", "x-project-id": String(projectId), "x-asset-type": assetType, "x-original-filename": encodeURIComponent(file.name), ...(sequenceNumber ? { "x-sequence-number": String(sequenceNumber) } : {}), ...(durationMs ? { "x-audio-duration-ms": String(durationMs) } : {}) }, body: file });
-  const payload = await response.json().catch(() => null) as { error?: string } | null;
-  if (!response.ok) throw new Error(payload?.error || `Upload failed for ${file.name}.`);
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < MEDIA_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch("/api/project-media/upload", { method: "POST", credentials: "include", signal, headers: { "content-type": file.type || "application/octet-stream", "x-project-id": String(projectId), "x-asset-type": assetType, "x-original-filename": encodeURIComponent(file.name), ...(sequenceNumber ? { "x-sequence-number": String(sequenceNumber) } : {}), ...(durationMs ? { "x-audio-duration-ms": String(durationMs) } : {}) }, body: file });
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      if (response.ok) return;
+      if (response.status < 500) throw new Error(payload?.error || `Upload failed for ${file.name}.`);
+      lastError = new Error(payload?.error || `Upload service temporarily failed for ${file.name}.`);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      lastError = error;
+      if (error instanceof Error && !/failed to fetch|network|load failed|upload service temporarily failed/i.test(error.message)) throw error;
+    }
+    if (attempt + 1 < MEDIA_UPLOAD_MAX_ATTEMPTS) await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(resolve, MEDIA_UPLOAD_RETRY_DELAYS_MS[attempt] ?? 3_000);
+      signal.addEventListener("abort", () => { window.clearTimeout(timer); reject(new DOMException("Upload cancelled by user.", "AbortError")); }, { once: true });
+    });
+  }
+  throw new Error(`The connection interrupted the upload for ${file.name} after ${MEDIA_UPLOAD_MAX_ATTEMPTS} attempts. Keep this page open and use Source media to retry this saved project.`);
 }
 
 export default function Projects() {
