@@ -346,12 +346,28 @@ export async function deleteProjectRecord(userId: number, projectId: number) {
   const project = await getUserProject(userId, projectId);
   if (!project) throw new Error("Project not found.");
   await db.transaction(async transaction => {
+    await transaction.delete(timelineGenerationJobs).where(eq(timelineGenerationJobs.projectId, projectId));
     await transaction.delete(timelineApprovals).where(eq(timelineApprovals.projectId, projectId));
     await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId));
     await transaction.delete(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.userId, userId)));
     await transaction.delete(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
   });
   return { success: true } as const;
+}
+
+export async function deleteAllProjectRecords(userId: number) {
+  const db = await requireDb();
+  const records = await db.select({ id: projects.id }).from(projects).where(eq(projects.userId, userId));
+  const projectIds = records.map(record => record.id);
+  if (!projectIds.length) return { success: true as const, deletedCount: 0 };
+  await db.transaction(async transaction => {
+    await transaction.delete(timelineGenerationJobs).where(inArray(timelineGenerationJobs.projectId, projectIds));
+    await transaction.delete(timelineApprovals).where(inArray(timelineApprovals.projectId, projectIds));
+    await transaction.delete(timelineSegments).where(inArray(timelineSegments.projectId, projectIds));
+    await transaction.delete(mediaAssets).where(and(eq(mediaAssets.userId, userId), inArray(mediaAssets.projectId, projectIds)));
+    await transaction.delete(projects).where(eq(projects.userId, userId));
+  });
+  return { success: true as const, deletedCount: projectIds.length };
 }
 
 export async function saveRenderedProjectVideo(input: { userId: number; projectId: number; originalFilename: string; storageKey: string; mimeType: string; byteSize: number; contentHash: string }) {
