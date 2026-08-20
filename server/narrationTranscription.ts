@@ -34,7 +34,7 @@ export type NarrationTranscriptionState = {
 };
 
 export const ADAPTIVE_PCM_WAV_RANGE_SPLIT_AFTER_ATTEMPTS = 3;
-export const ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS = 30_000;
+export const MIN_ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS = 15_000;
 
 function alignToBlock(value: number, blockAlign: number) {
   return Math.max(0, Math.floor(value / blockAlign) * blockAlign);
@@ -53,7 +53,7 @@ function pcmBlockAlign(wavFmtBase64: string) {
 export function splitRepeatedlyFailingPcmWavRange(chunk: PersistedNarrationChunk, overlapMs: number): PersistedNarrationChunk[] | null {
   if (!chunk.sourceRange) return null;
   const contentDurationMs = chunk.contentEndMs - chunk.contentStartMs;
-  if (contentDurationMs <= ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS) return null;
+  if (contentDurationMs <= MIN_ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS) return null;
   const sourceDurationMs = chunk.endMs - chunk.startMs;
   if (sourceDurationMs <= 0 || chunk.byteSize <= 0) return null;
   const blockAlign = pcmBlockAlign(chunk.sourceRange.wavFmtBase64);

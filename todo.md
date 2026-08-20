@@ -279,4 +279,5 @@
 - [ ] Diagnose and recover the ten-minute Timeline job that is stalled on a persisted Groq retry after narration chunk 7 of 10, without discarding completed work or starting an MP4 render.
 - [x] Keep ordinary repeated Groq 5xx, timeout, and network failures in automatic durable recovery rather than failing a long Timeline job solely because a transient-failure counter reaches its cap.
 - [x] Diagnose and automatically repair the repeated HTTP 500 affecting only narration chunk 7 of the preserved ten-minute job, while retaining all completed chunks and media.
+- [x] Extend the adaptive PCM narration recovery to progressively split a repeatedly failing child range down to a safe lower bound while preserving exact range coverage and completed chunks.
 - [x] Add a clearly confirmed Delete all projects action and responsive progress feedback for individual project deletion.

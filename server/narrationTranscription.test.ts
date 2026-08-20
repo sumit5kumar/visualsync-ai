@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS, mergeChunkTranscripts, narrationTranscriptionSummary, readNarrationTranscriptionState, splitRepeatedlyFailingPcmWavRange, type PersistedNarrationChunk } from "./narrationTranscription";
+import { MIN_ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS, mergeChunkTranscripts, narrationTranscriptionSummary, readNarrationTranscriptionState, splitRepeatedlyFailingPcmWavRange, type PersistedNarrationChunk } from "./narrationTranscription";
 
 const baseChunk = (overrides: Partial<PersistedNarrationChunk>): PersistedNarrationChunk => ({ storageKey: "chunk.mp3", startMs: 0, endMs: 10_000, contentStartMs: 0, contentEndMs: 10_000, byteSize: 100, status: "completed", attempts: 1, transcript: { text: "hello world", segments: [] }, ...overrides });
 
@@ -31,6 +31,8 @@ describe("resumable narration transcription", () => {
     expect(children).toHaveLength(2);
     expect(children?.map(chunk => [chunk.status, chunk.attempts, chunk.contentStartMs, chunk.contentEndMs])).toEqual([["pending", 0, 340_000, 368_000], ["pending", 0, 368_000, 396_000]]);
     expect(children?.every(chunk => chunk.byteSize < source.byteSize && chunk.sourceRange && chunk.sourceRange.endByteExclusive > chunk.sourceRange.startByte)).toBe(true);
-    expect(ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS).toBe(30_000);
+    expect(MIN_ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS).toBe(15_000);
+    expect(splitRepeatedlyFailingPcmWavRange(children![0], 4_000)?.map(chunk => [chunk.contentStartMs, chunk.contentEndMs])).toEqual([[340_000, 354_000], [354_000, 368_000]]);
+    expect(splitRepeatedlyFailingPcmWavRange(baseChunk({ startMs: 0, endMs: 15_000, contentStartMs: 0, contentEndMs: 15_000, sourceRange: { startByte: 44, endByteExclusive: 720_044, wavFmtBase64 } }), 4_000)).toBeNull();
   });
 });
