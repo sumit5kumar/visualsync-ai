@@ -10,7 +10,7 @@ import { isProjectVerifiedForAutomaticRotation } from "./groqRotation";
 export const TIMELINE_JOB_CRON = "0 */2 * * * *";
 export const DEFAULT_TIMELINE_RETRY_MS = 120_000;
 export const MAX_TIMELINE_TRANSIENT_FAILURES = 8;
-export const TIMELINE_CALLBACK_WORK_BUDGET_MS = 105_000;
+export const TIMELINE_CALLBACK_WORK_BUDGET_MS = 25_000;
 
 type JobStatus = "queued" | "processing" | "waiting_for_retry" | "completed" | "failed";
 type JobStage = "queued" | "transcribing" | "analyzing_images" | "building_timeline" | "finalizing" | "completed" | "failed";

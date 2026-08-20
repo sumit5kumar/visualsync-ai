@@ -36,10 +36,12 @@ export async function executeBoundedGroqRotation<T, Key extends { id: number }>(
   onSuccess: (key: Key) => Promise<void>;
   onFailure: (key: Key, error: GroqRequestError) => Promise<void>;
   operation: (key: Key) => Promise<T>;
+  maxAttempts?: number;
 }) {
   const attemptedIds = new Set<number>();
   let lastRetryableError: GroqRequestError | undefined;
   while (true) {
+    if (input.maxAttempts !== undefined && attemptedIds.size >= input.maxAttempts) throw new GroqPoolExhaustedError(exhaustedPoolMessage(lastRetryableError?.status), lastRetryableError?.metadata);
     let key: Key;
     try { key = await input.reserve(); } catch (error) { if (error instanceof GroqPoolExhaustedError) throw new GroqPoolExhaustedError(exhaustedPoolMessage(lastRetryableError?.status), lastRetryableError?.metadata); throw error; }
     if (attemptedIds.has(key.id)) throw new GroqPoolExhaustedError(exhaustedPoolMessage(lastRetryableError?.status), lastRetryableError?.metadata);
@@ -117,11 +119,12 @@ async function recordGroqPoolFailure(userId: number, key: StoredGroqKey, error: 
   await db.update(groqApiKeys).set({ testStatus: "verified", lastFailureAt: now, cooldownUntil: null }).where(and(eq(groqApiKeys.userId, userId), eq(groqApiKeys.id, key.id)));
 }
 
-export async function executeWithGroqRotation<T>(userId: number, operation: (client: GroqClient, key: { id: number; label: string; maskedKey: string }) => Promise<T>) {
+export async function executeWithGroqRotation<T>(userId: number, operation: (client: GroqClient, key: { id: number; label: string; maskedKey: string }) => Promise<T>, options?: { maxAttempts?: number }) {
   return executeBoundedGroqRotation({
     reserve: () => reserveNextGroqKey(userId),
     onSuccess: key => recordGroqPoolSuccess(userId, key.id),
     onFailure: (key, error) => recordGroqPoolFailure(userId, key, error),
+    maxAttempts: options?.maxAttempts,
     operation: async key => {
       const metadata = publicGroqPoolMetadata(key);
       const client = new GroqClient(decryptSecret({ ciphertext: key.encryptedCiphertext, iv: key.encryptionIv, tag: key.encryptionTag }));

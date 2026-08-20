@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildPublicManagedStorageUrl, isWavNarration, mapWithConcurrency, normalizeTimelineGenerationWorkState } from "./projectProcessor";
 
@@ -33,5 +35,11 @@ describe("public managed narration URLs", () => {
       pacingWeights: [1.2],
       nextPacingBatch: 1,
     });
+  });
+
+  it("keeps hosted slice provider work inside the short callback boundary while retaining round-robin recovery for later callbacks", () => {
+    const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
+    expect(source).toContain("timeoutMs: 20_000");
+    expect(source).toContain("{ maxAttempts: 1 }");
   });
 });

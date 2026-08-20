@@ -258,7 +258,7 @@ export async function processProjectTimelineSlice(userId: number, projectId: num
       try {
         const bytes = await loadNarrationChunkBytes(chunk.storageKey);
         const wavBytes = isMp3Narration(narration) ? await mp3ToMonoWav(bytes) : bytes;
-        const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes: wavBytes, filename: `narration-part-${nextChunkIndex + 1}.wav`, mimeType: "audio/wav", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers.", timeoutMs: 120_000 }), key }));
+        const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes: wavBytes, filename: `narration-part-${nextChunkIndex + 1}.wav`, mimeType: "audio/wav", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers.", timeoutMs: 20_000 }), key }), { maxAttempts: 1 });
         chunk.status = "completed";
         chunk.transcript = { text: run.value.text, language: run.value.language, segments: (run.value.segments ?? []).map(segment => ({ ...segment, start: segment.start + chunk.startMs / 1000, end: segment.end + chunk.startMs / 1000 })) };
         chunk.provider = { maskedKey: run.key.maskedKey, model: GROQ_TRANSCRIPTION_MODEL, durationMs: run.value.requestMetadata.durationMs, httpStatus: run.value.requestMetadata.httpStatus, category: run.value.requestMetadata.category };
@@ -289,7 +289,7 @@ export async function processProjectTimelineSlice(userId: number, projectId: num
       await db.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: analysis, embeddingSourceText: String(analysis.sceneDescription) }).where(eq(mediaAssets.id, pendingImage.id));
     } else {
       const imageUrl = await boundedVisionImageUrl(pendingImage.storageKey);
-      const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.analyzeImage({ imageUrl, prompt: "Analyze this image for a narration-driven video. Return JSON with sceneDescription, subjects, setting, mood, and relevance. Describe only visible content." }), key }));
+      const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.analyzeImage({ imageUrl, prompt: "Analyze this image for a narration-driven video. Return JSON with sceneDescription, subjects, setting, mood, and relevance. Describe only visible content.", timeoutMs: 20_000 }), key }), { maxAttempts: 1 });
       const record = typeof run.value === "object" && run.value ? run.value as Record<string, unknown> : {};
       const sceneDescription = typeof record.sceneDescription === "string" ? record.sceneDescription.trim() : "";
       if (!sceneDescription) throw new Error(`Groq returned no usable scene description for ${pendingImage.originalFilename}.`);
@@ -312,7 +312,7 @@ export async function processProjectTimelineSlice(userId: number, projectId: num
     await db.update(projects).set({ processingStage: "building_timeline", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
     const batch = batches[nextPacingBatch];
     const prompt = `Create variable pacing weights for contiguous ordered image batch ${nextPacingBatch + 1}/${batches.length}. Reply only {"weights":[...]} with exactly ${batch.length} positive non-equal decimals. Larger means longer hold. Narration digest: ${JSON.stringify(fullNarration.slice(0, MAX_PACING_NARRATION_CHARACTERS))}. Image batch: ${JSON.stringify(batch)}`;
-    const pacingRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completePacingPlan({ prompt }), key }));
+    const pacingRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completePacingPlan({ prompt, timeoutMs: 20_000 }), key }), { maxAttempts: 1 });
     const batchWeights = Array.isArray((pacingRun.value as { weights?: unknown }).weights) ? (pacingRun.value as { weights: unknown[] }).weights.map(Number) : [];
     if (batchWeights.length !== batch.length || batchWeights.some(weight => !Number.isFinite(weight) || weight <= 0)) throw new Error("Groq returned an invalid bounded pacing plan.");
     return { stage: "building_timeline", workState: { ...workState, pacingWeights: [...(workState.pacingWeights ?? []), ...batchWeights], nextPacingBatch: nextPacingBatch + 1, pacingProviderKeyLabel: pacingRun.key.label, pacingProviderKeyMasked: pacingRun.key.maskedKey } };

@@ -25,7 +25,8 @@ describe("durable Timeline Generation retry policy", () => {
     const malformed = new GroqRequestError("invalid request", "prompt_error", { durationMs: 1, category: "client_request" });
     expect(isRetryableTimelineFailure(denied)).toBe(false);
     expect(isRetryableTimelineFailure(malformed)).toBe(false);
-    expect(TIMELINE_CALLBACK_WORK_BUDGET_MS).toBeLessThan(120_000);
+    expect(TIMELINE_CALLBACK_WORK_BUDGET_MS).toBeLessThan(30_000);
+    expect(TIMELINE_CALLBACK_WORK_BUDGET_MS).toBe(25_000);
     expect(TIMELINE_JOB_CRON.split(" ")).toHaveLength(6);
   });
 

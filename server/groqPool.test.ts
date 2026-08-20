@@ -121,6 +121,20 @@ describe("Groq pool executor", () => {
     await expect(result).rejects.toMatchObject({ status: "quota_limited" });
   });
 
+  it("caps a hosted slice at one eligible key attempt so the next callback can continue round-robin recovery", async () => {
+    const reserve = vi.fn(async () => ({ id: 81 }));
+    const result = executeBoundedGroqRotation({
+      reserve,
+      onSuccess: async () => undefined,
+      onFailure: async () => undefined,
+      maxAttempts: 1,
+      operation: async () => { throw new GroqRequestError("temporary server error", "unavailable", { durationMs: 20_000, category: "server_error" }); },
+    });
+
+    await expect(result).rejects.toMatchObject({ metadata: expect.objectContaining({ category: "server_error" }) });
+    expect(reserve).toHaveBeenCalledTimes(1);
+  });
+
   it("explains a completed unavailable-key sweep without disclosing the upstream error text", async () => {
     const rawSecret = "gsk_not_for_the_user";
     const keys = [{ id: 31 }, { id: 31 }];
