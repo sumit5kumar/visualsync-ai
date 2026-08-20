@@ -280,4 +280,7 @@
 - [x] Keep ordinary repeated Groq 5xx, timeout, and network failures in automatic durable recovery rather than failing a long Timeline job solely because a transient-failure counter reaches its cap.
 - [x] Diagnose and automatically repair the repeated HTTP 500 affecting only narration chunk 7 of the preserved ten-minute job, while retaining all completed chunks and media.
 - [x] Extend the adaptive PCM narration recovery to progressively split a repeatedly failing child range down to a safe lower bound while preserving exact range coverage and completed chunks.
+- [x] Determine whether a final minimal PCM range fallback can recover a repeatedly failing 14-second provider request without creating unsafe tiny chunks or changing completed work; rejected because multiple distinct verified keys returned the same transient provider error.
+- [x] Restore the overdue hosted Timeline callback’s automatic dispatch without resetting the preserved ten-minute narration state or requiring further user clicks.
+- [x] Improve durable Timeline callback cadence to the platform-supported one-minute minimum so retries can resume without repeated manual wakes while preserving rate-limit handling.
 - [x] Add a clearly confirmed Delete all projects action and responsive progress feedback for individual project deletion.

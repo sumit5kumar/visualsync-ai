@@ -7,7 +7,10 @@ import { GroqPoolExhaustedError } from "./groqPool";
 import { processProjectTimelineSlice, type TimelineGenerationSliceResult } from "./projectProcessor";
 import { isProjectVerifiedForAutomaticRotation } from "./groqRotation";
 
-export const TIMELINE_JOB_CRON = "0 */2 * * * *";
+// The handler remains idempotent and retains the two-minute provider retry
+// delay. A one-minute heartbeat is the platform minimum and gives overdue
+// retry deadlines another chance to be claimed without user interaction.
+export const TIMELINE_JOB_CRON = "0 * * * * *";
 export const DEFAULT_TIMELINE_RETRY_MS = 120_000;
 export const TIMELINE_CALLBACK_WORK_BUDGET_MS = 25_000;
 

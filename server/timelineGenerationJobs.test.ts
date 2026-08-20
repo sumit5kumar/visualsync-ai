@@ -46,6 +46,7 @@ describe("durable Timeline Generation retry policy", () => {
     expect(isRetryableTimelineFailure(malformed)).toBe(false);
     expect(TIMELINE_CALLBACK_WORK_BUDGET_MS).toBeLessThan(30_000);
     expect(TIMELINE_CALLBACK_WORK_BUDGET_MS).toBe(25_000);
+    expect(TIMELINE_JOB_CRON).toBe("0 * * * * *");
     expect(TIMELINE_JOB_CRON.split(" ")).toHaveLength(6);
   });
 
