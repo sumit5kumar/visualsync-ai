@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TIMELINE_RETRY_MS, isRetryableTimelineFailure, resolveTimelineRetryAt, TIMELINE_CALLBACK_WORK_BUDGET_MS, TIMELINE_JOB_CRON, timelineJobAvailability } from "./timelineGenerationJobs";
+import { DEFAULT_TIMELINE_RETRY_MS, isRetryableTimelineFailure, resolveTimelineRetryAt, shouldContinueTimelineRecovery, TIMELINE_CALLBACK_WORK_BUDGET_MS, TIMELINE_JOB_CRON, timelineJobAvailability } from "./timelineGenerationJobs";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { GroqRequestError } from "./groqClient";
@@ -19,6 +19,17 @@ describe("durable Timeline Generation retry policy", () => {
     const server = new GroqRequestError("server", "unavailable", { durationMs: 1, category: "server_error" });
     const network = new GroqRequestError("network", "unavailable", { durationMs: 1, category: "network_failure" });
     expect([timeout, server, network].map(error => resolveTimelineRetryAt(error, 4, 1_000).getTime())).toEqual([1_000 + DEFAULT_TIMELINE_RETRY_MS, 1_000 + DEFAULT_TIMELINE_RETRY_MS, 1_000 + DEFAULT_TIMELINE_RETRY_MS]);
+  });
+
+  it("keeps ordinary provider 5xx, timeout, network, and rate-limit outcomes in automatic recovery after repeated attempts", () => {
+    const repeatedTransientFailures = [
+      new GroqRequestError("500", "unavailable", { durationMs: 1, category: "server_error" }),
+      new GroqRequestError("timeout", "unavailable", { durationMs: 1, category: "timeout" }),
+      new GroqRequestError("network", "unavailable", { durationMs: 1, category: "network_failure" }),
+      new GroqRequestError("429", "quota_limited", { durationMs: 1, category: "rate_limited" }),
+    ];
+    expect(repeatedTransientFailures.every(shouldContinueTimelineRecovery)).toBe(true);
+    expect(shouldContinueTimelineRecovery(new GroqRequestError("permission", "permission_restricted", { durationMs: 1, category: "permission_denied" }))).toBe(false);
   });
 
   it("keeps bounded backoff only for rate and audio quota responses when Groq omits Retry-After", () => {

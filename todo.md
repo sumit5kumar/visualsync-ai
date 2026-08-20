@@ -275,5 +275,7 @@
 - [x] Harden durable Timeline audio preparation and continuation for short, multi-minute, and multi-hour narration without relying on a one-shot provider request.
 - [x] Reset transient-failure accumulation after each persisted Timeline progress unit so long projects do not exhaust retries after intermittent recovered errors.
 - [ ] Diagnose and recover the ten-minute Timeline request that surfaced a browser “failed to fetch” error without rendering or changing completed projects.
-- [ ] Replace fragile one-shot media uploads with authenticated direct-to-storage uploads and completion verification for larger files.
+- [x] Replace fragile one-shot media uploads with authenticated direct-to-storage uploads and completion verification for larger files.
+- [ ] Diagnose and recover the ten-minute Timeline job that is stalled on a persisted Groq retry after narration chunk 7 of 10, without discarding completed work or starting an MP4 render.
+- [x] Keep ordinary repeated Groq 5xx, timeout, and network failures in automatic durable recovery rather than failing a long Timeline job solely because a transient-failure counter reaches its cap.
 - [x] Add a clearly confirmed Delete all projects action and responsive progress feedback for individual project deletion.

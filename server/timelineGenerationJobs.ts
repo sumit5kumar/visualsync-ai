@@ -9,7 +9,6 @@ import { isProjectVerifiedForAutomaticRotation } from "./groqRotation";
 
 export const TIMELINE_JOB_CRON = "0 */2 * * * *";
 export const DEFAULT_TIMELINE_RETRY_MS = 120_000;
-export const MAX_TIMELINE_TRANSIENT_FAILURES = 8;
 export const TIMELINE_CALLBACK_WORK_BUDGET_MS = 25_000;
 
 type JobStatus = "queued" | "processing" | "waiting_for_retry" | "completed" | "failed";
@@ -33,6 +32,10 @@ export function isRetryableTimelineFailure(error: unknown) {
   const metadata = failureMetadata(error);
   if (metadata?.category === "rate_limited" || metadata?.category === "audio_quota_exhausted" || metadata?.category === "server_error" || metadata?.category === "network_failure" || metadata?.category === "timeout" || metadata?.category === "unknown") return true;
   return error instanceof Error && /fetch failed|econnreset|network|connection reset|timed out|timeout/i.test(error.message);
+}
+
+export function shouldContinueTimelineRecovery(error: unknown) {
+  return isRetryableTimelineFailure(error);
 }
 
 export function resolveTimelineRetryAt(error: unknown, transientFailureCount: number, now = Date.now()) {
@@ -175,7 +178,7 @@ export async function runTimelineGenerationJob(jobId: number) {
     return { outcome: "advanced" as const, stage: latestStage, unitsCompleted };
   } catch (error) {
     const transientFailureCount = claimedJob.transientFailureCount + 1;
-    const retryable = isRetryableTimelineFailure(error) && transientFailureCount <= MAX_TIMELINE_TRANSIENT_FAILURES;
+    const retryable = shouldContinueTimelineRecovery(error);
     const retryAt = retryable ? resolveTimelineRetryAt(error, transientFailureCount) : null;
     await db.update(timelineGenerationJobs).set({ status: retryable ? "waiting_for_retry" : "failed", currentStage: retryable ? claimedJob.currentStage : "failed", transientFailureCount, retryAt, lastError: safeJobError(error), leaseToken: null, leaseExpiresAt: null }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
     if (!retryable) await db.update(projects).set({ status: "failed", workerState: "error", processingStage: "failed", processingStageStartedAt: new Date() }).where(eq(projects.id, claimedJob.projectId));
