@@ -267,3 +267,4 @@
 - [x] Fix the AI Providers verification action so only the clicked key displays its loading state while other keys remain independently usable.
 - [x] Explain the measured local-render time difference between zoom-only and crossfade-enabled 30-minute output without changing the accepted renderer.
 - [ ] Diagnose and recover the failing five-minute Timeline Generation job without changing the successful one-minute or thirty-minute timelines or starting MP4 rendering.
+- [ ] Keep genuinely short WAV narration direct while splitting longer WAV narration into hosted-callback-safe chunks after a provider timeout is observed.

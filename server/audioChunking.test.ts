@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription, splitPcmWavForTranscription } from "./audioChunking";
+import { SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_DIRECT_WAV_DURATION_MS, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription, splitPcmWavForTranscription } from "./audioChunking";
 
 function mpeg1Layer3Frame() {
   const length = 417;
@@ -74,6 +74,17 @@ describe("WAV transcription preparation", () => {
     expect(SAFE_GROQ_DIRECT_WAV_BYTES).toBe(24 * 1024 * 1024);
     expect(chunks).toHaveLength(1);
     expect(chunks[0]?.bytes).toEqual(source);
+  });
+
+  it("splits a long but file-size-safe PCM WAV into callback-safe duration chunks", () => {
+    const source = pcmWav(3_200_000);
+    const chunks = splitPcmWavForTranscription(source);
+
+    expect(SAFE_GROQ_DIRECT_WAV_DURATION_MS).toBe(90_000);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]?.contentEndMs).toBeLessThanOrEqual(SAFE_GROQ_DIRECT_WAV_DURATION_MS);
+    expect(chunks[1]?.contentStartMs).toBe(chunks[0]?.contentEndMs);
+    expect(chunks.every(chunk => chunk.bytes.byteLength <= SAFE_GROQ_DIRECT_WAV_BYTES)).toBe(true);
   });
 
   it("splits oversized PCM WAV into independently valid bounded WAV chunks", () => {

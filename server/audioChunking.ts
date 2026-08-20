@@ -11,6 +11,7 @@ export type AudioTranscriptionChunk = {
 // completed successfully on the Free tier; larger measured attachments stalled.
 export const SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES = 128 * 1024;
 export const SAFE_GROQ_DIRECT_WAV_BYTES = 24 * 1024 * 1024;
+export const SAFE_GROQ_DIRECT_WAV_DURATION_MS = 90_000;
 
 type Mp3Frame = { offset: number; length: number; durationMs: number; startMs: number; endMs: number };
 
@@ -137,10 +138,19 @@ function makePcmWavChunk(fmtBytes: Uint8Array, pcmBytes: Uint8Array) {
 }
 
 export function splitPcmWavForTranscription(source: Uint8Array, maxChunkBytes = SAFE_GROQ_DIRECT_WAV_BYTES, overlapMs = 4_000): AudioTranscriptionChunk[] {
-  if (source.byteLength <= maxChunkBytes) return [{ bytes: source, startMs: 0, endMs: 0, contentStartMs: 0, contentEndMs: 0 }];
-  const info = readPcmWavInfo(source);
+  let info: PcmWavInfo;
+  try {
+    info = readPcmWavInfo(source);
+  } catch (error) {
+    if (source.byteLength <= maxChunkBytes) return [{ bytes: source, startMs: 0, endMs: 0, contentStartMs: 0, contentEndMs: 0 }];
+    throw error;
+  }
+  const durationMs = Math.round((info.dataLength / info.byteRate) * 1000);
+  if (source.byteLength <= maxChunkBytes && durationMs <= SAFE_GROQ_DIRECT_WAV_DURATION_MS) return [{ bytes: source, startMs: 0, endMs: durationMs, contentStartMs: 0, contentEndMs: durationMs }];
   const headerBytes = 28 + info.fmtBytes.length;
-  const maximumPayload = Math.floor((maxChunkBytes - headerBytes) / info.blockAlign) * info.blockAlign;
+  const byteLimitedPayload = Math.floor((maxChunkBytes - headerBytes) / info.blockAlign) * info.blockAlign;
+  const durationLimitedPayload = Math.floor((info.byteRate * SAFE_GROQ_DIRECT_WAV_DURATION_MS) / 1000 / info.blockAlign) * info.blockAlign;
+  const maximumPayload = Math.min(byteLimitedPayload, durationLimitedPayload);
   if (maximumPayload <= 0) throw new Error("WAV transcription chunk limit is too small for this PCM format.");
   const overlapBytes = Math.floor((info.byteRate * overlapMs) / 1000 / info.blockAlign) * info.blockAlign;
   const chunks: AudioTranscriptionChunk[] = [];
