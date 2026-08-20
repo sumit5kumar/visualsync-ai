@@ -5,8 +5,9 @@ const baseChunk = (overrides: Partial<PersistedNarrationChunk>): PersistedNarrat
 
 describe("resumable narration transcription", () => {
   it("keeps the source-preparation marker so a duration-validated WAV plan is reused across hosted retries", () => {
-    const state = readNarrationTranscriptionState({ transcriptionState: { version: 2, chunkOverlapMs: 4_000, sourcePrepared: true, chunks: [baseChunk({})] } });
+    const state = readNarrationTranscriptionState({ transcriptionState: { version: 2, chunkOverlapMs: 4_000, sourcePrepared: true, sourcePreparationVersion: 2, chunks: [baseChunk({})] } });
     expect(state?.sourcePrepared).toBe(true);
+    expect(state?.sourcePreparationVersion).toBe(2);
   });
 
   it("removes duplicate overlap segments while preserving chronological timestamp coverage", () => {

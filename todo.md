@@ -271,3 +271,4 @@
 - [ ] Remove the duplicate byte-only WAV direct-upload branch so every WAV uses the same duration-aware preparation decision.
 - [ ] Keep provider Retry-After for 429 responses while retrying temporary 5xx and timeout failures on the normal two-minute recovery interval.
 - [ ] Reduce multi-minute WAV chunks to the proven short-audio range so each hosted transcription request stays within the reliable callback window.
+- [ ] Version persisted WAV preparation plans so chunk-policy upgrades safely rebuild stale plans instead of reusing them.

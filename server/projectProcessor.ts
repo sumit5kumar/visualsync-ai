@@ -19,6 +19,7 @@ function transcriptForRange(segments: Array<{ start: number; end: number; text: 
 const MAX_PACING_IMAGES_PER_REQUEST = 24;
 const MAX_PACING_NARRATION_CHARACTERS = 3600;
 const NARRATION_CHUNK_STORAGE_CONCURRENCY = 3;
+const NARRATION_SOURCE_PREPARATION_VERSION = 2;
 export function buildBoundedPacingBatches<T>(items: T[], batchSize = MAX_PACING_IMAGES_PER_REQUEST) { const batches: T[][] = []; for (let index = 0; index < items.length; index += batchSize) batches.push(items.slice(index, index + batchSize)); return batches; }
 export async function mapWithConcurrency<T, Result>(items: T[], concurrency: number, operation: (item: T, index: number) => Promise<Result>) {
   const results = new Array<Result>(items.length);
@@ -67,7 +68,8 @@ function isMp3Narration(narration: Pick<typeof mediaAssets.$inferSelect, "mimeTy
 export async function prepareNarrationChunks(projectId: number, narration: typeof mediaAssets.$inferSelect, db: Exclude<Awaited<ReturnType<typeof getDb>>, null>): Promise<NarrationTranscriptionState> {
   const cached = readNarrationTranscriptionState(narration.analysisJson);
   const wavNarration = isWavNarration(narration);
-  if (cached?.sourcePrepared) return cached;
+  const hasCompletedChunk = cached?.chunks.some(chunk => chunk.status === "completed" && chunk.transcript);
+  if (cached?.sourcePrepared && (cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk)) return cached;
   if (!isMp3Narration(narration) && !wavNarration) throw new Error("This narration must be uploaded as WAV or MP3 for automatic safe transcription chunking.");
   const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey));
   if (!sourceResponse.ok) throw new Error("The narration could not be retrieved from secure storage for transcription preparation.");
@@ -79,7 +81,7 @@ export async function prepareNarrationChunks(projectId: number, narration: typeo
     const stored = await storagePut(`projects/${projectId}/transcription-chunks/${narration.id}-part-${index + 1}.${chunkExtension}`, chunk.bytes, chunkMimeType);
     return { storageKey: stored.key, startMs: chunk.startMs, endMs: chunk.endMs, contentStartMs: chunk.contentStartMs, contentEndMs: chunk.contentEndMs, byteSize: chunk.bytes.byteLength, status: "pending", attempts: 0 };
   });
-  const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: chunks.length > 1 ? 4_000 : 0, sourcePrepared: true, chunks: storedChunks };
+  const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: chunks.length > 1 ? 4_000 : 0, sourcePrepared: true, sourcePreparationVersion: NARRATION_SOURCE_PREPARATION_VERSION, chunks: storedChunks };
   await persistNarrationTranscriptionState(narration, state, db);
   return state;
 }
