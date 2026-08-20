@@ -264,3 +264,4 @@
 - [x] Implement secure dual-model Groq project verification that promotes only keys passing real transcription and generation-model probes while preserving the current paused job state.
 - [ ] Fix the dual-verification image probe with a valid multi-pixel PNG, preserve the paused 16/18 job, and rerun the selected key's two real probes.
 - [ ] Diagnose the external Groq key’s dual-verification transcription timeout and repair only the verification timeout path if evidence supports it.
+- [x] Fix the AI Providers verification action so only the clicked key displays its loading state while other keys remain independently usable.

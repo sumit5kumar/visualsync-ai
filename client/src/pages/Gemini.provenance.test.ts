@@ -19,4 +19,11 @@ describe("Groq key provenance indicator", () => {
     expect(source).toContain("onTest(item.id)");
     expect(source).toContain("onRemove(item.id)");
   });
+
+  it("tracks verification loading state by key ID instead of marking every provider row as pending", () => {
+    expect(source).toContain("const [verifyingKeyIds, setVerifyingKeyIds]");
+    expect(source).toContain("verifyingKeyIds.has(key.id)");
+    expect(source).toContain("next.delete(variables.keyId)");
+    expect(source).not.toContain("verifying={groqVerifyProject.isPending}");
+  });
 });
