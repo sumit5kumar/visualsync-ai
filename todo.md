@@ -266,3 +266,4 @@
 - [x] Diagnose the external Groq key’s dual-verification transcription timeout and repair only the verification timeout path if evidence supports it.
 - [x] Fix the AI Providers verification action so only the clicked key displays its loading state while other keys remain independently usable.
 - [x] Explain the measured local-render time difference between zoom-only and crossfade-enabled 30-minute output without changing the accepted renderer.
+- [ ] Diagnose and recover the failing five-minute Timeline Generation job without changing the successful one-minute or thirty-minute timelines or starting MP4 rendering.

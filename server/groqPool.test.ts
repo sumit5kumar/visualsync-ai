@@ -97,6 +97,30 @@ describe("Groq pool executor", () => {
     expect(onFailure).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a completed provider result when only non-secret success-audit persistence fails", async () => {
+    const onSuccess = vi.fn(async () => { throw new Error("temporary database audit failure"); });
+    const result = await executeBoundedGroqRotation({
+      reserve: async () => ({ id: 71 }),
+      onSuccess,
+      onFailure: async () => undefined,
+      operation: async () => "transcribed",
+    });
+
+    expect(result).toBe("transcribed");
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the real provider classification when only failure-audit persistence fails", async () => {
+    const result = executeBoundedGroqRotation({
+      reserve: async () => ({ id: 72 }),
+      onSuccess: async () => undefined,
+      onFailure: async () => { throw new Error("temporary database audit failure"); },
+      operation: async () => { throw new GroqRequestError("rate limited", "quota_limited"); },
+    });
+
+    await expect(result).rejects.toMatchObject({ status: "quota_limited" });
+  });
+
   it("explains a completed unavailable-key sweep without disclosing the upstream error text", async () => {
     const rawSecret = "gsk_not_for_the_user";
     const keys = [{ id: 31 }, { id: 31 }];

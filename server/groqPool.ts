@@ -21,6 +21,16 @@ export function publicGroqPoolMetadata(key: { id: number; label: string; keyPref
   return { id: key.id, label: key.label, maskedKey: `${key.keyPrefix}••••••••${key.keySuffix}` };
 }
 
+async function persistPoolAuditBestEffort(action: () => Promise<void>, outcome: "success" | "failure") {
+  try {
+    await action();
+  } catch {
+    // A provider result has already been obtained. Do not discard it solely
+    // because a non-secret health/audit update had a transient DB failure.
+    console.warn(`[Groq pool] Could not persist key ${outcome} audit state; retaining the provider outcome.`);
+  }
+}
+
 export async function executeBoundedGroqRotation<T, Key extends { id: number }>(input: {
   reserve: () => Promise<Key>;
   onSuccess: (key: Key) => Promise<void>;
@@ -36,11 +46,11 @@ export async function executeBoundedGroqRotation<T, Key extends { id: number }>(
     attemptedIds.add(key.id);
     try {
       const result = await input.operation(key);
-      await input.onSuccess(key);
+      await persistPoolAuditBestEffort(() => input.onSuccess(key), "success");
       return result;
     } catch (error) {
       if (!(error instanceof GroqRequestError)) throw error;
-      await input.onFailure(key, error);
+      await persistPoolAuditBestEffort(() => input.onFailure(key, error), "failure");
       if (error.status === "invalid" || error.status === "unavailable") {
         lastRetryableError = error;
         continue;
