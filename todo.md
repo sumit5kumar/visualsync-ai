@@ -275,4 +275,5 @@
 - [x] Harden durable Timeline audio preparation and continuation for short, multi-minute, and multi-hour narration without relying on a one-shot provider request.
 - [x] Reset transient-failure accumulation after each persisted Timeline progress unit so long projects do not exhaust retries after intermittent recovered errors.
 - [ ] Diagnose and recover the ten-minute Timeline request that surfaced a browser “failed to fetch” error without rendering or changing completed projects.
-- [ ] Add a clearly confirmed Delete all projects action and responsive progress feedback for individual project deletion.
+- [ ] Replace fragile one-shot media uploads with authenticated direct-to-storage uploads and completion verification for larger files.
+- [x] Add a clearly confirmed Delete all projects action and responsive progress feedback for individual project deletion.

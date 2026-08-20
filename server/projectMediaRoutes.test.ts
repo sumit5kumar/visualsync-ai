@@ -1,15 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 
-const mocks = vi.hoisted(() => ({ authenticateRequest: vi.fn(), saveUploadedProjectMedia: vi.fn(), storagePut: vi.fn() }));
+const mocks = vi.hoisted(() => ({ authenticateRequest: vi.fn(), saveUploadedProjectMedia: vi.fn(), storagePut: vi.fn(), storagePresignPut: vi.fn() }));
 vi.mock("./_core/sdk", () => ({ sdk: { authenticateRequest: mocks.authenticateRequest } }));
 vi.mock("./db", () => ({ saveUploadedProjectMedia: mocks.saveUploadedProjectMedia }));
-vi.mock("./storage", () => ({ storagePut: mocks.storagePut }));
+vi.mock("./storage", () => ({ storagePut: mocks.storagePut, storagePresignPut: mocks.storagePresignPut }));
 
-import { projectMediaBodyParserOptions, validateProjectMediaUpload } from "./projectMediaRoutes";
+import { issueDirectUploadTicket, projectMediaBodyParserOptions, readDirectUploadTicket, validateDirectUploadMetadata, validateProjectMediaUpload } from "./projectMediaRoutes";
 import { registerProjectMediaRoutes } from "./projectMediaRoutes";
 
 afterEach(() => vi.clearAllMocks());
+
+it("signs a user-scoped expiring direct-upload completion ticket", () => {
+  const ticket = issueDirectUploadTicket({ expiresAt: Date.now() + 10_000, userId: 7, projectId: 3, assetType: "narration", originalFilename: "voice.wav", storageKey: "projects/3/narration/voice.wav", mimeType: "audio/wav", byteSize: 123, sequenceNumber: null, audioDurationMs: 12_000, contentHash: "direct-test" });
+  expect(readDirectUploadTicket(ticket)).toMatchObject({ userId: 7, projectId: 3, assetType: "narration" });
+  expect(readDirectUploadTicket(`${ticket}tampered`)).toBeNull();
+  expect(validateDirectUploadMetadata({ projectId: 3, assetType: "narration", originalFilename: "voice.wav", mimeType: "audio/wav", byteSize: 123, sequenceNumber: 0, audioDurationMs: 12_000 })).toBeNull();
+});
 
 async function requestUpload(headers: Record<string, string>, bytes: Uint8Array) {
   const app = express();

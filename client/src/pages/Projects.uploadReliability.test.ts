@@ -10,5 +10,8 @@ describe("project media upload transport recovery", () => {
     expect(source).toContain("response.status < 500");
     expect(source).toContain("failed to fetch|network|load failed|upload service temporarily failed");
     expect(source).toContain("Keep this page open and use Source media to retry this saved project.");
+    expect(source).toContain("/api/project-media/direct-ticket");
+    expect(source).toContain("/api/project-media/direct-complete");
+    expect(source).toContain("return uploadMediaViaApplication");
   });
 });

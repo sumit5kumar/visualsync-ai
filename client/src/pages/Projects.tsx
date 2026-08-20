@@ -33,7 +33,7 @@ async function audioDurationMs(file: File) {
   });
 }
 
-async function uploadMediaFile(projectId: number, assetType: "narration" | "image", file: File, signal: AbortSignal, sequenceNumber?: number, durationMs?: number) {
+async function uploadMediaViaApplication(projectId: number, assetType: "narration" | "image", file: File, signal: AbortSignal, sequenceNumber?: number, durationMs?: number) {
   let lastError: unknown = null;
   for (let attempt = 0; attempt < MEDIA_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
     try {
@@ -53,6 +53,23 @@ async function uploadMediaFile(projectId: number, assetType: "narration" | "imag
     });
   }
   throw new Error(`The connection interrupted the upload for ${file.name} after ${MEDIA_UPLOAD_MAX_ATTEMPTS} attempts. Keep this page open and use Source media to retry this saved project.`);
+}
+
+async function uploadMediaFile(projectId: number, assetType: "narration" | "image", file: File, signal: AbortSignal, sequenceNumber?: number, durationMs?: number) {
+  try {
+    const metadata = { projectId, assetType, originalFilename: file.name, mimeType: file.type || "application/octet-stream", byteSize: file.size, sequenceNumber: sequenceNumber ?? null, audioDurationMs: durationMs ?? null };
+    const ticketResponse = await fetch("/api/project-media/direct-ticket", { method: "POST", credentials: "include", signal, headers: { "content-type": "application/json" }, body: JSON.stringify(metadata) });
+    const ticketPayload = await ticketResponse.json().catch(() => null) as { uploadUrl?: string; ticket?: string } | null;
+    if (!ticketResponse.ok || !ticketPayload?.uploadUrl || !ticketPayload.ticket) throw new Error("Direct upload preparation was unavailable.");
+    const uploadResponse = await fetch(ticketPayload.uploadUrl, { method: "PUT", signal, headers: { "content-type": metadata.mimeType }, body: file });
+    if (!uploadResponse.ok) throw new Error("Direct storage upload was unavailable.");
+    const completeResponse = await fetch("/api/project-media/direct-complete", { method: "POST", credentials: "include", signal, headers: { "content-type": "application/json" }, body: JSON.stringify({ ticket: ticketPayload.ticket }) });
+    if (completeResponse.ok) return;
+    throw new Error("Direct upload completion was unavailable.");
+  } catch (error) {
+    if (signal.aborted) throw error;
+    return uploadMediaViaApplication(projectId, assetType, file, signal, sequenceNumber, durationMs);
+  }
 }
 
 export default function Projects() {
