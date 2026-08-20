@@ -6,7 +6,7 @@ import { executeWithGroqRotation, GroqPoolExhaustedError } from "./groqPool";
 import { buildGlobalReadableImageDurations } from "./readablePacing";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { validateTimeline } from "./timelineValidation";
-import { SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription, splitPcmWavForTranscription } from "./audioChunking";
+import { makePcmWavChunk, planPcmWavTranscriptionRanges, SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription } from "./audioChunking";
 import { mp3ToMonoWav } from "./audioTranscoding";
 import { mergeChunkTranscripts, readNarrationTranscriptionState, summarizeNarrationText, type NarrationTranscriptionState, type PersistedNarrationChunk } from "./narrationTranscription";
 import sharp from "sharp";
@@ -19,7 +19,7 @@ function transcriptForRange(segments: Array<{ start: number; end: number; text: 
 const MAX_PACING_IMAGES_PER_REQUEST = 24;
 const MAX_PACING_NARRATION_CHARACTERS = 3600;
 const NARRATION_CHUNK_STORAGE_CONCURRENCY = 3;
-const NARRATION_SOURCE_PREPARATION_VERSION = 2;
+const NARRATION_SOURCE_PREPARATION_VERSION = 3;
 export function buildBoundedPacingBatches<T>(items: T[], batchSize = MAX_PACING_IMAGES_PER_REQUEST) { const batches: T[][] = []; for (let index = 0; index < items.length; index += batchSize) batches.push(items.slice(index, index + batchSize)); return batches; }
 export async function mapWithConcurrency<T, Result>(items: T[], concurrency: number, operation: (item: T, index: number) => Promise<Result>) {
   const results = new Array<Result>(items.length);
@@ -47,10 +47,12 @@ async function boundedVisionImageUrl(storageKey: string) {
   return `data:image/jpeg;base64,${preview.toString("base64")}`;
 }
 
-async function loadNarrationChunkBytes(storageKey: string) {
-  const response = await fetch(await storageGetSignedUrl(storageKey));
+async function loadNarrationChunkBytes(chunk: PersistedNarrationChunk) {
+  const response = await fetch(await storageGetSignedUrl(chunk.storageKey), chunk.sourceRange ? { headers: { Range: `bytes=${chunk.sourceRange.startByte}-${chunk.sourceRange.endByteExclusive - 1}` } } : undefined);
   if (!response.ok) throw new Error("Prepared narration chunk could not be retrieved from secure storage.");
-  return new Uint8Array(await response.arrayBuffer());
+  if (chunk.sourceRange && response.status !== 206) throw new Error("Secure storage did not honor the bounded WAV byte-range request.");
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return chunk.sourceRange ? makePcmWavChunk(new Uint8Array(Buffer.from(chunk.sourceRange.wavFmtBase64, "base64")), bytes) : bytes;
 }
 
 async function persistNarrationTranscriptionState(narration: typeof mediaAssets.$inferSelect, state: NarrationTranscriptionState, db: Exclude<Awaited<ReturnType<typeof getDb>>, null>) {
@@ -71,17 +73,26 @@ export async function prepareNarrationChunks(projectId: number, narration: typeo
   const hasCompletedChunk = cached?.chunks.some(chunk => chunk.status === "completed" && chunk.transcript);
   if (cached?.sourcePrepared && (cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk)) return cached;
   if (!isMp3Narration(narration) && !wavNarration) throw new Error("This narration must be uploaded as WAV or MP3 for automatic safe transcription chunking.");
-  const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey));
-  if (!sourceResponse.ok) throw new Error("The narration could not be retrieved from secure storage for transcription preparation.");
-  const source = new Uint8Array(await sourceResponse.arrayBuffer());
-  const chunks = wavNarration ? splitPcmWavForTranscription(source) : splitMp3ForTranscription(source);
-  const chunkMimeType = wavNarration ? "audio/wav" : "audio/mpeg";
-  const chunkExtension = wavNarration ? "wav" : "mp3";
-  const storedChunks: PersistedNarrationChunk[] = await mapWithConcurrency(chunks, NARRATION_CHUNK_STORAGE_CONCURRENCY, async (chunk, index) => {
-    const stored = await storagePut(`projects/${projectId}/transcription-chunks/${narration.id}-part-${index + 1}.${chunkExtension}`, chunk.bytes, chunkMimeType);
-    return { storageKey: stored.key, startMs: chunk.startMs, endMs: chunk.endMs, contentStartMs: chunk.contentStartMs, contentEndMs: chunk.contentEndMs, byteSize: chunk.bytes.byteLength, status: "pending", attempts: 0 };
-  });
-  const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: chunks.length > 1 ? 4_000 : 0, sourcePrepared: true, sourcePreparationVersion: NARRATION_SOURCE_PREPARATION_VERSION, chunks: storedChunks };
+  const storedChunks: PersistedNarrationChunk[] = wavNarration
+    ? await (async () => {
+      const headerResponse = await fetch(await storageGetSignedUrl(narration.storageKey), { headers: { Range: "bytes=0-65535" } });
+      if (!headerResponse.ok || headerResponse.status !== 206) throw new Error("Secure storage did not provide the bounded WAV header required for durable preparation.");
+      const sourceByteLength = Number(headerResponse.headers.get("content-range")?.match(/\/(\d+)$/)?.[1]);
+      if (!Number.isSafeInteger(sourceByteLength)) throw new Error("Secure storage did not provide the WAV source length required for durable preparation.");
+      const plan = planPcmWavTranscriptionRanges(new Uint8Array(await headerResponse.arrayBuffer()), sourceByteLength);
+      const wavFmtBase64 = Buffer.from(plan.fmtBytes).toString("base64");
+      return plan.ranges.map(range => ({ storageKey: narration.storageKey, sourceRange: { startByte: range.startByte, endByteExclusive: range.endByteExclusive, wavFmtBase64 }, startMs: range.startMs, endMs: range.endMs, contentStartMs: range.contentStartMs, contentEndMs: range.contentEndMs, byteSize: range.endByteExclusive - range.startByte + 28 + plan.fmtBytes.length, status: "pending" as const, attempts: 0 }));
+    })()
+    : await (async () => {
+      const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey));
+      if (!sourceResponse.ok) throw new Error("The narration could not be retrieved from secure storage for transcription preparation.");
+      const chunks = splitMp3ForTranscription(new Uint8Array(await sourceResponse.arrayBuffer()));
+      return mapWithConcurrency(chunks, NARRATION_CHUNK_STORAGE_CONCURRENCY, async (chunk, index) => {
+        const stored = await storagePut(`projects/${projectId}/transcription-chunks/${narration.id}-part-${index + 1}.mp3`, chunk.bytes, "audio/mpeg");
+        return { storageKey: stored.key, startMs: chunk.startMs, endMs: chunk.endMs, contentStartMs: chunk.contentStartMs, contentEndMs: chunk.contentEndMs, byteSize: chunk.bytes.byteLength, status: "pending" as const, attempts: 0 };
+      });
+    })();
+  const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: storedChunks.length > 1 ? 4_000 : 0, sourcePrepared: true, sourcePreparationVersion: NARRATION_SOURCE_PREPARATION_VERSION, chunks: storedChunks };
   await persistNarrationTranscriptionState(narration, state, db);
   return state;
 }
@@ -96,7 +107,7 @@ export async function transcribePreparedNarrationChunks(userId: number, narratio
     narrationState.lastError = undefined;
     await persistNarrationTranscriptionState(narration, narrationState, db);
     try {
-      const bytes = await loadNarrationChunkBytes(chunk.storageKey);
+      const bytes = await loadNarrationChunkBytes(chunk);
       const wavBytes = isMp3Narration(narration) ? await mp3ToMonoWav(bytes) : bytes;
       const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes: wavBytes, filename: `narration-part-${index + 1}.wav`, mimeType: "audio/wav", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers.", timeoutMs: 120_000 }), key }));
       transcriptionKey ??= run.key;
@@ -251,7 +262,7 @@ export async function processProjectTimelineSlice(userId: number, projectId: num
       narrationState.lastError = undefined;
       await persistNarrationTranscriptionState(narration, narrationState, db);
       try {
-        const bytes = await loadNarrationChunkBytes(chunk.storageKey);
+        const bytes = await loadNarrationChunkBytes(chunk);
         const wavBytes = isMp3Narration(narration) ? await mp3ToMonoWav(bytes) : bytes;
         const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes: wavBytes, filename: `narration-part-${nextChunkIndex + 1}.wav`, mimeType: "audio/wav", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers.", timeoutMs: 20_000 }), key }), { maxAttempts: 1 });
         chunk.status = "completed";

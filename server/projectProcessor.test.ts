@@ -46,13 +46,14 @@ describe("public managed narration URLs", () => {
   it("uses one persisted source-preparation marker instead of a separate WAV byte-only direct-upload branch", () => {
     const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
     expect(source).toContain("cached?.sourcePrepared && (cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk)");
-    expect(source).toContain("const chunks = wavNarration ? splitPcmWavForTranscription(source) : splitMp3ForTranscription(source);");
+    expect(source).toContain("const plan = planPcmWavTranscriptionRanges(new Uint8Array(await headerResponse.arrayBuffer()), sourceByteLength);");
+    expect(source).toContain("headers: { Range: \"bytes=0-65535\" }");
     expect(source).not.toContain("if (byteSize <= directLimit)");
   });
 
   it("versions unstarted WAV preparation plans while retaining any plan that already has completed transcription progress", () => {
     const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
-    expect(source).toContain("const NARRATION_SOURCE_PREPARATION_VERSION = 2;");
+    expect(source).toContain("const NARRATION_SOURCE_PREPARATION_VERSION = 3;");
     expect(source).toContain("cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk");
   });
 });

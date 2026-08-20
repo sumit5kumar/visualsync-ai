@@ -165,7 +165,7 @@ export async function runTimelineGenerationJob(jobId: number) {
       workState = { ...result.workState };
       unitsCompleted += 1;
       const completed = result.stage === "completed";
-      await db.update(timelineGenerationJobs).set({ status: completed ? "completed" : "processing", currentStage: mapStage(result.stage), workState, retryAt: null, lastError: null, completedAt: completed ? new Date() : null }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
+      await db.update(timelineGenerationJobs).set({ status: completed ? "completed" : "processing", currentStage: mapStage(result.stage), workState, retryAt: null, lastError: null, transientFailureCount: 0, completedAt: completed ? new Date() : null }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
       if (completed) {
         await db.update(timelineGenerationJobs).set({ leaseToken: null, leaseExpiresAt: null }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
         return { outcome: "completed" as const, stage: result.stage, unitsCompleted };

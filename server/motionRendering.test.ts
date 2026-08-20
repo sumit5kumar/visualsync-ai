@@ -158,7 +158,8 @@ describe("middle-origin motion rendering", () => {
     const processor = readFileSync(resolve(projectRoot, "server/projectProcessor.ts"), "utf8");
     expect(processor).toContain("prepareNarrationChunks");
     expect(processor).toContain("splitMp3ForTranscription");
-    expect(processor).toContain("loadNarrationChunkBytes(chunk.storageKey)");
+    expect(processor).toContain("loadNarrationChunkBytes(chunk)");
+    expect(processor).toContain("Range: `bytes=${chunk.sourceRange.startByte}-${chunk.sourceRange.endByteExclusive - 1}`");
     expect(processor).toContain("mp3ToMonoWav(bytes)");
     expect(processor).toContain("transcribeAudio({ bytes: wavBytes, filename: `narration-part-${index + 1}.wav`");
     expect(providers).toContain("groqActivate.mutate");

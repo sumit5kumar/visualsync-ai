@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_DIRECT_WAV_DURATION_MS, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription, splitPcmWavForTranscription } from "./audioChunking";
+import { planPcmWavTranscriptionRanges, SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_DIRECT_WAV_DURATION_MS, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription, splitPcmWavForTranscription } from "./audioChunking";
 
 function mpeg1Layer3Frame() {
   const length = 417;
@@ -85,6 +85,21 @@ describe("WAV transcription preparation", () => {
     expect(chunks[0]?.contentEndMs).toBeLessThanOrEqual(SAFE_GROQ_DIRECT_WAV_DURATION_MS);
     expect(chunks[1]?.contentStartMs).toBe(chunks[0]?.contentEndMs);
     expect(chunks.every(chunk => chunk.bytes.byteLength <= SAFE_GROQ_DIRECT_WAV_BYTES)).toBe(true);
+  });
+
+  it("plans a five-hour PCM WAV from header metadata into bounded source ranges without allocating the full audio", () => {
+    const header = pcmWav(8);
+    const view = new DataView(header.buffer);
+    const byteRate = 32_000;
+    const dataLength = byteRate * 60 * 60 * 5;
+    view.setUint32(40, dataLength, true);
+    view.setUint32(4, 36 + dataLength, true);
+    const plan = planPcmWavTranscriptionRanges(header, 44 + dataLength);
+
+    expect(plan.ranges).toHaveLength(322);
+    expect(plan.ranges[0]?.contentStartMs).toBe(0);
+    expect(plan.ranges.at(-1)?.contentEndMs).toBe(18_000_000);
+    expect(plan.ranges.every(range => range.endByteExclusive - range.startByte + 44 <= SAFE_GROQ_DIRECT_WAV_BYTES)).toBe(true);
   });
 
   it("splits oversized PCM WAV into independently valid bounded WAV chunks", () => {

@@ -11,6 +11,7 @@ export type NarrationChunkStatus = "pending" | "processing" | "completed" | "wai
 
 export type PersistedNarrationChunk = {
   storageKey: string;
+  sourceRange?: { startByte: number; endByteExclusive: number; wavFmtBase64: string };
   startMs: number;
   endMs: number;
   contentStartMs: number;
@@ -40,7 +41,7 @@ export function readNarrationTranscriptionState(value: unknown): NarrationTransc
   if (!candidate || typeof candidate !== "object") return null;
   const state = candidate as Partial<NarrationTranscriptionState>;
   if (state.version !== 2 || !Array.isArray(state.chunks)) return null;
-  const chunks = state.chunks.filter(chunk => chunk && typeof chunk.storageKey === "string" && Number.isFinite(chunk.startMs) && Number.isFinite(chunk.endMs) && Number.isFinite(chunk.contentStartMs) && Number.isFinite(chunk.contentEndMs) && Number.isFinite(chunk.byteSize));
+  const chunks = state.chunks.filter(chunk => chunk && typeof chunk.storageKey === "string" && (!chunk.sourceRange || (Number.isInteger(chunk.sourceRange.startByte) && Number.isInteger(chunk.sourceRange.endByteExclusive) && chunk.sourceRange.endByteExclusive > chunk.sourceRange.startByte && typeof chunk.sourceRange.wavFmtBase64 === "string")) && Number.isFinite(chunk.startMs) && Number.isFinite(chunk.endMs) && Number.isFinite(chunk.contentStartMs) && Number.isFinite(chunk.contentEndMs) && Number.isFinite(chunk.byteSize));
   return chunks.length === state.chunks.length ? { version: 2, chunkOverlapMs: Number(state.chunkOverlapMs) || 0, sourcePrepared: state.sourcePrepared === true, sourcePreparationVersion: Number.isFinite(state.sourcePreparationVersion) ? Number(state.sourcePreparationVersion) : undefined, chunks, ...(state.lastError ? { lastError: state.lastError } : {}) } : null;
 }
 

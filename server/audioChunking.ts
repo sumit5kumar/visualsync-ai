@@ -13,6 +13,20 @@ export const SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES = 128 * 1024;
 export const SAFE_GROQ_DIRECT_WAV_BYTES = 24 * 1024 * 1024;
 export const SAFE_GROQ_DIRECT_WAV_DURATION_MS = 60_000;
 
+export type PcmWavTranscriptionRange = {
+  startByte: number;
+  endByteExclusive: number;
+  startMs: number;
+  endMs: number;
+  contentStartMs: number;
+  contentEndMs: number;
+};
+
+export type PcmWavRangePlan = {
+  fmtBytes: Uint8Array;
+  ranges: PcmWavTranscriptionRange[];
+};
+
 type Mp3Frame = { offset: number; length: number; durationMs: number; startMs: number; endMs: number };
 
 const BITRATES: Record<string, number[]> = {
@@ -89,7 +103,7 @@ function readAscii(source: Uint8Array, offset: number, length: number) {
   return value;
 }
 
-function readPcmWavInfo(source: Uint8Array): PcmWavInfo {
+export function readPcmWavInfo(source: Uint8Array): PcmWavInfo {
   if (source.length < 44 || readAscii(source, 0, 4) !== "RIFF" || readAscii(source, 8, 4) !== "WAVE") throw new Error("Oversized WAV narration must use a standard RIFF/WAVE container.");
   const view = new DataView(source.buffer, source.byteOffset, source.byteLength);
   let offset = 12;
@@ -102,6 +116,11 @@ function readPcmWavInfo(source: Uint8Array): PcmWavInfo {
     const chunkId = readAscii(source, offset, 4);
     const chunkLength = view.getUint32(offset + 4, true);
     const payloadOffset = offset + 8;
+    if (chunkId === "data") {
+      dataOffset = payloadOffset;
+      dataLength = chunkLength;
+      break;
+    }
     if (payloadOffset + chunkLength > source.length) break;
     if (chunkId === "fmt ") {
       if (chunkLength < 16) throw new Error("WAV narration has an incomplete format chunk.");
@@ -111,10 +130,6 @@ function readPcmWavInfo(source: Uint8Array): PcmWavInfo {
       blockAlign = view.getUint16(payloadOffset + 12, true);
       if (!byteRate || !blockAlign) throw new Error("WAV narration has invalid PCM timing metadata.");
       fmtBytes = source.slice(payloadOffset, payloadOffset + chunkLength);
-    } else if (chunkId === "data") {
-      dataOffset = payloadOffset;
-      dataLength = chunkLength;
-      break;
     }
     offset = payloadOffset + chunkLength + (chunkLength % 2);
   }
@@ -122,7 +137,7 @@ function readPcmWavInfo(source: Uint8Array): PcmWavInfo {
   return { fmtBytes, dataOffset, dataLength, blockAlign, byteRate };
 }
 
-function makePcmWavChunk(fmtBytes: Uint8Array, pcmBytes: Uint8Array) {
+export function makePcmWavChunk(fmtBytes: Uint8Array, pcmBytes: Uint8Array) {
   const bytes = new Uint8Array(12 + 8 + fmtBytes.length + 8 + pcmBytes.length);
   const view = new DataView(bytes.buffer);
   bytes.set([0x52, 0x49, 0x46, 0x46], 0);
@@ -135,6 +150,29 @@ function makePcmWavChunk(fmtBytes: Uint8Array, pcmBytes: Uint8Array) {
   view.setUint32(dataHeaderOffset + 4, pcmBytes.length, true);
   bytes.set(pcmBytes, dataHeaderOffset + 8);
   return bytes;
+}
+
+export function planPcmWavTranscriptionRanges(header: Uint8Array, sourceByteLength: number, maxChunkBytes = SAFE_GROQ_DIRECT_WAV_BYTES, overlapMs = 4_000): PcmWavRangePlan {
+  const info = readPcmWavInfo(header);
+  if (info.dataOffset + info.dataLength > sourceByteLength) throw new Error("WAV narration size does not match its PCM data header.");
+  const headerBytes = 28 + info.fmtBytes.length;
+  const byteLimitedPayload = Math.floor((maxChunkBytes - headerBytes) / info.blockAlign) * info.blockAlign;
+  const durationLimitedPayload = Math.floor((info.byteRate * SAFE_GROQ_DIRECT_WAV_DURATION_MS) / 1000 / info.blockAlign) * info.blockAlign;
+  const maximumPayload = Math.min(byteLimitedPayload, durationLimitedPayload);
+  if (maximumPayload <= 0) throw new Error("WAV transcription chunk limit is too small for this PCM format.");
+  const overlapBytes = Math.floor((info.byteRate * overlapMs) / 1000 / info.blockAlign) * info.blockAlign;
+  const ranges: PcmWavTranscriptionRange[] = [];
+  let contentOffset = 0;
+  while (contentOffset < info.dataLength) {
+    const startOffset = Math.max(0, contentOffset - overlapBytes);
+    const remaining = info.dataLength - contentOffset;
+    const contentLength = Math.min(maximumPayload - (contentOffset > 0 ? Math.min(overlapBytes, contentOffset) : 0), remaining);
+    const alignedContentLength = Math.max(info.blockAlign, Math.floor(contentLength / info.blockAlign) * info.blockAlign);
+    const endOffset = Math.min(info.dataLength, contentOffset + alignedContentLength);
+    ranges.push({ startByte: info.dataOffset + startOffset, endByteExclusive: info.dataOffset + endOffset, startMs: Math.round((startOffset / info.byteRate) * 1000), endMs: Math.round((endOffset / info.byteRate) * 1000), contentStartMs: Math.round((contentOffset / info.byteRate) * 1000), contentEndMs: Math.round((endOffset / info.byteRate) * 1000) });
+    contentOffset = endOffset;
+  }
+  return { fmtBytes: info.fmtBytes, ranges };
 }
 
 export function splitPcmWavForTranscription(source: Uint8Array, maxChunkBytes = SAFE_GROQ_DIRECT_WAV_BYTES, overlapMs = 4_000): AudioTranscriptionChunk[] {
