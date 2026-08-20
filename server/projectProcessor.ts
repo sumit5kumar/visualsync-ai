@@ -216,7 +216,7 @@ export type TimelineGenerationSliceResult = {
   workState: TimelineGenerationWorkState;
 };
 
-function asTimelineGenerationWorkState(value: unknown): TimelineGenerationWorkState {
+export function normalizeTimelineGenerationWorkState(value: unknown): TimelineGenerationWorkState {
   if (!value || typeof value !== "object") return {};
   const record = value as Record<string, unknown>;
   return {
@@ -243,7 +243,7 @@ export async function processProjectTimelineSlice(userId: number, projectId: num
   const narration = assets.find(asset => asset.assetType === "narration");
   const images = assets.filter(asset => asset.assetType === "image").sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0));
   if (!narration || !images.length) throw new Error("Select and upload one narration and at least one image before processing.");
-  const workState = asTimelineGenerationWorkState(savedWorkState);
+  const workState = normalizeTimelineGenerationWorkState(savedWorkState);
 
   if (narration.analysisState !== "analyzed") {
     const narrationState = await prepareNarrationChunks(projectId, narration, db);

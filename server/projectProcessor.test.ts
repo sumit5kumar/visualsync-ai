@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPublicManagedStorageUrl, isWavNarration, mapWithConcurrency } from "./projectProcessor";
+import { buildPublicManagedStorageUrl, isWavNarration, mapWithConcurrency, normalizeTimelineGenerationWorkState } from "./projectProcessor";
 
 describe("public managed narration URLs", () => {
   it("keeps the managed storage path public and safely encodes every storage-key segment", () => {
@@ -24,5 +24,14 @@ describe("public managed narration URLs", () => {
   it("recognizes common WAV uploads so short narration is sent directly instead of entering the MP3-only conversion path", () => {
     expect(isWavNarration({ mimeType: "audio/wav", storageKey: "projects/1/narration.wav" })).toBe(true);
     expect(isWavNarration({ mimeType: "audio/mpeg", storageKey: "projects/1/narration.mp3" })).toBe(false);
+  });
+
+  it("retains first-dispatch telemetry when persisted work state is normalized for a later hosted slice", () => {
+    expect(normalizeTimelineGenerationWorkState({ firstDispatchAtMs: 1_787_173_659_541, preflightComplete: true, pacingWeights: [1.2], nextPacingBatch: 1 })).toMatchObject({
+      firstDispatchAtMs: 1_787_173_659_541,
+      preflightComplete: true,
+      pacingWeights: [1.2],
+      nextPacingBatch: 1,
+    });
   });
 });
