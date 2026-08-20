@@ -11,7 +11,7 @@ export type AudioTranscriptionChunk = {
 // completed successfully on the Free tier; larger measured attachments stalled.
 export const SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES = 128 * 1024;
 export const SAFE_GROQ_DIRECT_WAV_BYTES = 24 * 1024 * 1024;
-export const SAFE_GROQ_DIRECT_WAV_DURATION_MS = 90_000;
+export const SAFE_GROQ_DIRECT_WAV_DURATION_MS = 60_000;
 
 type Mp3Frame = { offset: number; length: number; durationMs: number; startMs: number; endMs: number };
 

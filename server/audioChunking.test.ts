@@ -80,7 +80,7 @@ describe("WAV transcription preparation", () => {
     const source = pcmWav(3_200_000);
     const chunks = splitPcmWavForTranscription(source);
 
-    expect(SAFE_GROQ_DIRECT_WAV_DURATION_MS).toBe(90_000);
+    expect(SAFE_GROQ_DIRECT_WAV_DURATION_MS).toBe(60_000);
     expect(chunks).toHaveLength(2);
     expect(chunks[0]?.contentEndMs).toBeLessThanOrEqual(SAFE_GROQ_DIRECT_WAV_DURATION_MS);
     expect(chunks[1]?.contentStartMs).toBe(chunks[0]?.contentEndMs);
