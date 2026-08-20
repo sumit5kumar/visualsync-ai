@@ -266,11 +266,11 @@
 - [x] Diagnose the external Groq key’s dual-verification transcription timeout and repair only the verification timeout path if evidence supports it.
 - [x] Fix the AI Providers verification action so only the clicked key displays its loading state while other keys remain independently usable.
 - [x] Explain the measured local-render time difference between zoom-only and crossfade-enabled 30-minute output without changing the accepted renderer.
-- [ ] Diagnose and recover the failing five-minute Timeline Generation job without changing the successful one-minute or thirty-minute timelines or starting MP4 rendering.
-- [ ] Keep genuinely short WAV narration direct while splitting longer WAV narration into hosted-callback-safe chunks after a provider timeout is observed.
-- [ ] Remove the duplicate byte-only WAV direct-upload branch so every WAV uses the same duration-aware preparation decision.
-- [ ] Keep provider Retry-After for 429 responses while retrying temporary 5xx and timeout failures on the normal two-minute recovery interval.
-- [ ] Reduce multi-minute WAV chunks to the proven short-audio range so each hosted transcription request stays within the reliable callback window.
-- [ ] Version persisted WAV preparation plans so chunk-policy upgrades safely rebuild stale plans instead of reusing them.
-- [ ] Harden durable Timeline audio preparation and continuation for short, multi-minute, and multi-hour narration without relying on a one-shot provider request.
-- [ ] Reset transient-failure accumulation after each persisted Timeline progress unit so long projects do not exhaust retries after intermittent recovered errors.
+- [x] Diagnose and recover the failing five-minute Timeline Generation job without changing the successful one-minute or thirty-minute timelines or starting MP4 rendering.
+- [x] Keep genuinely short WAV narration direct while splitting longer WAV narration into hosted-callback-safe chunks after a provider timeout is observed.
+- [x] Remove the duplicate byte-only WAV direct-upload branch so every WAV uses the same duration-aware preparation decision.
+- [x] Keep provider Retry-After for 429 responses while retrying temporary 5xx and timeout failures on the normal two-minute recovery interval.
+- [x] Reduce multi-minute WAV chunks to the proven short-audio range so each hosted transcription request stays within the reliable callback window.
+- [x] Version persisted WAV preparation plans so chunk-policy upgrades safely rebuild stale plans instead of reusing them.
+- [x] Harden durable Timeline audio preparation and continuation for short, multi-minute, and multi-hour narration without relying on a one-shot provider request.
+- [x] Reset transient-failure accumulation after each persisted Timeline progress unit so long projects do not exhaust retries after intermittent recovered errors.
