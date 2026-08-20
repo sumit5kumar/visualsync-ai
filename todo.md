@@ -269,3 +269,4 @@
 - [ ] Diagnose and recover the failing five-minute Timeline Generation job without changing the successful one-minute or thirty-minute timelines or starting MP4 rendering.
 - [ ] Keep genuinely short WAV narration direct while splitting longer WAV narration into hosted-callback-safe chunks after a provider timeout is observed.
 - [ ] Remove the duplicate byte-only WAV direct-upload branch so every WAV uses the same duration-aware preparation decision.
+- [ ] Keep provider Retry-After for 429 responses while retrying temporary 5xx and timeout failures on the normal two-minute recovery interval.

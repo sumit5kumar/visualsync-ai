@@ -36,10 +36,13 @@ export function isRetryableTimelineFailure(error: unknown) {
 }
 
 export function resolveTimelineRetryAt(error: unknown, transientFailureCount: number, now = Date.now()) {
-  const providerDelay = failureMetadata(error)?.retryAfterMs;
+  const metadata = failureMetadata(error);
+  const providerDelay = metadata?.retryAfterMs;
   const delay = providerDelay !== undefined && providerDelay >= 0
     ? providerDelay
-    : Math.min(1_800_000, DEFAULT_TIMELINE_RETRY_MS * Math.max(1, 2 ** Math.max(0, transientFailureCount - 1)));
+    : metadata?.category === "rate_limited" || metadata?.category === "audio_quota_exhausted"
+      ? Math.min(1_800_000, DEFAULT_TIMELINE_RETRY_MS * Math.max(1, 2 ** Math.max(0, transientFailureCount - 1)))
+      : DEFAULT_TIMELINE_RETRY_MS;
   return new Date(now + delay);
 }
 

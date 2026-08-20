@@ -14,10 +14,18 @@ describe("durable Timeline Generation retry policy", () => {
     expect(isRetryableTimelineFailure(new Error("fetch failed: ECONNRESET"))).toBe(true);
   });
 
-  it("uses a two-minute fallback and bounded backoff when Groq omits retry guidance", () => {
-    const transient = new GroqRequestError("timeout", "unavailable", { durationMs: 1, category: "timeout" });
-    expect(resolveTimelineRetryAt(transient, 1, 1_000).getTime()).toBe(1_000 + DEFAULT_TIMELINE_RETRY_MS);
-    expect(resolveTimelineRetryAt(transient, 2, 1_000).getTime()).toBe(1_000 + DEFAULT_TIMELINE_RETRY_MS * 2);
+  it("uses the normal two-minute recovery interval for temporary server, timeout, and network failures without provider guidance", () => {
+    const timeout = new GroqRequestError("timeout", "unavailable", { durationMs: 1, category: "timeout" });
+    const server = new GroqRequestError("server", "unavailable", { durationMs: 1, category: "server_error" });
+    const network = new GroqRequestError("network", "unavailable", { durationMs: 1, category: "network_failure" });
+    expect([timeout, server, network].map(error => resolveTimelineRetryAt(error, 4, 1_000).getTime())).toEqual([1_000 + DEFAULT_TIMELINE_RETRY_MS, 1_000 + DEFAULT_TIMELINE_RETRY_MS, 1_000 + DEFAULT_TIMELINE_RETRY_MS]);
+  });
+
+  it("keeps bounded backoff only for rate and audio quota responses when Groq omits Retry-After", () => {
+    const rateLimited = new GroqRequestError("429", "quota_limited", { durationMs: 1, category: "rate_limited" });
+    const audioQuota = new GroqRequestError("audio quota", "quota_limited", { durationMs: 1, category: "audio_quota_exhausted" });
+    expect(resolveTimelineRetryAt(rateLimited, 2, 1_000).getTime()).toBe(1_000 + DEFAULT_TIMELINE_RETRY_MS * 2);
+    expect(resolveTimelineRetryAt(audioQuota, 5, 1_000).getTime()).toBe(1_000 + 1_800_000);
   });
 
   it("does not retry permanent access or malformed-request failures and stays inside the hosted callback deadline", () => {
