@@ -8,7 +8,7 @@ import { storageGetSignedUrl, storagePut } from "./storage";
 import { validateTimeline } from "./timelineValidation";
 import { makePcmWavChunk, planPcmWavTranscriptionRanges, SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription } from "./audioChunking";
 import { mp3ToMonoWav } from "./audioTranscoding";
-import { mergeChunkTranscripts, readNarrationTranscriptionState, summarizeNarrationText, type NarrationTranscriptionState, type PersistedNarrationChunk } from "./narrationTranscription";
+import { ADAPTIVE_PCM_WAV_RANGE_SPLIT_AFTER_ATTEMPTS, mergeChunkTranscripts, readNarrationTranscriptionState, splitRepeatedlyFailingPcmWavRange, summarizeNarrationText, type NarrationTranscriptionState, type PersistedNarrationChunk } from "./narrationTranscription";
 import sharp from "sharp";
 
 function transcriptForRange(segments: Array<{ start: number; end: number; text: string }>, startMs: number, endMs: number) {
@@ -275,7 +275,10 @@ export async function processProjectTimelineSlice(userId: number, projectId: num
         const metadata = safeError?.metadata;
         chunk.status = error instanceof GroqRequestError && error.status === "quota_limited" ? "waiting" : "failed";
         chunk.provider = { maskedKey: "Groq key", model: GROQ_TRANSCRIPTION_MODEL, durationMs: metadata?.durationMs ?? 0, httpStatus: metadata?.httpStatus, category: metadata?.category ?? "unknown" };
-        narrationState.lastError = { category: metadata?.category ?? "unknown", message: safeError?.message ?? "Narration chunk transcription did not complete.", retryAfterMs: metadata?.retryAfterMs, httpStatus: metadata?.httpStatus, errorCode: metadata?.errorCode, remainingRequests: metadata?.remainingRequests, remainingAudio: metadata?.remainingAudio, resetAudio: metadata?.resetAudio, requestDurationMs: metadata?.durationMs ?? 0, occurredAtMs: Date.now() };
+        const canAdaptivelySplit = !isMp3Narration(narration) && chunk.attempts >= ADAPTIVE_PCM_WAV_RANGE_SPLIT_AFTER_ATTEMPTS && (metadata?.category === "server_error" || metadata?.category === "timeout" || metadata?.category === "network_failure");
+        const replacementChunks = canAdaptivelySplit ? splitRepeatedlyFailingPcmWavRange(chunk, narrationState.chunkOverlapMs) : null;
+        if (replacementChunks) narrationState.chunks.splice(nextChunkIndex, 1, ...replacementChunks);
+        narrationState.lastError = { category: metadata?.category ?? "unknown", message: replacementChunks ? "Groq did not complete this PCM WAV range repeatedly, so VisualSync safely divided only that pending range and will resume from its first child." : safeError?.message ?? "Narration chunk transcription did not complete.", retryAfterMs: metadata?.retryAfterMs, httpStatus: metadata?.httpStatus, errorCode: metadata?.errorCode, remainingRequests: metadata?.remainingRequests, remainingAudio: metadata?.remainingAudio, resetAudio: metadata?.resetAudio, requestDurationMs: metadata?.durationMs ?? 0, occurredAtMs: Date.now() };
         await persistNarrationTranscriptionState(narration, narrationState, db);
         throw error;
       }

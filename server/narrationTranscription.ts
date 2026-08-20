@@ -33,6 +33,56 @@ export type NarrationTranscriptionState = {
   lastError?: { category: string; message: string; retryAfterMs?: number; httpStatus?: number; errorCode?: string; remainingRequests?: string; remainingAudio?: string; resetAudio?: string; requestDurationMs: number; occurredAtMs: number };
 };
 
+export const ADAPTIVE_PCM_WAV_RANGE_SPLIT_AFTER_ATTEMPTS = 3;
+export const ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS = 30_000;
+
+function alignToBlock(value: number, blockAlign: number) {
+  return Math.max(0, Math.floor(value / blockAlign) * blockAlign);
+}
+
+function pcmBlockAlign(wavFmtBase64: string) {
+  const fmt = Buffer.from(wavFmtBase64, "base64");
+  return fmt.length >= 14 ? fmt.readUInt16LE(12) : 1;
+}
+
+/**
+ * Replaces a repeatedly failing PCM source range with two overlap-aware child
+ * ranges. Completed neighboring chunks remain untouched; the children retain
+ * their exact source mapping and therefore can be merged normally later.
+ */
+export function splitRepeatedlyFailingPcmWavRange(chunk: PersistedNarrationChunk, overlapMs: number): PersistedNarrationChunk[] | null {
+  if (!chunk.sourceRange) return null;
+  const contentDurationMs = chunk.contentEndMs - chunk.contentStartMs;
+  if (contentDurationMs <= ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS) return null;
+  const sourceDurationMs = chunk.endMs - chunk.startMs;
+  if (sourceDurationMs <= 0 || chunk.byteSize <= 0) return null;
+  const blockAlign = pcmBlockAlign(chunk.sourceRange.wavFmtBase64);
+  const bytesPerMs = chunk.byteSize / sourceDurationMs;
+  const midpointContentMs = chunk.contentStartMs + Math.round(contentDurationMs / 2);
+  const childRanges = [
+    { startMs: chunk.startMs, endMs: midpointContentMs, contentStartMs: chunk.contentStartMs, contentEndMs: midpointContentMs },
+    { startMs: Math.max(chunk.startMs, midpointContentMs - overlapMs), endMs: chunk.endMs, contentStartMs: midpointContentMs, contentEndMs: chunk.contentEndMs },
+  ];
+  const children: PersistedNarrationChunk[] = [];
+  for (const range of childRanges) {
+    const startByte = chunk.sourceRange!.startByte + alignToBlock((range.startMs - chunk.startMs) * bytesPerMs, blockAlign);
+    const endByteExclusive = chunk.sourceRange!.startByte + alignToBlock((range.endMs - chunk.startMs) * bytesPerMs, blockAlign);
+    if (endByteExclusive <= startByte) return null;
+    children.push({
+      storageKey: chunk.storageKey,
+      sourceRange: { startByte, endByteExclusive, wavFmtBase64: chunk.sourceRange!.wavFmtBase64 },
+      startMs: range.startMs,
+      endMs: range.endMs,
+      contentStartMs: range.contentStartMs,
+      contentEndMs: range.contentEndMs,
+      byteSize: endByteExclusive - startByte,
+      status: "pending" as const,
+      attempts: 0,
+    });
+  }
+  return children;
+}
+
 const normalizeText = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
 
 export function readNarrationTranscriptionState(value: unknown): NarrationTranscriptionState | null {
