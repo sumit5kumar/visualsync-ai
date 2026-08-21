@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { signTimelineScheduleTask, verifiedTimelineScheduleTask } from "./timelineScheduleAuth";
+import { signTimelineScheduleTask, taskUidFromSchedulePayload, verifiedTimelineScheduleTask } from "./timelineScheduleAuth";
 
 describe("timeline scheduled callback signatures", () => {
   const secret = "test-only-schedule-secret";
@@ -15,5 +15,11 @@ describe("timeline scheduled callback signatures", () => {
     expect(verifiedTimelineScheduleTask({ taskUid: `${taskUid}x`, signature }, secret)).toBeNull();
     expect(verifiedTimelineScheduleTask({ taskUid, signature: `${signature.slice(0, -1)}0` }, secret)).toBeNull();
     expect(verifiedTimelineScheduleTask({ taskUid }, secret)).toBeNull();
+  });
+
+  it("accepts only a high-entropy task UID as the limited post-authentication fallback token", () => {
+    expect(taskUidFromSchedulePayload({ taskUid })).toBe(taskUid);
+    expect(taskUidFromSchedulePayload({ taskUid: "short" })).toBeNull();
+    expect(taskUidFromSchedulePayload({ taskUid: "not valid spaces in task uid" })).toBeNull();
   });
 });
