@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { sdk } from "./_core/sdk";
 import { runTimelineGenerationJobBySchedule } from "./timelineGenerationJobs";
-import { taskUidFromSchedulePayload, verifiedTimelineScheduleTask } from "./timelineScheduleAuth";
+import { verifiedTimelineScheduleTask } from "./timelineScheduleAuth";
 
 export function registerTimelineGenerationScheduleRoutes(app: Express) {
   app.post("/api/scheduled/timeline-generation", async (req: Request, res: Response) => {
@@ -11,7 +11,7 @@ export function registerTimelineGenerationScheduleRoutes(app: Express) {
         const user = await sdk.authenticateRequest(req);
         taskUid = user.isCron && user.taskUid ? user.taskUid : null;
       } catch {
-        taskUid = verifiedTimelineScheduleTask(req.body) ?? taskUidFromSchedulePayload(req.body);
+        taskUid = verifiedTimelineScheduleTask(req.body);
       }
       if (!taskUid) return res.status(403).json({ error: "cron-only" });
       const result = await runTimelineGenerationJobBySchedule(taskUid);

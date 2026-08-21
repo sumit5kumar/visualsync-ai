@@ -17,9 +17,3 @@ export function verifiedTimelineScheduleTask(payload: unknown, secret = ENV.cook
   const expectedBytes = Buffer.from(expected, "utf8");
   return supplied.length === expectedBytes.length && timingSafeEqual(supplied, expectedBytes) ? taskUid : null;
 }
-
-export function taskUidFromSchedulePayload(payload: unknown) {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-  const { taskUid } = payload as { taskUid?: unknown };
-  return typeof taskUid === "string" && /^[A-Za-z0-9_-]{20,65}$/.test(taskUid) ? taskUid : null;
-}
