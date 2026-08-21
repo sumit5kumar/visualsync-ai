@@ -19,7 +19,7 @@ function transcriptForRange(segments: Array<{ start: number; end: number; text: 
 const MAX_PACING_IMAGES_PER_REQUEST = 24;
 const MAX_PACING_NARRATION_CHARACTERS = 3600;
 const NARRATION_CHUNK_STORAGE_CONCURRENCY = 3;
-const NARRATION_SOURCE_PREPARATION_VERSION = 3;
+const NARRATION_SOURCE_PREPARATION_VERSION = 4;
 export function buildBoundedPacingBatches<T>(items: T[], batchSize = MAX_PACING_IMAGES_PER_REQUEST) { const batches: T[][] = []; for (let index = 0; index < items.length; index += batchSize) batches.push(items.slice(index, index + batchSize)); return batches; }
 export async function mapWithConcurrency<T, Result>(items: T[], concurrency: number, operation: (item: T, index: number) => Promise<Result>) {
   const results = new Array<Result>(items.length);
@@ -52,7 +52,7 @@ async function loadNarrationChunkBytes(chunk: PersistedNarrationChunk) {
   if (!response.ok) throw new Error("Prepared narration chunk could not be retrieved from secure storage.");
   if (chunk.sourceRange && response.status !== 206) throw new Error("Secure storage did not honor the bounded WAV byte-range request.");
   const bytes = new Uint8Array(await response.arrayBuffer());
-  return chunk.sourceRange ? makePcmWavChunk(new Uint8Array(Buffer.from(chunk.sourceRange.wavFmtBase64, "base64")), bytes) : bytes;
+  return chunk.sourceRange?.wavFmtBase64 ? makePcmWavChunk(new Uint8Array(Buffer.from(chunk.sourceRange.wavFmtBase64, "base64")), bytes) : bytes;
 }
 
 async function persistNarrationTranscriptionState(narration: typeof mediaAssets.$inferSelect, state: NarrationTranscriptionState, db: Exclude<Awaited<ReturnType<typeof getDb>>, null>) {
@@ -87,9 +87,11 @@ export async function prepareNarrationChunks(projectId: number, narration: typeo
       const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey));
       if (!sourceResponse.ok) throw new Error("The narration could not be retrieved from secure storage for transcription preparation.");
       const chunks = splitMp3ForTranscription(new Uint8Array(await sourceResponse.arrayBuffer()));
-      return mapWithConcurrency(chunks, NARRATION_CHUNK_STORAGE_CONCURRENCY, async (chunk, index) => {
-        const stored = await storagePut(`projects/${projectId}/transcription-chunks/${narration.id}-part-${index + 1}.mp3`, chunk.bytes, "audio/mpeg");
-        return { storageKey: stored.key, startMs: chunk.startMs, endMs: chunk.endMs, contentStartMs: chunk.contentStartMs, contentEndMs: chunk.contentEndMs, byteSize: chunk.bytes.byteLength, status: "pending" as const, attempts: 0 };
+      return chunks.map(chunk => {
+        const startByte = chunk.sourceStartByte;
+        const endByteExclusive = chunk.sourceEndByteExclusive;
+        if (typeof startByte !== "number" || typeof endByteExclusive !== "number" || !Number.isInteger(startByte) || !Number.isInteger(endByteExclusive) || endByteExclusive <= startByte) throw new Error("MP3 preparation did not preserve a valid source byte range.");
+        return { storageKey: narration.storageKey, sourceRange: { kind: "mp3" as const, startByte, endByteExclusive }, startMs: chunk.startMs, endMs: chunk.endMs, contentStartMs: chunk.contentStartMs, contentEndMs: chunk.contentEndMs, byteSize: chunk.bytes.byteLength, status: "pending" as const, attempts: 0 };
       });
     })();
   const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: storedChunks.length > 1 ? 4_000 : 0, sourcePrepared: true, sourcePreparationVersion: NARRATION_SOURCE_PREPARATION_VERSION, chunks: storedChunks };

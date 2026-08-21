@@ -65,6 +65,14 @@ describe("MP3 transcription chunking", () => {
     expect(chunks[1].contentStartMs).toBe(chunks[0].contentEndMs);
     expect(chunks.every(chunk => chunk.bytes.byteLength <= 1_300)).toBe(true);
   });
+
+  it("keeps frame-aligned source-byte ranges so a long MP3 plan can be persisted without child uploads", () => {
+    const source = new Uint8Array(417 * 5);
+    for (let index = 0; index < 5; index++) source.set(mpeg1Layer3Frame(), index * 417);
+    const chunks = splitMp3ForTranscription(source, 900, 0);
+
+    expect(chunks.map(chunk => [chunk.sourceStartByte, chunk.sourceEndByteExclusive])).toEqual([[0, 834], [834, 1_668], [1_668, 2_085]]);
+  });
 });
 
 describe("WAV transcription preparation", () => {

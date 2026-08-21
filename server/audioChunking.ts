@@ -1,5 +1,7 @@
 export type AudioTranscriptionChunk = {
   bytes: Uint8Array;
+  sourceStartByte?: number;
+  sourceEndByteExclusive?: number;
   startMs: number;
   endMs: number;
   contentStartMs: number;
@@ -213,7 +215,7 @@ export function splitPcmWavForTranscription(source: Uint8Array, maxChunkBytes = 
 }
 
 export function splitMp3ForTranscription(source: Uint8Array, maxChunkBytes = SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, overlapMs = 4_000): AudioTranscriptionChunk[] {
-  if (source.byteLength <= maxChunkBytes) return [{ bytes: source, startMs: 0, endMs: 0, contentStartMs: 0, contentEndMs: 0 }];
+  if (source.byteLength <= maxChunkBytes) return [{ bytes: source, sourceStartByte: 0, sourceEndByteExclusive: source.byteLength, startMs: 0, endMs: 0, contentStartMs: 0, contentEndMs: 0 }];
   const frames = scanMp3Frames(source);
   if (!frames.length) throw new Error("Oversized narration must be a valid MP3 so it can be split safely for Groq transcription.");
   const chunks: AudioTranscriptionChunk[] = [];
@@ -233,7 +235,7 @@ export function splitMp3ForTranscription(source: Uint8Array, maxChunkBytes = SAF
     if (endFrameIndex === frameIndex) throw new Error("A single MP3 frame exceeds the safe Groq transcription chunk size.");
     const endOffset = frames[endFrameIndex - 1].offset + frames[endFrameIndex - 1].length;
     const contentEnd = frames[endFrameIndex - 1];
-    chunks.push({ bytes: source.slice(start.offset, endOffset), startMs: Math.round(start.startMs), endMs: Math.round(contentEnd.endMs), contentStartMs: Math.round(contentStart.startMs), contentEndMs: Math.round(contentEnd.endMs) });
+    chunks.push({ bytes: source.slice(start.offset, endOffset), sourceStartByte: start.offset, sourceEndByteExclusive: endOffset, startMs: Math.round(start.startMs), endMs: Math.round(contentEnd.endMs), contentStartMs: Math.round(contentStart.startMs), contentEndMs: Math.round(contentEnd.endMs) });
     frameIndex = endFrameIndex;
   }
   return chunks;

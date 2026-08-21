@@ -53,7 +53,13 @@ describe("public managed narration URLs", () => {
 
   it("versions unstarted WAV preparation plans while retaining any plan that already has completed transcription progress", () => {
     const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
-    expect(source).toContain("const NARRATION_SOURCE_PREPARATION_VERSION = 3;");
+    expect(source).toContain("const NARRATION_SOURCE_PREPARATION_VERSION = 4;");
     expect(source).toContain("cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk");
+  });
+
+  it("persists frame-aligned MP3 source ranges immediately instead of uploading every prepared child before progress can be saved", () => {
+    const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
+    expect(source).toContain('sourceRange: { kind: "mp3" as const, startByte, endByteExclusive }');
+    expect(source).not.toContain("transcription-chunks/${narration.id}-part-");
   });
 });

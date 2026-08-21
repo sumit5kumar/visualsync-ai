@@ -11,7 +11,7 @@ export type NarrationChunkStatus = "pending" | "processing" | "completed" | "wai
 
 export type PersistedNarrationChunk = {
   storageKey: string;
-  sourceRange?: { startByte: number; endByteExclusive: number; wavFmtBase64: string };
+  sourceRange?: { startByte: number; endByteExclusive: number; wavFmtBase64?: string; kind?: "mp3" };
   startMs: number;
   endMs: number;
   contentStartMs: number;
@@ -51,12 +51,13 @@ function pcmBlockAlign(wavFmtBase64: string) {
  * their exact source mapping and therefore can be merged normally later.
  */
 export function splitRepeatedlyFailingPcmWavRange(chunk: PersistedNarrationChunk, overlapMs: number): PersistedNarrationChunk[] | null {
-  if (!chunk.sourceRange) return null;
+  const sourceRange = chunk.sourceRange;
+  if (!sourceRange?.wavFmtBase64) return null;
   const contentDurationMs = chunk.contentEndMs - chunk.contentStartMs;
   if (contentDurationMs <= MIN_ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS) return null;
   const sourceDurationMs = chunk.endMs - chunk.startMs;
   if (sourceDurationMs <= 0 || chunk.byteSize <= 0) return null;
-  const blockAlign = pcmBlockAlign(chunk.sourceRange.wavFmtBase64);
+  const blockAlign = pcmBlockAlign(sourceRange.wavFmtBase64);
   const bytesPerMs = chunk.byteSize / sourceDurationMs;
   const midpointContentMs = chunk.contentStartMs + Math.round(contentDurationMs / 2);
   const childRanges = [
@@ -65,12 +66,12 @@ export function splitRepeatedlyFailingPcmWavRange(chunk: PersistedNarrationChunk
   ];
   const children: PersistedNarrationChunk[] = [];
   for (const range of childRanges) {
-    const startByte = chunk.sourceRange!.startByte + alignToBlock((range.startMs - chunk.startMs) * bytesPerMs, blockAlign);
-    const endByteExclusive = chunk.sourceRange!.startByte + alignToBlock((range.endMs - chunk.startMs) * bytesPerMs, blockAlign);
+    const startByte = sourceRange.startByte + alignToBlock((range.startMs - chunk.startMs) * bytesPerMs, blockAlign);
+    const endByteExclusive = sourceRange.startByte + alignToBlock((range.endMs - chunk.startMs) * bytesPerMs, blockAlign);
     if (endByteExclusive <= startByte) return null;
     children.push({
       storageKey: chunk.storageKey,
-      sourceRange: { startByte, endByteExclusive, wavFmtBase64: chunk.sourceRange!.wavFmtBase64 },
+      sourceRange: { startByte, endByteExclusive, wavFmtBase64: sourceRange.wavFmtBase64 },
       startMs: range.startMs,
       endMs: range.endMs,
       contentStartMs: range.contentStartMs,
@@ -91,7 +92,7 @@ export function readNarrationTranscriptionState(value: unknown): NarrationTransc
   if (!candidate || typeof candidate !== "object") return null;
   const state = candidate as Partial<NarrationTranscriptionState>;
   if (state.version !== 2 || !Array.isArray(state.chunks)) return null;
-  const chunks = state.chunks.filter(chunk => chunk && typeof chunk.storageKey === "string" && (!chunk.sourceRange || (Number.isInteger(chunk.sourceRange.startByte) && Number.isInteger(chunk.sourceRange.endByteExclusive) && chunk.sourceRange.endByteExclusive > chunk.sourceRange.startByte && typeof chunk.sourceRange.wavFmtBase64 === "string")) && Number.isFinite(chunk.startMs) && Number.isFinite(chunk.endMs) && Number.isFinite(chunk.contentStartMs) && Number.isFinite(chunk.contentEndMs) && Number.isFinite(chunk.byteSize));
+  const chunks = state.chunks.filter(chunk => chunk && typeof chunk.storageKey === "string" && (!chunk.sourceRange || (Number.isInteger(chunk.sourceRange.startByte) && Number.isInteger(chunk.sourceRange.endByteExclusive) && chunk.sourceRange.endByteExclusive > chunk.sourceRange.startByte && (typeof chunk.sourceRange.wavFmtBase64 === "string" || chunk.sourceRange.kind === "mp3"))) && Number.isFinite(chunk.startMs) && Number.isFinite(chunk.endMs) && Number.isFinite(chunk.contentStartMs) && Number.isFinite(chunk.contentEndMs) && Number.isFinite(chunk.byteSize));
   return chunks.length === state.chunks.length ? { version: 2, chunkOverlapMs: Number(state.chunkOverlapMs) || 0, sourcePrepared: state.sourcePrepared === true, sourcePreparationVersion: Number.isFinite(state.sourcePreparationVersion) ? Number(state.sourcePreparationVersion) : undefined, chunks, ...(state.lastError ? { lastError: state.lastError } : {}) } : null;
 }
 
