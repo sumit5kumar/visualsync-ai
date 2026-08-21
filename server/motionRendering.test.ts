@@ -157,7 +157,8 @@ describe("middle-origin motion rendering", () => {
     expect(projects).toContain("retryAnalysis");
     const processor = readFileSync(resolve(projectRoot, "server/projectProcessor.ts"), "utf8");
     expect(processor).toContain("prepareNarrationChunks");
-    expect(processor).toContain("splitMp3ForTranscription");
+    expect(processor).toContain("scanMp3FrameRanges");
+    expect(processor).toContain("MP3_PREPARATION_SCAN_BYTES");
     expect(processor).toContain("loadNarrationChunkBytes(chunk)");
     expect(processor).toContain("Range: `bytes=${chunk.sourceRange.startByte}-${chunk.sourceRange.endByteExclusive - 1}`");
     expect(processor).toContain("mp3ToMonoWav(bytes)");

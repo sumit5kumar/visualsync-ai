@@ -4,11 +4,11 @@ import { GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL, GroqRequestError } from ".
 import { getDb } from "./db";
 import { executeWithGroqRotation, GroqPoolExhaustedError } from "./groqPool";
 import { buildGlobalReadableImageDurations } from "./readablePacing";
-import { storageGetSignedUrl, storagePut } from "./storage";
+import { storageGetSignedUrl } from "./storage";
 import { validateTimeline } from "./timelineValidation";
-import { makePcmWavChunk, planPcmWavTranscriptionRanges, SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription } from "./audioChunking";
+import { makePcmWavChunk, planPcmWavTranscriptionRanges, SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, scanMp3FrameRanges } from "./audioChunking";
 import { mp3ToMonoWav } from "./audioTranscoding";
-import { ADAPTIVE_PCM_WAV_RANGE_SPLIT_AFTER_ATTEMPTS, mergeChunkTranscripts, readNarrationTranscriptionState, splitRepeatedlyFailingPcmWavRange, summarizeNarrationText, type NarrationTranscriptionState, type PersistedNarrationChunk } from "./narrationTranscription";
+import { ADAPTIVE_PCM_WAV_RANGE_SPLIT_AFTER_ATTEMPTS, mergeChunkTranscripts, readNarrationTranscriptionState, splitRepeatedlyFailingPcmWavRange, summarizeNarrationText, type Mp3PreparationActiveChunk, type Mp3PreparationFrame, type Mp3PreparationState, type NarrationTranscriptionState, type PersistedNarrationChunk } from "./narrationTranscription";
 import sharp from "sharp";
 
 function transcriptForRange(segments: Array<{ start: number; end: number; text: string }>, startMs: number, endMs: number) {
@@ -18,8 +18,8 @@ function transcriptForRange(segments: Array<{ start: number; end: number; text: 
 
 const MAX_PACING_IMAGES_PER_REQUEST = 24;
 const MAX_PACING_NARRATION_CHARACTERS = 3600;
-const NARRATION_CHUNK_STORAGE_CONCURRENCY = 3;
-const NARRATION_SOURCE_PREPARATION_VERSION = 4;
+const NARRATION_SOURCE_PREPARATION_VERSION = 5;
+const MP3_PREPARATION_SCAN_BYTES = 256 * 1024;
 export function buildBoundedPacingBatches<T>(items: T[], batchSize = MAX_PACING_IMAGES_PER_REQUEST) { const batches: T[][] = []; for (let index = 0; index < items.length; index += batchSize) batches.push(items.slice(index, index + batchSize)); return batches; }
 export async function mapWithConcurrency<T, Result>(items: T[], concurrency: number, operation: (item: T, index: number) => Promise<Result>) {
   const results = new Array<Result>(items.length);
@@ -36,6 +36,31 @@ export async function mapWithConcurrency<T, Result>(items: T[], concurrency: num
 export function buildPublicManagedStorageUrl(origin: string, storageKey: string) {
   const safePath = storageKey.split("/").map(segment => encodeURIComponent(segment)).join("/");
   return new URL(`/manus-storage/${safePath}`, origin).toString();
+}
+
+function mp3PreparationChunk(active: Mp3PreparationActiveChunk, storageKey: string): PersistedNarrationChunk {
+  return { storageKey, sourceRange: { kind: "mp3", startByte: active.startByte, endByteExclusive: active.endByteExclusive }, startMs: Math.round(active.startMs), endMs: Math.round(active.endMs), contentStartMs: Math.round(active.contentStartMs), contentEndMs: Math.round(active.contentEndMs), byteSize: active.endByteExclusive - active.startByte, status: "pending", attempts: 0 };
+}
+
+function advanceMp3Preparation(state: NarrationTranscriptionState, storageKey: string, preparation: Mp3PreparationState, frames: Mp3PreparationFrame[]) {
+  for (const frame of frames) {
+    const active = preparation.activeChunk;
+    if (!active) {
+      const overlapStart = preparation.recentFrames.find(candidate => candidate.endMs > frame.startMs - 4_000) ?? frame;
+      preparation.activeChunk = { startByte: overlapStart.startByte, endByteExclusive: frame.endByteExclusive, startMs: overlapStart.startMs, endMs: frame.endMs, contentStartByte: frame.startByte, contentStartMs: frame.startMs, contentEndMs: frame.endMs };
+    } else if (frame.endByteExclusive - active.startByte > SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES) {
+      state.chunks.push(mp3PreparationChunk(active, storageKey));
+      const overlapStart = preparation.recentFrames.find(candidate => candidate.endMs > frame.startMs - 4_000) ?? frame;
+      preparation.activeChunk = { startByte: overlapStart.startByte, endByteExclusive: frame.endByteExclusive, startMs: overlapStart.startMs, endMs: frame.endMs, contentStartByte: frame.startByte, contentStartMs: frame.startMs, contentEndMs: frame.endMs };
+    } else {
+      active.endByteExclusive = frame.endByteExclusive;
+      active.endMs = frame.endMs;
+      active.contentEndMs = frame.endMs;
+    }
+    preparation.recentFrames.push(frame);
+  }
+  preparation.recentFrames = preparation.recentFrames.filter(frame => frame.endMs > preparation.nextTimestampMs - 4_000);
+  state.chunkOverlapMs = state.chunks.length || preparation.activeChunk?.startByte !== preparation.activeChunk?.contentStartByte ? 4_000 : 0;
 }
 
 async function boundedVisionImageUrl(storageKey: string) {
@@ -73,6 +98,32 @@ export async function prepareNarrationChunks(projectId: number, narration: typeo
   const hasCompletedChunk = cached?.chunks.some(chunk => chunk.status === "completed" && chunk.transcript);
   if (cached?.sourcePrepared && (cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk)) return cached;
   if (!isMp3Narration(narration) && !wavNarration) throw new Error("This narration must be uploaded as WAV or MP3 for automatic safe transcription chunking.");
+  if (isMp3Narration(narration)) {
+    const state: NarrationTranscriptionState = cached ?? { version: 2, chunkOverlapMs: 0, sourcePrepared: false, sourcePreparationVersion: NARRATION_SOURCE_PREPARATION_VERSION, chunks: [], mp3Preparation: { nextByteOffset: 0, nextTimestampMs: 0, recentFrames: [] } };
+    const preparation = state.mp3Preparation ?? { nextByteOffset: 0, nextTimestampMs: 0, recentFrames: [] };
+    state.mp3Preparation = preparation;
+    state.sourcePrepared = false;
+    state.sourcePreparationVersion = NARRATION_SOURCE_PREPARATION_VERSION;
+    await persistNarrationTranscriptionState(narration, state, db);
+    const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey), { headers: { Range: `bytes=${preparation.nextByteOffset}-${preparation.nextByteOffset + MP3_PREPARATION_SCAN_BYTES - 1}` } });
+    if (!sourceResponse.ok || sourceResponse.status !== 206) throw new Error("Secure storage did not provide the bounded MP3 range required for durable preparation.");
+    const sourceByteLength = Number(sourceResponse.headers.get("content-range")?.match(/\/(\d+)$/)?.[1]);
+    if (!Number.isSafeInteger(sourceByteLength)) throw new Error("Secure storage did not provide the MP3 source length required for durable preparation.");
+    preparation.sourceByteLength = sourceByteLength;
+    const scanned = scanMp3FrameRanges(new Uint8Array(await sourceResponse.arrayBuffer()), preparation.nextByteOffset, preparation.nextTimestampMs);
+    if (!scanned.frames.length && scanned.nextByteOffset <= preparation.nextByteOffset) throw new Error("MP3 preparation could not find a complete frame in the bounded source range.");
+    preparation.nextByteOffset = scanned.nextByteOffset;
+    preparation.nextTimestampMs = scanned.nextTimestampMs;
+    advanceMp3Preparation(state, narration.storageKey, preparation, scanned.frames);
+    if (preparation.nextByteOffset >= sourceByteLength) {
+      if (preparation.activeChunk) state.chunks.push(mp3PreparationChunk(preparation.activeChunk, narration.storageKey));
+      state.sourcePrepared = true;
+      delete state.mp3Preparation;
+      state.chunkOverlapMs = state.chunks.length > 1 ? 4_000 : 0;
+    }
+    await persistNarrationTranscriptionState(narration, state, db);
+    return state;
+  }
   const storedChunks: PersistedNarrationChunk[] = wavNarration
     ? await (async () => {
       const headerResponse = await fetch(await storageGetSignedUrl(narration.storageKey), { headers: { Range: "bytes=0-65535" } });
@@ -83,17 +134,7 @@ export async function prepareNarrationChunks(projectId: number, narration: typeo
       const wavFmtBase64 = Buffer.from(plan.fmtBytes).toString("base64");
       return plan.ranges.map(range => ({ storageKey: narration.storageKey, sourceRange: { startByte: range.startByte, endByteExclusive: range.endByteExclusive, wavFmtBase64 }, startMs: range.startMs, endMs: range.endMs, contentStartMs: range.contentStartMs, contentEndMs: range.contentEndMs, byteSize: range.endByteExclusive - range.startByte + 28 + plan.fmtBytes.length, status: "pending" as const, attempts: 0 }));
     })()
-    : await (async () => {
-      const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey));
-      if (!sourceResponse.ok) throw new Error("The narration could not be retrieved from secure storage for transcription preparation.");
-      const chunks = splitMp3ForTranscription(new Uint8Array(await sourceResponse.arrayBuffer()));
-      return chunks.map(chunk => {
-        const startByte = chunk.sourceStartByte;
-        const endByteExclusive = chunk.sourceEndByteExclusive;
-        if (typeof startByte !== "number" || typeof endByteExclusive !== "number" || !Number.isInteger(startByte) || !Number.isInteger(endByteExclusive) || endByteExclusive <= startByte) throw new Error("MP3 preparation did not preserve a valid source byte range.");
-        return { storageKey: narration.storageKey, sourceRange: { kind: "mp3" as const, startByte, endByteExclusive }, startMs: chunk.startMs, endMs: chunk.endMs, contentStartMs: chunk.contentStartMs, contentEndMs: chunk.contentEndMs, byteSize: chunk.bytes.byteLength, status: "pending" as const, attempts: 0 };
-      });
-    })();
+    : [];
   const state: NarrationTranscriptionState = { version: 2, chunkOverlapMs: storedChunks.length > 1 ? 4_000 : 0, sourcePrepared: true, sourcePreparationVersion: NARRATION_SOURCE_PREPARATION_VERSION, chunks: storedChunks };
   await persistNarrationTranscriptionState(narration, state, db);
   return state;

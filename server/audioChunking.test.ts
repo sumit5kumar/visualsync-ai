@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planPcmWavTranscriptionRanges, SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_DIRECT_WAV_DURATION_MS, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, splitMp3ForTranscription, splitPcmWavForTranscription } from "./audioChunking";
+import { planPcmWavTranscriptionRanges, SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_DIRECT_WAV_DURATION_MS, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, scanMp3FrameRanges, splitMp3ForTranscription, splitPcmWavForTranscription } from "./audioChunking";
 
 function mpeg1Layer3Frame() {
   const length = 417;
@@ -72,6 +72,17 @@ describe("MP3 transcription chunking", () => {
     const chunks = splitMp3ForTranscription(source, 900, 0);
 
     expect(chunks.map(chunk => [chunk.sourceStartByte, chunk.sourceEndByteExclusive])).toEqual([[0, 834], [834, 1_668], [1_668, 2_085]]);
+  });
+
+  it("continues MP3 frame scanning from a persisted byte and timestamp boundary", () => {
+    const source = new Uint8Array(417 * 5);
+    for (let index = 0; index < 5; index++) source.set(mpeg1Layer3Frame(), index * 417);
+    const first = scanMp3FrameRanges(source.slice(0, 900));
+    const second = scanMp3FrameRanges(source.slice(first.nextByteOffset), first.nextByteOffset, first.nextTimestampMs);
+
+    expect(first.frames.map(frame => frame.startByte)).toEqual([0, 417]);
+    expect(second.frames.map(frame => frame.startByte)).toEqual([834, 1_251, 1_668]);
+    expect(second.nextByteOffset).toBe(source.byteLength);
   });
 });
 

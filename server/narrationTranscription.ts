@@ -24,11 +24,16 @@ export type PersistedNarrationChunk = {
   provider?: { maskedKey: string; model: string; durationMs: number; httpStatus?: number; category: string };
 };
 
+export type Mp3PreparationFrame = { startByte: number; endByteExclusive: number; startMs: number; endMs: number };
+export type Mp3PreparationActiveChunk = { startByte: number; endByteExclusive: number; startMs: number; endMs: number; contentStartByte: number; contentStartMs: number; contentEndMs: number };
+export type Mp3PreparationState = { nextByteOffset: number; nextTimestampMs: number; sourceByteLength?: number; recentFrames: Mp3PreparationFrame[]; activeChunk?: Mp3PreparationActiveChunk };
+
 export type NarrationTranscriptionState = {
   version: 2;
   chunkOverlapMs: number;
   sourcePrepared?: boolean;
   sourcePreparationVersion?: number;
+  mp3Preparation?: Mp3PreparationState;
   chunks: PersistedNarrationChunk[];
   lastError?: { category: string; message: string; retryAfterMs?: number; httpStatus?: number; errorCode?: string; remainingRequests?: string; remainingAudio?: string; resetAudio?: string; requestDurationMs: number; occurredAtMs: number };
 };
@@ -93,7 +98,8 @@ export function readNarrationTranscriptionState(value: unknown): NarrationTransc
   const state = candidate as Partial<NarrationTranscriptionState>;
   if (state.version !== 2 || !Array.isArray(state.chunks)) return null;
   const chunks = state.chunks.filter(chunk => chunk && typeof chunk.storageKey === "string" && (!chunk.sourceRange || (Number.isInteger(chunk.sourceRange.startByte) && Number.isInteger(chunk.sourceRange.endByteExclusive) && chunk.sourceRange.endByteExclusive > chunk.sourceRange.startByte && (typeof chunk.sourceRange.wavFmtBase64 === "string" || chunk.sourceRange.kind === "mp3"))) && Number.isFinite(chunk.startMs) && Number.isFinite(chunk.endMs) && Number.isFinite(chunk.contentStartMs) && Number.isFinite(chunk.contentEndMs) && Number.isFinite(chunk.byteSize));
-  return chunks.length === state.chunks.length ? { version: 2, chunkOverlapMs: Number(state.chunkOverlapMs) || 0, sourcePrepared: state.sourcePrepared === true, sourcePreparationVersion: Number.isFinite(state.sourcePreparationVersion) ? Number(state.sourcePreparationVersion) : undefined, chunks, ...(state.lastError ? { lastError: state.lastError } : {}) } : null;
+  const mp3Preparation = state.mp3Preparation && typeof state.mp3Preparation === "object" && Number.isInteger(state.mp3Preparation.nextByteOffset) && Number.isFinite(state.mp3Preparation.nextTimestampMs) && Array.isArray(state.mp3Preparation.recentFrames) ? state.mp3Preparation as Mp3PreparationState : undefined;
+  return chunks.length === state.chunks.length ? { version: 2, chunkOverlapMs: Number(state.chunkOverlapMs) || 0, sourcePrepared: state.sourcePrepared === true, sourcePreparationVersion: Number.isFinite(state.sourcePreparationVersion) ? Number(state.sourcePreparationVersion) : undefined, ...(mp3Preparation ? { mp3Preparation } : {}), chunks, ...(state.lastError ? { lastError: state.lastError } : {}) } : null;
 }
 
 export function narrationTranscriptionSummary(value: unknown) {

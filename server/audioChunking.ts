@@ -30,6 +30,7 @@ export type PcmWavRangePlan = {
 };
 
 type Mp3Frame = { offset: number; length: number; durationMs: number; startMs: number; endMs: number };
+export type Mp3FrameRange = { startByte: number; endByteExclusive: number; startMs: number; endMs: number };
 
 const BITRATES: Record<string, number[]> = {
   "1-1": [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448],
@@ -89,6 +90,25 @@ function scanMp3Frames(source: Uint8Array) {
     offset += frame.length;
   }
   return frames;
+}
+
+export function scanMp3FrameRanges(source: Uint8Array, sourceByteOffset = 0, startMs = 0) {
+  const frames: Mp3FrameRange[] = [];
+  let offset = sourceByteOffset === 0 ? id3v2Length(source) : 0;
+  let cursorMs = startMs;
+  while (offset + 4 <= source.length) {
+    const frame = parseMp3Frame(source, offset);
+    if (!frame) {
+      if (frames.length) break;
+      offset += 1;
+      continue;
+    }
+    const frameStartMs = cursorMs;
+    cursorMs += frame.durationMs;
+    frames.push({ startByte: sourceByteOffset + offset, endByteExclusive: sourceByteOffset + offset + frame.length, startMs: frameStartMs, endMs: cursorMs });
+    offset += frame.length;
+  }
+  return { frames, nextByteOffset: sourceByteOffset + offset, nextTimestampMs: cursorMs };
 }
 
 type PcmWavInfo = {
