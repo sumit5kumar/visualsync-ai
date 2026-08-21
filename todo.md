@@ -278,6 +278,8 @@
 - [x] Replace fragile one-shot media uploads with authenticated direct-to-storage uploads and completion verification for larger files.
 - [ ] Diagnose and recover the ten-minute Timeline job that is stalled on a persisted Groq retry after narration chunk 7 of 10, without discarding completed work or starting an MP4 render.
 - [ ] Resolve the 884-minute 14% transcription stall by identifying the current provider and durable-job blocker, then recover the preserved job without re-uploading or rendering.
+- [ ] Replace the expired end-user Heartbeat callback credential with a project-owned durable callback so the saved Timeline job can continue without user-browser authentication.
+- [ ] Add a server-only signed scheduled-callback fallback for an expired platform cron cookie, scoped to the exact persisted job task UID and without exposing user sessions or provider keys.
 - [x] Preserve and surface safely redacted Groq HTTP 500 response detail so the repeated failing narration range can be diagnosed rather than retried blindly.
 - [x] Keep ordinary repeated Groq 5xx, timeout, and network failures in automatic durable recovery rather than failing a long Timeline job solely because a transient-failure counter reaches its cap.
 - [x] Diagnose and automatically repair the repeated HTTP 500 affecting only narration chunk 7 of the preserved ten-minute job, while retaining all completed chunks and media.
