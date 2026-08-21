@@ -53,13 +53,14 @@ describe("public managed narration URLs", () => {
 
   it("versions unstarted WAV preparation plans while retaining any plan that already has completed transcription progress", () => {
     const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
-    expect(source).toContain("const NARRATION_SOURCE_PREPARATION_VERSION = 5;");
+    expect(source).toContain("const NARRATION_SOURCE_PREPARATION_VERSION = 6;");
     expect(source).toContain("cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk");
   });
 
   it("persists frame-aligned MP3 source ranges immediately instead of uploading every prepared child before progress can be saved", () => {
     const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
     expect(source).toContain("MP3_PREPARATION_SCAN_BYTES = 256 * 1024");
+    expect(source).toContain("MP3_OVERLAP_BYTE_BUDGET = Math.floor(SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES * 0.25)");
     expect(source).toContain("HOSTED_STORAGE_READ_TIMEOUT_MS = 20_000");
     expect(source).toContain("scanMp3FrameRanges");
     expect(source).toContain("fetchNarrationStorageRange(narration.storageKey, `bytes=${preparation.nextByteOffset}-${preparation.nextByteOffset + MP3_PREPARATION_SCAN_BYTES - 1}`)");

@@ -18,8 +18,9 @@ function transcriptForRange(segments: Array<{ start: number; end: number; text: 
 
 const MAX_PACING_IMAGES_PER_REQUEST = 24;
 const MAX_PACING_NARRATION_CHARACTERS = 3600;
-const NARRATION_SOURCE_PREPARATION_VERSION = 5;
+const NARRATION_SOURCE_PREPARATION_VERSION = 6;
 const MP3_PREPARATION_SCAN_BYTES = 256 * 1024;
+const MP3_OVERLAP_BYTE_BUDGET = Math.floor(SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES * 0.25);
 const HOSTED_STORAGE_READ_TIMEOUT_MS = 20_000;
 export function buildBoundedPacingBatches<T>(items: T[], batchSize = MAX_PACING_IMAGES_PER_REQUEST) { const batches: T[][] = []; for (let index = 0; index < items.length; index += batchSize) batches.push(items.slice(index, index + batchSize)); return batches; }
 export async function mapWithConcurrency<T, Result>(items: T[], concurrency: number, operation: (item: T, index: number) => Promise<Result>) {
@@ -43,15 +44,19 @@ function mp3PreparationChunk(active: Mp3PreparationActiveChunk, storageKey: stri
   return { storageKey, sourceRange: { kind: "mp3", startByte: active.startByte, endByteExclusive: active.endByteExclusive }, startMs: Math.round(active.startMs), endMs: Math.round(active.endMs), contentStartMs: Math.round(active.contentStartMs), contentEndMs: Math.round(active.contentEndMs), byteSize: active.endByteExclusive - active.startByte, status: "pending", attempts: 0 };
 }
 
+function selectMp3OverlapStart(frames: Mp3PreparationFrame[], frame: Mp3PreparationFrame) {
+  return frames.find(candidate => frame.endByteExclusive - candidate.startByte <= MP3_OVERLAP_BYTE_BUDGET) ?? frame;
+}
+
 function advanceMp3Preparation(state: NarrationTranscriptionState, storageKey: string, preparation: Mp3PreparationState, frames: Mp3PreparationFrame[]) {
   for (const frame of frames) {
     const active = preparation.activeChunk;
     if (!active) {
-      const overlapStart = preparation.recentFrames.find(candidate => candidate.endMs > frame.startMs - 4_000) ?? frame;
+      const overlapStart = selectMp3OverlapStart(preparation.recentFrames, frame);
       preparation.activeChunk = { startByte: overlapStart.startByte, endByteExclusive: frame.endByteExclusive, startMs: overlapStart.startMs, endMs: frame.endMs, contentStartByte: frame.startByte, contentStartMs: frame.startMs, contentEndMs: frame.endMs };
     } else if (frame.endByteExclusive - active.startByte > SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES) {
       state.chunks.push(mp3PreparationChunk(active, storageKey));
-      const overlapStart = preparation.recentFrames.find(candidate => candidate.endMs > frame.startMs - 4_000) ?? frame;
+      const overlapStart = selectMp3OverlapStart(preparation.recentFrames, frame);
       preparation.activeChunk = { startByte: overlapStart.startByte, endByteExclusive: frame.endByteExclusive, startMs: overlapStart.startMs, endMs: frame.endMs, contentStartByte: frame.startByte, contentStartMs: frame.startMs, contentEndMs: frame.endMs };
     } else {
       active.endByteExclusive = frame.endByteExclusive;
@@ -60,8 +65,9 @@ function advanceMp3Preparation(state: NarrationTranscriptionState, storageKey: s
     }
     preparation.recentFrames.push(frame);
   }
-  preparation.recentFrames = preparation.recentFrames.filter(frame => frame.endMs > preparation.nextTimestampMs - 4_000);
-  state.chunkOverlapMs = state.chunks.length || preparation.activeChunk?.startByte !== preparation.activeChunk?.contentStartByte ? 4_000 : 0;
+  preparation.recentFrames = preparation.recentFrames.filter(frame => frame.endByteExclusive > preparation.nextByteOffset - MP3_OVERLAP_BYTE_BUDGET);
+  const activeOverlapMs = preparation.activeChunk ? preparation.activeChunk.contentStartMs - preparation.activeChunk.startMs : 0;
+  state.chunkOverlapMs = Math.max(0, ...state.chunks.map(chunk => chunk.contentStartMs - chunk.startMs), activeOverlapMs);
 }
 
 async function boundedVisionImageUrl(storageKey: string) {
@@ -116,7 +122,8 @@ export async function prepareNarrationChunks(projectId: number, narration: typeo
   if (cached?.sourcePrepared && (cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk)) return cached;
   if (!isMp3Narration(narration) && !wavNarration) throw new Error("This narration must be uploaded as WAV or MP3 for automatic safe transcription chunking.");
   if (isMp3Narration(narration)) {
-    const state: NarrationTranscriptionState = cached ?? { version: 2, chunkOverlapMs: 0, sourcePrepared: false, sourcePreparationVersion: NARRATION_SOURCE_PREPARATION_VERSION, chunks: [], mp3Preparation: { nextByteOffset: 0, nextTimestampMs: 0, recentFrames: [] } };
+    const resumableCached = cached && (cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk) ? cached : null;
+    const state: NarrationTranscriptionState = resumableCached ?? { version: 2, chunkOverlapMs: 0, sourcePrepared: false, sourcePreparationVersion: NARRATION_SOURCE_PREPARATION_VERSION, chunks: [], mp3Preparation: { nextByteOffset: 0, nextTimestampMs: 0, recentFrames: [] } };
     const preparation = state.mp3Preparation ?? { nextByteOffset: 0, nextTimestampMs: 0, recentFrames: [] };
     state.mp3Preparation = preparation;
     state.sourcePrepared = false;
