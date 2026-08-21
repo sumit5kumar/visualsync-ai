@@ -160,7 +160,7 @@ describe("middle-origin motion rendering", () => {
     expect(processor).toContain("scanMp3FrameRanges");
     expect(processor).toContain("MP3_PREPARATION_SCAN_BYTES");
     expect(processor).toContain("loadNarrationChunkBytes(chunk)");
-    expect(processor).toContain("Range: `bytes=${chunk.sourceRange.startByte}-${chunk.sourceRange.endByteExclusive - 1}`");
+    expect(processor).toContain("fetchNarrationStorageRange(chunk.storageKey, chunk.sourceRange ? `bytes=${chunk.sourceRange.startByte}-${chunk.sourceRange.endByteExclusive - 1}` : undefined)");
     expect(processor).toContain("mp3ToMonoWav(bytes)");
     expect(processor).toContain("transcribeAudio({ bytes: wavBytes, filename: `narration-part-${index + 1}.wav`");
     expect(providers).toContain("groqActivate.mutate");

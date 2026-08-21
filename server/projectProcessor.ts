@@ -20,6 +20,7 @@ const MAX_PACING_IMAGES_PER_REQUEST = 24;
 const MAX_PACING_NARRATION_CHARACTERS = 3600;
 const NARRATION_SOURCE_PREPARATION_VERSION = 5;
 const MP3_PREPARATION_SCAN_BYTES = 256 * 1024;
+const HOSTED_STORAGE_READ_TIMEOUT_MS = 20_000;
 export function buildBoundedPacingBatches<T>(items: T[], batchSize = MAX_PACING_IMAGES_PER_REQUEST) { const batches: T[][] = []; for (let index = 0; index < items.length; index += batchSize) batches.push(items.slice(index, index + batchSize)); return batches; }
 export async function mapWithConcurrency<T, Result>(items: T[], concurrency: number, operation: (item: T, index: number) => Promise<Result>) {
   const results = new Array<Result>(items.length);
@@ -72,8 +73,24 @@ async function boundedVisionImageUrl(storageKey: string) {
   return `data:image/jpeg;base64,${preview.toString("base64")}`;
 }
 
+async function fetchNarrationStorageRange(storageKey: string, range?: string) {
+  const controller = new AbortController();
+  const startedAtMs = Date.now();
+  const timeout = setTimeout(() => controller.abort(), HOSTED_STORAGE_READ_TIMEOUT_MS);
+  try {
+    const url = await storageGetSignedUrl(storageKey, controller.signal);
+    return await fetch(url, { ...(range ? { headers: { Range: range } } : {}), signal: controller.signal });
+  } catch (error) {
+    const durationMs = Date.now() - startedAtMs;
+    if (controller.signal.aborted) throw new GroqRequestError("Secure storage timed out while preparing the saved narration. The hosted Timeline job will retry automatically.", "unavailable", { durationMs, category: "timeout" });
+    throw new GroqRequestError("Secure storage was temporarily unavailable while preparing the saved narration. The hosted Timeline job will retry automatically.", "unavailable", { durationMs, category: "network_failure" });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function loadNarrationChunkBytes(chunk: PersistedNarrationChunk) {
-  const response = await fetch(await storageGetSignedUrl(chunk.storageKey), chunk.sourceRange ? { headers: { Range: `bytes=${chunk.sourceRange.startByte}-${chunk.sourceRange.endByteExclusive - 1}` } } : undefined);
+  const response = await fetchNarrationStorageRange(chunk.storageKey, chunk.sourceRange ? `bytes=${chunk.sourceRange.startByte}-${chunk.sourceRange.endByteExclusive - 1}` : undefined);
   if (!response.ok) throw new Error("Prepared narration chunk could not be retrieved from secure storage.");
   if (chunk.sourceRange && response.status !== 206) throw new Error("Secure storage did not honor the bounded WAV byte-range request.");
   const bytes = new Uint8Array(await response.arrayBuffer());
@@ -105,7 +122,7 @@ export async function prepareNarrationChunks(projectId: number, narration: typeo
     state.sourcePrepared = false;
     state.sourcePreparationVersion = NARRATION_SOURCE_PREPARATION_VERSION;
     await persistNarrationTranscriptionState(narration, state, db);
-    const sourceResponse = await fetch(await storageGetSignedUrl(narration.storageKey), { headers: { Range: `bytes=${preparation.nextByteOffset}-${preparation.nextByteOffset + MP3_PREPARATION_SCAN_BYTES - 1}` } });
+    const sourceResponse = await fetchNarrationStorageRange(narration.storageKey, `bytes=${preparation.nextByteOffset}-${preparation.nextByteOffset + MP3_PREPARATION_SCAN_BYTES - 1}`);
     if (!sourceResponse.ok || sourceResponse.status !== 206) throw new Error("Secure storage did not provide the bounded MP3 range required for durable preparation.");
     const sourceByteLength = Number(sourceResponse.headers.get("content-range")?.match(/\/(\d+)$/)?.[1]);
     if (!Number.isSafeInteger(sourceByteLength)) throw new Error("Secure storage did not provide the MP3 source length required for durable preparation.");
@@ -126,7 +143,7 @@ export async function prepareNarrationChunks(projectId: number, narration: typeo
   }
   const storedChunks: PersistedNarrationChunk[] = wavNarration
     ? await (async () => {
-      const headerResponse = await fetch(await storageGetSignedUrl(narration.storageKey), { headers: { Range: "bytes=0-65535" } });
+      const headerResponse = await fetchNarrationStorageRange(narration.storageKey, "bytes=0-65535");
       if (!headerResponse.ok || headerResponse.status !== 206) throw new Error("Secure storage did not provide the bounded WAV header required for durable preparation.");
       const sourceByteLength = Number(headerResponse.headers.get("content-range")?.match(/\/(\d+)$/)?.[1]);
       if (!Number.isSafeInteger(sourceByteLength)) throw new Error("Secure storage did not provide the WAV source length required for durable preparation.");

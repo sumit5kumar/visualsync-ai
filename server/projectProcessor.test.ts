@@ -47,7 +47,7 @@ describe("public managed narration URLs", () => {
     const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
     expect(source).toContain("cached?.sourcePrepared && (cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk)");
     expect(source).toContain("const plan = planPcmWavTranscriptionRanges(new Uint8Array(await headerResponse.arrayBuffer()), sourceByteLength);");
-    expect(source).toContain("headers: { Range: \"bytes=0-65535\" }");
+    expect(source).toContain('fetchNarrationStorageRange(narration.storageKey, "bytes=0-65535")');
     expect(source).not.toContain("if (byteSize <= directLimit)");
   });
 
@@ -60,8 +60,9 @@ describe("public managed narration URLs", () => {
   it("persists frame-aligned MP3 source ranges immediately instead of uploading every prepared child before progress can be saved", () => {
     const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
     expect(source).toContain("MP3_PREPARATION_SCAN_BYTES = 256 * 1024");
+    expect(source).toContain("HOSTED_STORAGE_READ_TIMEOUT_MS = 20_000");
     expect(source).toContain("scanMp3FrameRanges");
-    expect(source).toContain("Range: `bytes=${preparation.nextByteOffset}-${preparation.nextByteOffset + MP3_PREPARATION_SCAN_BYTES - 1}`");
+    expect(source).toContain("fetchNarrationStorageRange(narration.storageKey, `bytes=${preparation.nextByteOffset}-${preparation.nextByteOffset + MP3_PREPARATION_SCAN_BYTES - 1}`)");
     expect(source).not.toContain("transcription-chunks/${narration.id}-part-");
   });
 });
