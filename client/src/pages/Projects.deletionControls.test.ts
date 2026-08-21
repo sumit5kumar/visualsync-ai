@@ -11,4 +11,11 @@ describe("project deletion controls", () => {
     expect(source).toContain("Deleting all…");
     expect(source).toContain("Deleting…");
   });
+
+  it("exposes a signed-in server-analysis resume control for a waiting hosted job", () => {
+    const source = readFileSync(resolve(process.cwd(), "client/src/pages/Projects.tsx"), "utf8");
+    expect(source).toContain('chunks?.state === "waiting"');
+    expect(source).toContain("Resume server analysis");
+    expect(source).toContain("onResume={() => retryAnalysis(project)}");
+  });
 });
