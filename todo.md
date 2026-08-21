@@ -292,3 +292,5 @@
 - [x] Restore the overdue hosted Timeline callback’s automatic dispatch without resetting the preserved ten-minute narration state or requiring further user clicks.
 - [x] Improve durable Timeline callback cadence to the platform-supported one-minute minimum so retries can resume without repeated manual wakes while preserving rate-limit handling.
 - [x] Add a clearly confirmed Delete all projects action and responsive progress feedback for individual project deletion.
+- [ ] Observe and diagnose the in-progress 16 min test upload of the 38-minute narration and six images; apply only a confirmed upload recovery if necessary.
+- [x] Add a bounded direct-storage upload timeout that falls back to the existing authenticated application upload instead of leaving a 38 MB narration upload indefinitely pending after a successful ticket request.

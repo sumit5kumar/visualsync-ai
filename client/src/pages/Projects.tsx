@@ -19,6 +19,7 @@ const formatElapsed = (milliseconds: number) => { const seconds = Math.max(0, Ma
 const fileOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const MEDIA_UPLOAD_MAX_ATTEMPTS = 3;
 const MEDIA_UPLOAD_RETRY_DELAYS_MS = [1_000, 3_000];
+const DIRECT_UPLOAD_TIMEOUT_MS = 120_000;
 
 function emptySelection(): Selection { return { narration: null, images: [], sourceFolderName: "", outputFolderName: "", nativeSourceDirectory: "", nativeOutputDirectory: "" }; }
 
@@ -61,7 +62,17 @@ async function uploadMediaFile(projectId: number, assetType: "narration" | "imag
     const ticketResponse = await fetch("/api/project-media/direct-ticket", { method: "POST", credentials: "include", signal, headers: { "content-type": "application/json" }, body: JSON.stringify(metadata) });
     const ticketPayload = await ticketResponse.json().catch(() => null) as { uploadUrl?: string; ticket?: string } | null;
     if (!ticketResponse.ok || !ticketPayload?.uploadUrl || !ticketPayload.ticket) throw new Error("Direct upload preparation was unavailable.");
-    const uploadResponse = await fetch(ticketPayload.uploadUrl, { method: "PUT", signal, headers: { "content-type": metadata.mimeType }, body: file });
+    const directUpload = new AbortController();
+    const cancelDirectUpload = () => directUpload.abort(signal.reason);
+    signal.addEventListener("abort", cancelDirectUpload, { once: true });
+    const directUploadTimer = window.setTimeout(() => directUpload.abort(new DOMException("Direct storage upload timed out.", "TimeoutError")), DIRECT_UPLOAD_TIMEOUT_MS);
+    let uploadResponse: Response;
+    try {
+      uploadResponse = await fetch(ticketPayload.uploadUrl, { method: "PUT", signal: directUpload.signal, headers: { "content-type": metadata.mimeType }, body: file });
+    } finally {
+      window.clearTimeout(directUploadTimer);
+      signal.removeEventListener("abort", cancelDirectUpload);
+    }
     if (!uploadResponse.ok) throw new Error("Direct storage upload was unavailable.");
     const completeResponse = await fetch("/api/project-media/direct-complete", { method: "POST", credentials: "include", signal, headers: { "content-type": "application/json" }, body: JSON.stringify({ ticket: ticketPayload.ticket }) });
     if (completeResponse.ok) return;

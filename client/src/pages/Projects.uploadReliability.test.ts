@@ -12,6 +12,9 @@ describe("project media upload transport recovery", () => {
     expect(source).toContain("Keep this page open and use Source media to retry this saved project.");
     expect(source).toContain("/api/project-media/direct-ticket");
     expect(source).toContain("/api/project-media/direct-complete");
+    expect(source).toContain("const DIRECT_UPLOAD_TIMEOUT_MS = 120_000;");
+    expect(source).toContain("Direct storage upload timed out.");
+    expect(source).toContain("directUpload.abort");
     expect(source).toContain("return uploadMediaViaApplication");
   });
 });
