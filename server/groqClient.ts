@@ -17,6 +17,11 @@ function safeGroqMessage(message: string) {
   return message.replace(/gsk_[A-Za-z0-9_-]+/g, "[redacted key]").replace(/https?:\/\/\S+/gi, "[secure URL]").trim();
 }
 
+function safeProviderDiagnostic(message: string) {
+  const cleaned = safeGroqMessage(message).replace(/[\r\n\t]+/g, " ").trim();
+  return cleaned.slice(0, 240);
+}
+
 function retryAfterMs(value: string | null) {
   if (!value) return undefined;
   const seconds = Number(value);
@@ -52,7 +57,10 @@ function classifyGroqError(response: Response, message: string, durationMs: numb
     return new GroqRequestError(category === "audio_quota_exhausted" ? "Groq audio quota is currently exhausted." : "Groq rate limit reached.", "quota_limited", responseMetadata(response, durationMs, category));
   }
   if (statusCode === 408 || statusCode === 504) return new GroqRequestError("Groq transcription timed out.", "unavailable", responseMetadata(response, durationMs, "timeout"));
-  if (statusCode >= 500) return new GroqRequestError("Groq reported a temporary server error.", "unavailable", responseMetadata(response, durationMs, "server_error"));
+  if (statusCode >= 500) {
+    const detail = safeProviderDiagnostic(message);
+    return new GroqRequestError(`Groq reported a temporary server error${detail ? `: ${detail}` : "."}`, "unavailable", responseMetadata(response, durationMs, "server_error"));
+  }
   if (statusCode >= 400 && statusCode < 500) return new GroqRequestError(`Groq rejected this request${message ? `: ${safeGroqMessage(message)}` : "."}`, "prompt_error", responseMetadata(response, durationMs, "client_request"));
   return new GroqRequestError(safeGroqMessage(message) || "Groq is currently unavailable.", "unavailable", responseMetadata(response, durationMs, "unknown"));
 }
