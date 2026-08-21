@@ -60,7 +60,7 @@ export async function listUserProjects(userId: number) {
     const sourcesAttached = Boolean(project.narrationStorageKey && project.audioDurationMs && narrationAsset && imageAssets.length > 0);
     const semanticAnalysisComplete = sourcesAttached && narrationAnalyzed && analyzedImageCount === imageAssets.length;
     const timelineGenerationJob = generationJobs.find(job => job.projectId === project.id) ?? null;
-    const processingProgress = buildProjectProcessingProgress({ status: project.status, processingStage: project.processingStage, processingStartedAt: project.processingStartedAt, processingStageStartedAt: project.processingStageStartedAt, totalImageCount: imageAssets.length, completedImageCount: analyzedImageCount, narrationAnalyzed, audioDurationMs: project.audioDurationMs, narrationChunks, backgroundJob: timelineGenerationJob ? { status: timelineGenerationJob.status, retryAt: timelineGenerationJob.retryAt, lastError: timelineGenerationJob.lastError as { message?: string } | null } : null });
+    const processingProgress = buildProjectProcessingProgress({ status: project.status, processingStage: project.processingStage, processingStartedAt: project.processingStartedAt, processingStageStartedAt: project.processingStageStartedAt, totalImageCount: imageAssets.length, completedImageCount: analyzedImageCount, narrationAnalyzed, audioDurationMs: project.audioDurationMs, narrationChunks, backgroundJob: timelineGenerationJob ? { status: timelineGenerationJob.status, retryAt: timelineGenerationJob.retryAt, leaseExpiresAt: timelineGenerationJob.leaseExpiresAt, lastError: timelineGenerationJob.lastError as { message?: string } | null } : null });
     return {
       ...project,
       sourceImageCount: imageAssets.length,

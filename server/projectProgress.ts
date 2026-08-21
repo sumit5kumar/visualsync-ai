@@ -10,7 +10,7 @@ type ProgressInput = {
   narrationAnalyzed: boolean;
   audioDurationMs: number | null;
   narrationChunks?: { totalChunks: number; completedChunks: number; activeChunkIndex: number; chunkOverlapMs: number; state: "processing" | "waiting" | "completed"; lastError: { category: string; message: string; retryAfterMs?: number; httpStatus?: number; requestDurationMs: number } | null } | null;
-  backgroundJob?: { status: "queued" | "processing" | "waiting_for_retry" | "completed" | "failed"; retryAt: Date | null; lastError: { message?: string } | null } | null;
+  backgroundJob?: { status: "queued" | "processing" | "waiting_for_retry" | "completed" | "failed"; retryAt: Date | null; leaseExpiresAt?: Date | null; lastError: { message?: string } | null } | null;
   now?: Date;
 };
 
@@ -90,6 +90,13 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
     message = `${input.backgroundJob.lastError?.message ?? "Groq temporarily refused the current work unit."}${retryAtMs ? ` The hosted job will retry automatically in about ${Math.max(0, Math.ceil((retryAtMs - now.getTime()) / 1000))} seconds.` : " The hosted job will retry automatically."}`;
   }
 
+  const resumeRecommended = input.backgroundJob?.status === "processing"
+    && Boolean(input.backgroundJob.leaseExpiresAt && input.backgroundJob.leaseExpiresAt.getTime() <= now.getTime());
+  if (resumeRecommended) {
+    label = "Timeline worker needs a safe resume";
+    message = "The previous worker lease expired before it could continue. Resume server analysis uses your saved media and progress; it does not upload again.";
+  }
+
   return {
     stage,
     label,
@@ -104,5 +111,6 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
     estimatedAtMs: now.getTime(),
     initialEstimatedTotalMs,
     estimateSource,
+    resumeRecommended,
   };
 }
