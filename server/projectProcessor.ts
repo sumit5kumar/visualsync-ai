@@ -48,6 +48,19 @@ function selectMp3OverlapStart(frames: Mp3PreparationFrame[], frame: Mp3Preparat
   return frames.find(candidate => frame.endByteExclusive - candidate.startByte <= MP3_OVERLAP_BYTE_BUDGET) ?? frame;
 }
 
+export function recoverLegacyInflatedMp3Preparation(cached: NarrationTranscriptionState | null) {
+  if (!cached || cached.sourcePrepared || (cached.sourcePreparationVersion ?? 0) >= NARRATION_SOURCE_PREPARATION_VERSION) return cached;
+  const completed = cached.chunks.filter(chunk => chunk.status === "completed" && chunk.transcript);
+  const first = completed[0];
+  const firstStartByte = first?.sourceRange?.kind === "mp3" ? first.sourceRange.startByte : null;
+  const repeatedStartByte = firstStartByte !== null && completed.slice(1).every(chunk => chunk.sourceRange?.kind === "mp3" && chunk.sourceRange.startByte === firstStartByte);
+  if (completed.length < 2 || !repeatedStartByte) return cached;
+  const retained = [first];
+  const recoveredAtMs = first.endMs;
+  const recoveredAtByte = first.sourceRange!.endByteExclusive;
+  return { version: 2 as const, chunkOverlapMs: 0, sourcePrepared: false, sourcePreparationVersion: NARRATION_SOURCE_PREPARATION_VERSION, chunks: retained, mp3Preparation: { nextByteOffset: recoveredAtByte, nextTimestampMs: recoveredAtMs, recentFrames: [] } } satisfies NarrationTranscriptionState;
+}
+
 function advanceMp3Preparation(state: NarrationTranscriptionState, storageKey: string, preparation: Mp3PreparationState, frames: Mp3PreparationFrame[]) {
   for (const frame of frames) {
     const active = preparation.activeChunk;
@@ -122,7 +135,8 @@ export async function prepareNarrationChunks(projectId: number, narration: typeo
   if (cached?.sourcePrepared && (cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk)) return cached;
   if (!isMp3Narration(narration) && !wavNarration) throw new Error("This narration must be uploaded as WAV or MP3 for automatic safe transcription chunking.");
   if (isMp3Narration(narration)) {
-    const resumableCached = cached && (cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk) ? cached : null;
+    const repairedCached = recoverLegacyInflatedMp3Preparation(cached);
+    const resumableCached = repairedCached && (repairedCached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || repairedCached.chunks.some(chunk => chunk.status === "completed" && chunk.transcript)) ? repairedCached : null;
     const state: NarrationTranscriptionState = resumableCached ?? { version: 2, chunkOverlapMs: 0, sourcePrepared: false, sourcePreparationVersion: NARRATION_SOURCE_PREPARATION_VERSION, chunks: [], mp3Preparation: { nextByteOffset: 0, nextTimestampMs: 0, recentFrames: [] } };
     const preparation = state.mp3Preparation ?? { nextByteOffset: 0, nextTimestampMs: 0, recentFrames: [] };
     state.mp3Preparation = preparation;

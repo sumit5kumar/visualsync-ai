@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildPublicManagedStorageUrl, isWavNarration, mapWithConcurrency, normalizeTimelineGenerationWorkState } from "./projectProcessor";
+import { buildPublicManagedStorageUrl, isWavNarration, mapWithConcurrency, normalizeTimelineGenerationWorkState, recoverLegacyInflatedMp3Preparation } from "./projectProcessor";
 
 describe("public managed narration URLs", () => {
   it("keeps the managed storage path public and safely encodes every storage-key segment", () => {
@@ -65,5 +65,12 @@ describe("public managed narration URLs", () => {
     expect(source).toContain("scanMp3FrameRanges");
     expect(source).toContain("fetchNarrationStorageRange(narration.storageKey, `bytes=${preparation.nextByteOffset}-${preparation.nextByteOffset + MP3_PREPARATION_SCAN_BYTES - 1}`)");
     expect(source).not.toContain("transcription-chunks/${narration.id}-part-");
+  });
+
+  it("retains only the genuine first completed MP3 coverage when an old high-bitrate plan repeated the same source start", () => {
+    const completed = (endMs: number, endByteExclusive: number) => ({ storageKey: "narration.mp3", sourceRange: { kind: "mp3" as const, startByte: 223, endByteExclusive }, startMs: 0, endMs, contentStartMs: 0, contentEndMs: endMs, byteSize: endByteExclusive - 223, status: "completed" as const, attempts: 1, transcript: { text: "saved", segments: [] } });
+    const repaired = recoverLegacyInflatedMp3Preparation({ version: 2, chunkOverlapMs: 4_000, sourcePrepared: false, sourcePreparationVersion: 5, chunks: [completed(3264, 130_783), completed(3288, 131_743), { storageKey: "narration.mp3", sourceRange: { kind: "mp3", startByte: 223, endByteExclusive: 132_703 }, startMs: 0, endMs: 3312, contentStartMs: 0, contentEndMs: 3312, byteSize: 132_480, status: "pending", attempts: 0 }] });
+
+    expect(repaired).toMatchObject({ sourcePreparationVersion: 6, sourcePrepared: false, chunks: [completed(3264, 130_783)], mp3Preparation: { nextByteOffset: 130_783, nextTimestampMs: 3264 } });
   });
 });
