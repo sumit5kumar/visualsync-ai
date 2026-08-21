@@ -3,6 +3,7 @@ const RETRYABLE_GATEWAY_STATUSES = new Set([502, 503, 504]);
 const QUERY_TIMEOUT_MS = 20_000;
 const GATEWAY_RETRY_DELAY_MS = 300;
 const MAX_QUERY_GATEWAY_ATTEMPTS = 3;
+const SAFE_MUTATION_GATEWAY_MESSAGE = "The API gateway was temporarily unavailable. This action was not automatically retried to avoid duplicate processing. Refresh to check the saved Timeline state, then use Resume server analysis only if it is still available.";
 
 function requestMethod(input: RequestInfo | URL, init?: RequestInit) {
   if (init?.method) return init.method.toUpperCase();
@@ -46,7 +47,9 @@ export async function fetchTrpcResponse(input: RequestInfo | URL, init?: Request
         if (isGatewayHtml) {
           const proxyCode = response.headers.get("x-e2b-error-code");
           if (proxyCode === SESSION_PROXY_FAILURE) throw new Error("The application preview connection was interrupted. The request was not processed; please retry now.");
-          if (isRetryableGatewayFailure) throw new Error("The API gateway was temporarily unavailable. The Preview request was retried automatically; please refresh if it is still unavailable.");
+          if (isRetryableGatewayFailure) throw new Error(canRetryGatewayFailure
+            ? "The API gateway was temporarily unavailable. The Preview request was retried automatically; please refresh if it is still unavailable."
+            : SAFE_MUTATION_GATEWAY_MESSAGE);
           throw new Error("The API gateway returned an unexpected non-JSON response. The request was not processed; please retry.");
         }
         return response;

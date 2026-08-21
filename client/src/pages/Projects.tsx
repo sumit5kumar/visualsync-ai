@@ -100,6 +100,22 @@ export default function Projects() {
   const processTimeline = trpc.project.processGlobalTimeline.useMutation();
   const removeProject = trpc.project.remove.useMutation({ onSuccess: async () => { await Promise.all([utils.project.list.invalidate(), utils.timeline.review.invalidate(), utils.timeline.candidates.invalidate(), utils.worker.renderHandoff.invalidate(), utils.worker.renderedVideo.invalidate()]); toast.success("Project removed from the workspace."); }, onError: error => toast.error(error.message) });
   const removeAllProjects = trpc.project.removeAll.useMutation({ onSuccess: async result => { await Promise.all([utils.project.list.invalidate(), utils.timeline.review.invalidate(), utils.timeline.candidates.invalidate(), utils.worker.renderHandoff.invalidate(), utils.worker.renderedVideo.invalidate()]); toast.success(`${result.deletedCount} project${result.deletedCount === 1 ? "" : "s"} removed from the workspace.`); }, onError: error => toast.error(error.message) });
+  const queueTimelineStart = async (projectId: number, previousStartedAtMs = 0) => {
+    try {
+      await processTimeline.mutateAsync({ projectId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (!message.includes("not automatically retried to avoid duplicate processing")) throw error;
+      const refreshed = await projects.refetch();
+      const savedProject = refreshed.data?.find(project => project.id === projectId);
+      const savedStartedAtMs = savedProject?.processingProgress?.startedAtMs ?? 0;
+      if (savedStartedAtMs <= previousStartedAtMs) throw error;
+      await Promise.all([utils.project.list.invalidate(), utils.timeline.review.invalidate({ projectId })]);
+      return { confirmedAfterGatewayResponse: true } as const;
+    }
+    await Promise.all([utils.project.list.invalidate(), utils.timeline.review.invalidate({ projectId })]);
+    return { confirmedAfterGatewayResponse: false } as const;
+  };
 
   const ingestAndProcess = async (projectId: number, selection: Selection) => {
     if (!selection.narration || !selection.images.length) throw new Error("Choose one narration file and at least one image before continuing.");
@@ -124,9 +140,8 @@ export default function Projects() {
       assertNotAborted();
       await updateSetup.mutateAsync({ projectId, narrationOriginalName: selection.narration.name, imageSourcePath: selection.nativeSourceDirectory.trim() || (selection.sourceFolderName ? `Native source folder selected: ${selection.sourceFolderName}` : `Browser-selected image folder (${orderedImages.length} files)`), outputPath: selection.nativeOutputDirectory.trim() || (selection.outputFolderName ? `Native output folder selected: ${selection.outputFolderName}` : "Choose the output folder in the render command") });
       setBusyLabel("Groq is analyzing narration and building the readable visual flow…");
-      await processTimeline.mutateAsync({ projectId });
-      await Promise.all([utils.project.list.invalidate(), utils.timeline.review.invalidate({ projectId })]);
-      toast.success("Hosted Timeline Generation is queued. You may safely close the browser; progress is saved server-side.");
+      const queued = await queueTimelineStart(projectId);
+      toast.success(queued.confirmedAfterGatewayResponse ? "The gateway interrupted its reply, but Timeline Generation was confirmed from saved server state." : "Hosted Timeline Generation is queued. You may safely close the browser; progress is saved server-side.");
     } finally {
       if (activeImportAbort.current === importAbort) activeImportAbort.current = null;
     }
@@ -157,9 +172,8 @@ export default function Projects() {
   const retryAnalysis = async (project: ProjectSummary) => {
     try {
       setBusyLabel("Restarting Groq analysis with your existing uploaded media…");
-      await processTimeline.mutateAsync({ projectId: project.id });
-      await Promise.all([utils.project.list.invalidate(), utils.timeline.review.invalidate({ projectId: project.id })]);
-      toast.success("Hosted Timeline Generation is queued from the saved progress state.");
+      const queued = await queueTimelineStart(project.id, project.processingProgress?.startedAtMs ?? 0);
+      toast.success(queued.confirmedAfterGatewayResponse ? "The gateway interrupted its reply, but the saved Timeline job was confirmed as resumed." : "Hosted Timeline Generation is queued from the saved progress state.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Project analysis could not be restarted.");
     } finally {

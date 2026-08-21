@@ -24,11 +24,11 @@ describe("fetchTrpcResponse", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("never replays a mutation after a generic gateway HTML response", async () => {
+  it("never replays a mutation after a generic gateway HTML response and gives safe Timeline recovery guidance", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("<!doctype html><html></html>", { status: 504, headers: { "content-type": "text/html" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchTrpcResponse("/api/trpc/project.updateZoom", { method: "POST" })).rejects.toThrow("temporarily unavailable");
+    await expect(fetchTrpcResponse("/api/trpc/project.processGlobalTimeline", { method: "POST" })).rejects.toThrow("not automatically retried to avoid duplicate processing");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

@@ -294,5 +294,6 @@
 - [x] Add a clearly confirmed Delete all projects action and responsive progress feedback for individual project deletion.
 - [ ] Observe and diagnose the in-progress 16 min test upload of the 38-minute narration and six images; apply only a confirmed upload recovery if necessary.
 - [x] Add a bounded direct-storage upload timeout that falls back to the existing authenticated application upload instead of leaving a 38 MB narration upload indefinitely pending after a successful ticket request.
-- [ ] Diagnose and repair the Projects-page API gateway temporary-unavailability mutation error without disrupting the in-progress 16 min test upload.
-- [ ] Expose Resume server analysis when a Timeline job remains queued behind an expired processing lease, so the signed-in app can safely resume it without re-uploading media.
+- [x] Diagnose and repair the Projects-page API gateway temporary-unavailability mutation error without disrupting the in-progress 16 min test upload.
+- [x] Expose Resume server analysis when a Timeline job remains queued behind an expired processing lease, so the signed-in app can safely resume it without re-uploading media.
+- [x] Diagnose and repair the Projects-page temporary API gateway mutation failure reported at 19:30 IST, while preserving the 16 min test's uploaded media and durable Timeline state.
