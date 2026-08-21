@@ -46,6 +46,13 @@ describe("project processing progress", () => {
     expect(progress?.message).toContain("does not upload again");
   });
 
+  it("offers a safe signed-in resume when a queued hosted job passes its start grace period without a worker lease", () => {
+    const progress = buildProjectProcessingProgress({ status: "analyzing", processingStage: "transcribing", processingStartedAt: new Date("2026-08-21T19:30:00.000Z"), processingStageStartedAt: new Date("2026-08-21T19:30:00.000Z"), totalImageCount: 6, completedImageCount: 0, narrationAnalyzed: false, audioDurationMs: 1_000_512, backgroundJob: { status: "queued", retryAt: null, leaseExpiresAt: null, lastError: null }, now: new Date("2026-08-21T19:31:20.000Z") });
+
+    expect(progress).toMatchObject({ label: "Timeline worker needs a safe resume", resumeRecommended: true });
+    expect(progress?.message).toContain("remained queued beyond its normal start window");
+  });
+
   it("does not invent live progress for projects that are not currently analyzing", () => {
     expect(buildProjectProcessingProgress({ status: "timeline_ready", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null, totalImageCount: 300, completedImageCount: 300, narrationAnalyzed: true, audioDurationMs: 30 * 60 * 1000 })).toBeNull();
   });

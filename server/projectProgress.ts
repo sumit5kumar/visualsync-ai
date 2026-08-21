@@ -14,6 +14,8 @@ type ProgressInput = {
   now?: Date;
 };
 
+const QUEUED_TIMELINE_START_GRACE_MS = 75_000;
+
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
 }
@@ -90,11 +92,15 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
     message = `${input.backgroundJob.lastError?.message ?? "Groq temporarily refused the current work unit."}${retryAtMs ? ` The hosted job will retry automatically in about ${Math.max(0, Math.ceil((retryAtMs - now.getTime()) / 1000))} seconds.` : " The hosted job will retry automatically."}`;
   }
 
-  const resumeRecommended = input.backgroundJob?.status === "processing"
+  const workerLeaseExpired = input.backgroundJob?.status === "processing"
     && Boolean(input.backgroundJob.leaseExpiresAt && input.backgroundJob.leaseExpiresAt.getTime() <= now.getTime());
+  const queuedStartGraceExpired = input.backgroundJob?.status === "queued" && stageElapsedMs >= QUEUED_TIMELINE_START_GRACE_MS;
+  const resumeRecommended = workerLeaseExpired || queuedStartGraceExpired;
   if (resumeRecommended) {
     label = "Timeline worker needs a safe resume";
-    message = "The previous worker lease expired before it could continue. Resume server analysis uses your saved media and progress; it does not upload again.";
+    message = workerLeaseExpired
+      ? "The previous worker lease expired before it could continue. Resume server analysis uses your saved media and progress; it does not upload again."
+      : "The hosted job remained queued beyond its normal start window. Resume server analysis uses your saved media and progress; it does not upload again.";
   }
 
   return {
