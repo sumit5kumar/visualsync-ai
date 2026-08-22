@@ -19,7 +19,8 @@ const formatElapsed = (milliseconds: number) => { const seconds = Math.max(0, Ma
 const fileOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const MEDIA_UPLOAD_MAX_ATTEMPTS = 3;
 const MEDIA_UPLOAD_RETRY_DELAYS_MS = [1_000, 3_000];
-const DIRECT_UPLOAD_TIMEOUT_MS = 120_000;
+const DIRECT_UPLOAD_STALL_TIMEOUT_MS = 45_000;
+const DIRECT_UPLOAD_HARD_TIMEOUT_MS = 15 * 60_000;
 
 function emptySelection(): Selection { return { narration: null, images: [], sourceFolderName: "", outputFolderName: "", nativeSourceDirectory: "", nativeOutputDirectory: "" }; }
 
@@ -56,27 +57,58 @@ async function uploadMediaViaApplication(projectId: number, assetType: "narratio
   throw new Error(`The connection interrupted the upload for ${file.name} after ${MEDIA_UPLOAD_MAX_ATTEMPTS} attempts. Keep this page open and use Source media to retry this saved project.`);
 }
 
-async function uploadMediaFile(projectId: number, assetType: "narration" | "image", file: File, signal: AbortSignal, sequenceNumber?: number, durationMs?: number) {
+function directStoragePut(uploadUrl: string, file: File, mimeType: string, signal: AbortSignal, onProgress?: (loadedBytes: number, totalBytes: number) => void) {
+  return new Promise<void>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    let settled = false;
+    let stallTimer = 0;
+    let hardTimer = 0;
+    const cleanup = () => { window.clearTimeout(stallTimer); window.clearTimeout(hardTimer); signal.removeEventListener("abort", abortFromCaller); };
+    const finish = (error?: Error) => { if (settled) return; settled = true; cleanup(); error ? reject(error) : resolve(); };
+    const abortForStall = () => { request.abort(); finish(new DOMException("Direct storage upload stopped making progress.", "TimeoutError")); };
+    const resetStallTimer = () => { window.clearTimeout(stallTimer); stallTimer = window.setTimeout(abortForStall, DIRECT_UPLOAD_STALL_TIMEOUT_MS); };
+    const abortFromCaller = () => { request.abort(); finish(signal.reason instanceof Error ? signal.reason : new DOMException("Upload cancelled by user.", "AbortError")); };
+    request.open("PUT", uploadUrl);
+    request.setRequestHeader("content-type", mimeType);
+    request.upload.onprogress = event => { if (!event.lengthComputable) return; resetStallTimer(); onProgress?.(event.loaded, event.total); };
+    request.onload = () => finish(request.status >= 200 && request.status < 300 ? undefined : new Error("Direct storage upload was unavailable."));
+    request.onerror = () => finish(new Error("Direct storage upload was unavailable."));
+    request.onabort = () => finish(signal.aborted ? signal.reason instanceof Error ? signal.reason : new DOMException("Upload cancelled by user.", "AbortError") : new DOMException("Direct storage upload stopped making progress.", "TimeoutError"));
+    signal.addEventListener("abort", abortFromCaller, { once: true });
+    hardTimer = window.setTimeout(() => { request.abort(); finish(new DOMException("Direct storage upload exceeded the safe maximum duration.", "TimeoutError")); }, DIRECT_UPLOAD_HARD_TIMEOUT_MS);
+    resetStallTimer();
+    request.send(file);
+  });
+}
+
+async function completeDirectUpload(ticket: string, signal: AbortSignal) {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < MEDIA_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch("/api/project-media/direct-complete", { method: "POST", credentials: "include", signal, headers: { "content-type": "application/json" }, body: JSON.stringify({ ticket }) });
+      if (response.ok) return;
+      if (response.status < 500) throw new Error("Direct upload completion was unavailable.");
+      lastError = new Error("Direct upload completion was temporarily unavailable.");
+    } catch (error) {
+      if (signal.aborted) throw error;
+      lastError = error instanceof Error ? error : new Error("Direct upload completion was unavailable.");
+    }
+    if (attempt + 1 < MEDIA_UPLOAD_MAX_ATTEMPTS) await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(resolve, MEDIA_UPLOAD_RETRY_DELAYS_MS[attempt] ?? 3_000);
+      signal.addEventListener("abort", () => { window.clearTimeout(timer); reject(new DOMException("Upload cancelled by user.", "AbortError")); }, { once: true });
+    });
+  }
+  throw lastError ?? new Error("Direct upload completion was unavailable.");
+}
+
+async function uploadMediaFile(projectId: number, assetType: "narration" | "image", file: File, signal: AbortSignal, sequenceNumber?: number, durationMs?: number, onProgress?: (loadedBytes: number, totalBytes: number) => void) {
   try {
     const metadata = { projectId, assetType, originalFilename: file.name, mimeType: file.type || "application/octet-stream", byteSize: file.size, sequenceNumber: sequenceNumber ?? null, audioDurationMs: durationMs ?? null };
     const ticketResponse = await fetch("/api/project-media/direct-ticket", { method: "POST", credentials: "include", signal, headers: { "content-type": "application/json" }, body: JSON.stringify(metadata) });
     const ticketPayload = await ticketResponse.json().catch(() => null) as { uploadUrl?: string; ticket?: string } | null;
     if (!ticketResponse.ok || !ticketPayload?.uploadUrl || !ticketPayload.ticket) throw new Error("Direct upload preparation was unavailable.");
-    const directUpload = new AbortController();
-    const cancelDirectUpload = () => directUpload.abort(signal.reason);
-    signal.addEventListener("abort", cancelDirectUpload, { once: true });
-    const directUploadTimer = window.setTimeout(() => directUpload.abort(new DOMException("Direct storage upload timed out.", "TimeoutError")), DIRECT_UPLOAD_TIMEOUT_MS);
-    let uploadResponse: Response;
-    try {
-      uploadResponse = await fetch(ticketPayload.uploadUrl, { method: "PUT", signal: directUpload.signal, headers: { "content-type": metadata.mimeType }, body: file });
-    } finally {
-      window.clearTimeout(directUploadTimer);
-      signal.removeEventListener("abort", cancelDirectUpload);
-    }
-    if (!uploadResponse.ok) throw new Error("Direct storage upload was unavailable.");
-    const completeResponse = await fetch("/api/project-media/direct-complete", { method: "POST", credentials: "include", signal, headers: { "content-type": "application/json" }, body: JSON.stringify({ ticket: ticketPayload.ticket }) });
-    if (completeResponse.ok) return;
-    throw new Error("Direct upload completion was unavailable.");
+    await directStoragePut(ticketPayload.uploadUrl, file, metadata.mimeType, signal, onProgress);
+    await completeDirectUpload(ticketPayload.ticket, signal);
   } catch (error) {
     if (signal.aborted) throw error;
     return uploadMediaViaApplication(projectId, assetType, file, signal, sequenceNumber, durationMs);
@@ -130,7 +162,7 @@ export default function Projects() {
       const durationMs = await audioDurationMs(selection.narration);
       assertNotAborted();
       setBusyLabel("Uploading narration…");
-      await uploadMediaFile(projectId, "narration", selection.narration, importAbort.signal, undefined, durationMs);
+      await uploadMediaFile(projectId, "narration", selection.narration, importAbort.signal, undefined, durationMs, (loadedBytes, totalBytes) => setBusyLabel(`Uploading narration… ${Math.min(100, Math.round(loadedBytes / totalBytes * 100))}%`));
       for (let index = 0; index < orderedImages.length; index += 1) {
         assertNotAborted();
         const image = orderedImages[index];

@@ -298,7 +298,9 @@
 - [ ] Bound hosted MP3 preparation storage reads so a stalled presign or source-range request records a retryable timeout instead of silently expiring the worker lease.
 - [ ] Recover the legacy high-bitrate MP3 plan by retaining only non-duplicated completed narration coverage and rebuilding its invalid unfinished duplicate ranges from saved media.
 - [x] Restart and verify the development service after the reported preview interruption without changing the active Timeline job or uploaded media.
-- [ ] Save and synchronize the current VisualSync AI source project to the connected GitHub repository as a backup without committing secrets or uploaded media.
+- [x] Save and synchronize the current VisualSync AI source project to the connected GitHub repository as a backup without committing secrets or uploaded media.
+- [x] Verify the official Manus Task Data Backup workflow for VisualSync AI; the authenticated account is reported as unaffected, so no separate Task Data Backup export is available or required.
+- [x] Diagnose and repair slow or failing large narration uploads around 38 MB while retaining direct S3 upload as the primary path and preserving saved media.
 - [x] Add a bounded direct-storage upload timeout that falls back to the existing authenticated application upload instead of leaving a 38 MB narration upload indefinitely pending after a successful ticket request.
 - [x] Diagnose and repair the Projects-page API gateway temporary-unavailability mutation error without disrupting the in-progress 16 min test upload.
 - [x] Expose Resume server analysis when a Timeline job remains queued behind an expired processing lease, so the signed-in app can safely resume it without re-uploading media.
