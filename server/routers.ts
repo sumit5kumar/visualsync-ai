@@ -9,6 +9,7 @@ import { activateGeminiKey, activateGroqKey, approveTimeline, createProjectRecor
 import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { getTimelineGenerationJob, queueTimelineGenerationJob, runTimelineGenerationJob, setTimelineGenerationSchedule, TIMELINE_JOB_CRON } from "./timelineGenerationJobs";
 import { signTimelineScheduleTask } from "./timelineScheduleAuth";
+import { isAmbiguousHeartbeatUpdateTimeout } from "./timelineScheduleRecovery";
 import { decryptSecret, describeApiKey, describeGeminiKey, encryptSecret, fingerprintSecret } from "./crypto";
 import { GEMINI_MODEL, GeminiClient } from "./geminiClient";
 import { GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL, GroqClient } from "./groqClient";
@@ -40,9 +41,15 @@ export const appRouter = router({
     const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
     if (!sessionToken) throw new Error("Sign in again before starting hosted Timeline Generation.");
     if (previous?.scheduleCronTaskUid) {
-      await updateHeartbeatJob(previous.scheduleCronTaskUid, { cron: TIMELINE_JOB_CRON, path: "/api/scheduled/timeline-generation", method: "POST", payload: { taskUid: previous.scheduleCronTaskUid, signature: signTimelineScheduleTask(previous.scheduleCronTaskUid) }, enable: true, description: `Persistent Timeline Generation for project ${input.projectId}` }, sessionToken);
+      let scheduleRefreshDeferred = false;
+      try {
+        await updateHeartbeatJob(previous.scheduleCronTaskUid, { cron: TIMELINE_JOB_CRON, path: "/api/scheduled/timeline-generation", method: "POST", payload: { taskUid: previous.scheduleCronTaskUid, signature: signTimelineScheduleTask(previous.scheduleCronTaskUid) }, enable: true, description: `Persistent Timeline Generation for project ${input.projectId}` }, sessionToken);
+      } catch (error) {
+        if (!isAmbiguousHeartbeatUpdateTimeout(error)) throw error;
+        scheduleRefreshDeferred = true;
+      }
       const dispatch = await runTimelineGenerationJob(job.id);
-      return { jobId: job.id, status: "queued" as const, scheduled: true, dispatch };
+      return { jobId: job.id, status: "queued" as const, scheduled: true, scheduleRefreshDeferred, dispatch };
     }
     const schedule = await createHeartbeatJob({ name: `timeline-generation-${input.projectId}`, cron: TIMELINE_JOB_CRON, path: "/api/scheduled/timeline-generation", method: "POST", payload: {}, description: `Persistent Timeline Generation for project ${input.projectId}` }, sessionToken);
     await updateHeartbeatJob(schedule.taskUid, { payload: { taskUid: schedule.taskUid, signature: signTimelineScheduleTask(schedule.taskUid) } }, sessionToken);
