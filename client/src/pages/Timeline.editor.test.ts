@@ -21,5 +21,9 @@ describe("Timeline editor presentation", () => {
     expect(source).toContain('aria-label="Resize end boundary"');
     expect(source).toContain("narration waveform");
     expect(source).toContain('transition === "Crossfade"');
+    expect(source).toContain("overflow-x-auto overflow-y-hidden");
+    expect(source).toContain("document.elementFromPoint(event.clientX, event.clientY)");
+    expect(source).toContain("dropRef.current = target");
+    expect(source).toContain('pointerEvents: drag?.id === segment.id ? "none" : "auto"');
   });
 });

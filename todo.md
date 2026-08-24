@@ -320,3 +320,5 @@
 - [x] Diagnose and repair the Projects-page API gateway temporary-unavailability mutation error without disrupting the in-progress 16 min test upload.
 - [x] Expose Resume server analysis when a Timeline job remains queued behind an expired processing lease, so the signed-in app can safely resume it without re-uploading media.
 - [x] Diagnose and repair the Projects-page temporary API gateway mutation failure reported at 19:30 IST, while preserving the 16 min test's uploaded media and durable Timeline state.
+- [x] Make direct visual reordering reliably place a selected clip at the intended target position through the Timeline-only pointer gesture.
+- [x] Add horizontal scrolling only within the Timeline track and compact the track width to remove excess separation from the preview workspace.
