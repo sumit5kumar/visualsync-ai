@@ -28,5 +28,10 @@ describe("Timeline editor presentation", () => {
     expect(source).toContain("<TimelineTrack");
     expect(source).toContain('document.addEventListener("click", saveTimelineTransition, true)');
     expect(source).toContain("onTransitionChange(toTransitionType(label))");
+    expect(source).toContain("Random mix");
+    expect(source).toContain("data-transition-duration");
+    expect(source).toContain("data-zoom-amount");
+    expect(source).toContain("Fast Render · no zoom / no transitions");
+    expect(source).toContain("enabledZoomDirections");
   });
 });

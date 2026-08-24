@@ -330,3 +330,7 @@
 - [x] Add a random transition mode that selects only from the user-enabled transition set at each Timeline boundary.
 - [x] Ensure every working transition keeps full-canvas outgoing/incoming image coverage throughout the effect, preventing black frames or visual gaps.
 - [x] Replace the obsolete Timeline UI-only transition click handler so every choice persists the actual local render transition.
+- [x] Add reference-style Timeline Transition controls with multi-select chips, selected-only Random mix, and the shared duration control in the same panel.
+- [x] Add a matching Timeline Effects panel for persisted Zoom selections and selected-only Random mix behavior.
+- [x] Move Zoom amount, selected-direction Random mix, and Fast Render controls into the Timeline sidebar alongside Transition controls.
+- [x] Remove duplicated render-settings controls from Preview while retaining playback, approved handoff download, saved Windows paths, and render guidance.

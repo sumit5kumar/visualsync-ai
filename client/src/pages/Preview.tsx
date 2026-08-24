@@ -100,12 +100,11 @@ export default function Preview() {
         <aside className="vs-surface rounded-[1.5rem] p-6">
           <p className="vs-kicker">Timeline preview</p>
           <h2 className="mt-3 text-lg font-semibold text-white">Check the story with narration</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">Preview the approved image boundaries with the original audio before creating the final local MP4.</p>
+          <p className="mt-2 text-sm leading-6 text-slate-500">Preview the approved image boundaries with the original audio before creating the final local MP4. Choose transitions, Zoom, duration, and Fast Render from the Timeline editor.</p>
           <Button onClick={download} disabled={!approved || !handoff.data} className="mt-5 w-full bg-cyan-200 text-slate-950 hover:bg-cyan-100"><Download className="mr-2 h-4 w-4" />Download handoff</Button>
           <div className="mt-5 rounded-xl border border-cyan-200/[.12] bg-cyan-200/[.04] p-3 text-xs leading-5 text-slate-400"><span className="font-semibold text-cyan-100">Local workflow.</span> Download the approved handoff, run the saved command in Windows PowerShell, and find the completed MP4 in the project output folder.</div>
         </aside>
       </section>
-      <ZoomControls zoom={selectedZoom} saving={updateZoom.isPending} onChange={saveZoom} />
       <RenderEstimate durationMs={project.audioDurationMs ?? review.data?.segments.at(-1)?.endMs ?? 0} imageCount={review.data?.segments.length ?? 0} zoom={selectedZoom} />
       <section className="rounded-[1.5rem] border border-cyan-200/[.14] bg-[#101827] p-6">
         <p className="text-xs font-semibold uppercase tracking-[.14em] text-cyan-200">Saved Windows render folders</p>

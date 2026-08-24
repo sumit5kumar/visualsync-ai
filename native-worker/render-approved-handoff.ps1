@@ -29,6 +29,7 @@ $transitionSeconds = 0.8
 $zoomEnabled = $true
 $zoomAmountPercent = 8.0
 $zoomDirection = "IN"
+$enabledZoomDirections = @("IN", "OUT")
 $crossfadeDurationMs = 800
 $transitionType = "CROSSFADE"
 $enabledTransitions = @("CROSSFADE")
@@ -38,6 +39,7 @@ if ($handoff.PSObject.Properties.Name -contains "zoom") {
   if ($zoomSettings.PSObject.Properties.Name -contains "enabled") { $zoomEnabled = [bool]$zoomSettings.enabled }
   if ($zoomSettings.PSObject.Properties.Name -contains "amountPercent") { $zoomAmountPercent = [double]$zoomSettings.amountPercent }
   if ($zoomSettings.PSObject.Properties.Name -contains "direction") { $zoomDirection = ([string]$zoomSettings.direction).ToUpperInvariant() }
+  if ($zoomSettings.PSObject.Properties.Name -contains "enabledDirections") { $enabledZoomDirections = @($zoomSettings.enabledDirections | ForEach-Object { ([string]$_).ToUpperInvariant() }) }
 }
 if ($handoff.PSObject.Properties.Name -contains "crossfade") {
   $crossfadeSettings = $handoff.crossfade
@@ -50,6 +52,8 @@ if ($handoff.PSObject.Properties.Name -contains "transition") {
 }
 if ($zoomAmountPercent -notin @(3.0, 5.0, 8.0, 12.0)) { $zoomAmountPercent = 8.0 }
 if ($zoomDirection -notin @("IN", "OUT", "AUTO")) { $zoomDirection = "IN" }
+$enabledZoomDirections = @($enabledZoomDirections | Where-Object { $_ -in @("IN", "OUT") } | Select-Object -Unique)
+if ($enabledZoomDirections.Count -eq 0) { $enabledZoomDirections = @("IN", "OUT") }
 if ($crossfadeDurationMs -notin @(0, 300, 500, 800, 1000, 1200)) { $crossfadeDurationMs = 800 }
 $supportedTransitions = @("CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN")
 if ($transitionType -notin @("NONE", "RANDOM") + $supportedTransitions) { $transitionType = "CROSSFADE" }
@@ -133,7 +137,7 @@ function Get-ZoomPlan([int]$segmentIndex) {
 
   $amount = $zoomAmountPercent / 100.0
   $direction = $zoomDirection
-  if ($direction -eq "AUTO") { $direction = if (($segmentIndex % 2) -eq 0) { "IN" } else { "OUT" } }
+  if ($direction -eq "AUTO") { $direction = $enabledZoomDirections[(($segmentIndex * 13) + 1) % $enabledZoomDirections.Count] }
   if ($direction -eq "OUT") {
     return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0; direction = "OUT" }
   }
