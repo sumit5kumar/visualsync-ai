@@ -37,7 +37,9 @@ describe("real Timeline timing edits", () => {
     expect(() => planTimelineBoundaryAdjustment(segments, 31, "end", MIN_TIMELINE_CLIP_DURATION_MS - 1)).toThrow("at least");
   });
 
-  it("swaps real visuals between Timeline positions without modifying their timing", () => {
-    expect(planTimelineVisualMove(segments, 31, 32)).toEqual({ sourceSegmentId: 31, targetSegmentId: 32, sourceImageAssetId: 7, targetImageAssetId: 8 });
+  it("plans a visual insertion before a target Timeline position without modifying timing", () => {
+    const ordered = [...segments, { id: 33, imageAssetId: 9, startMs: 4920, endMs: 7310 }];
+    expect(planTimelineVisualMove(ordered, 31, 33, "before").assignments).toEqual([{ segmentId: 31, sourceSegmentId: 32, imageAssetId: 8 }, { segmentId: 32, sourceSegmentId: 31, imageAssetId: 7 }]);
+    expect(planTimelineVisualMove(ordered, 31, 33, "before").placement).toBe("before");
   });
 });

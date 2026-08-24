@@ -322,3 +322,5 @@
 - [x] Diagnose and repair the Projects-page temporary API gateway mutation failure reported at 19:30 IST, while preserving the 16 min test's uploaded media and durable Timeline state.
 - [x] Make direct visual reordering reliably place a selected clip at the intended target position through the Timeline-only pointer gesture.
 - [x] Add horizontal scrolling only within the Timeline track and compact the track width to remove excess separation from the preview workspace.
+- [x] Change Timeline visual movement from target-clip swapping to direct insertion between two adjacent visual clips.
+- [x] Move the compact Timeline track directly beneath the video preview inside the left editor column, with right-side controls remaining alongside it.

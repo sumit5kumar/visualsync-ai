@@ -106,7 +106,7 @@ export const appRouter = router({
     approve: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => approveTimeline(ctx.user.id, input.projectId)),
     substituteImage: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), segmentId: z.number().int().positive(), newImageAssetId: z.number().int().positive() })).mutation(({ ctx, input }) => substituteTimelineImage(ctx.user.id, input)),
     adjustBoundary: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), segmentId: z.number().int().positive(), edge: z.enum(["start", "end"]), boundaryMs: z.number().int().nonnegative() })).mutation(({ ctx, input }) => adjustTimelineBoundary(ctx.user.id, input)),
-    moveVisual: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), sourceSegmentId: z.number().int().positive(), targetSegmentId: z.number().int().positive() })).mutation(({ ctx, input }) => moveTimelineVisual(ctx.user.id, input)),
+    moveVisual: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), sourceSegmentId: z.number().int().positive(), targetSegmentId: z.number().int().positive(), placement: z.enum(["swap", "before", "after"]).optional() })).mutation(({ ctx, input }) => moveTimelineVisual(ctx.user.id, input)),
     validate: protectedProcedure.input(z.object({ audioDurationMs: z.number().finite().positive(), segments: z.array(proposedSegment).min(1) })).mutation(({ input }) => validateTimeline(input.audioDurationMs, input.segments)),
   }),
   worker: router({

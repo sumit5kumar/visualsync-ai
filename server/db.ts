@@ -349,19 +349,20 @@ export async function adjustTimelineBoundary(userId: number, input: { projectId:
   return { ...planned, approvalStatus: "revoked" as const, validation };
 }
 
-export async function moveTimelineVisual(userId: number, input: { projectId: number; sourceSegmentId: number; targetSegmentId: number }) {
+export async function moveTimelineVisual(userId: number, input: { projectId: number; sourceSegmentId: number; targetSegmentId: number; placement?: "swap" | "before" | "after" }) {
   const project = await getUserProject(userId, input.projectId);
   if (!project || !project.audioDurationMs || !canEditValidatedTimeline(project.status)) throw new Error("A validated timeline is required before a visual can be moved.");
   const db = await requireDb();
   const allSegments = await db.select().from(timelineSegments).where(eq(timelineSegments.projectId, input.projectId)).orderBy(timelineSegments.startMs);
   const existing = validateTimeline(project.audioDurationMs, allSegments.map(segment => ({ ...segment, confidence: Number(segment.confidence) })));
   if (!existing.valid) throw new Error(`Timeline cannot be edited because its validated coverage is no longer intact: ${existing.issues.join(" ")}`);
-  const planned = planTimelineVisualMove(allSegments, input.sourceSegmentId, input.targetSegmentId);
-  const source = allSegments.find(segment => segment.id === input.sourceSegmentId)!;
-  const target = allSegments.find(segment => segment.id === input.targetSegmentId)!;
+  const planned = planTimelineVisualMove(allSegments, input.sourceSegmentId, input.targetSegmentId, input.placement);
+  const originalById = new Map(allSegments.map(segment => [segment.id, segment]));
   await db.transaction(async transaction => {
-    await transaction.update(timelineSegments).set({ imageAssetId: planned.targetImageAssetId, decisionType: "CHANGE", selectionReason: `User moved this visual from Timeline clip ${target.id}; original rationale: ${source.selectionReason}` }).where(eq(timelineSegments.id, source.id));
-    await transaction.update(timelineSegments).set({ imageAssetId: planned.sourceImageAssetId, decisionType: "CHANGE", selectionReason: `User moved this visual from Timeline clip ${source.id}; original rationale: ${target.selectionReason}` }).where(eq(timelineSegments.id, target.id));
+    for (const assignment of planned.assignments) {
+      const original = originalById.get(assignment.sourceSegmentId);
+      await transaction.update(timelineSegments).set({ imageAssetId: assignment.imageAssetId, decisionType: "CHANGE", selectionReason: `User placed the visual from Timeline clip ${assignment.sourceSegmentId} ${planned.placement === "before" ? "before" : planned.placement === "after" ? "after" : "at"} Timeline clip ${planned.targetSegmentId}; original rationale: ${original?.selectionReason ?? "saved Timeline visual"}` }).where(eq(timelineSegments.id, assignment.segmentId));
+    }
     await transaction.insert(timelineApprovals).values({ projectId: input.projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
     await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, input.projectId));
   });
