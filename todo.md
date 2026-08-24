@@ -337,3 +337,5 @@
 - [x] Restore the prior Timeline workspace layout, visual/audio tracks, preview, and existing editing surfaces without removing them for render controls.
 - [x] Retain only the new Transition and Effects controls in the existing right-side Timeline panel after restoration.
 - [x] Preserve every original Timeline preview, visual/audio track, export, selected-clip, and editing surface unchanged; append new settings only as additional right-side cards.
+- [x] Remove duplicate Timeline transition controls and retain one compact Transition card plus one compact Effects card in the existing sidebar.
+- [x] Place all compact Transition, Zoom, duration, Random mix, and Fast Render controls inside the existing right-side Timeline sidebar cards.

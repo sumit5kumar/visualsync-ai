@@ -94,6 +94,7 @@ function Workspace({ narrationUrl, projectName, segments, settings, approved, sa
   useEffect(() => {
     const original = Array.from(document.querySelectorAll<HTMLElement>("section")).find(section => section.textContent?.includes("UI only"));
     if (!original) return;
+    original.style.display = "none";
     const card = document.querySelector<HTMLElement>("[data-additional-render-controls]") ?? document.createElement("section");
     card.dataset.additionalRenderControls = "true"; card.className = "mb-3 rounded-xl border border-white/[0.08] bg-[#101824] p-3";
     if (!card.parentElement) original.after(card);
