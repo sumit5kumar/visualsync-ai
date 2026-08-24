@@ -292,11 +292,11 @@
 - [x] Restore the overdue hosted Timeline callback’s automatic dispatch without resetting the preserved ten-minute narration state or requiring further user clicks.
 - [x] Improve durable Timeline callback cadence to the platform-supported one-minute minimum so retries can resume without repeated manual wakes while preserving rate-limit handling.
 - [x] Add a clearly confirmed Delete all projects action and responsive progress feedback for individual project deletion.
-- [ ] Observe and diagnose the in-progress 16 min test upload of the 38-minute narration and six images; apply only a confirmed upload recovery if necessary.
-- [ ] Persist long-MP3 narration preparation progress within the hosted callback budget so the 16 min job surfaces its chunk plan and resumes without repeated expired leases.
-- [ ] Offer Resume server analysis when a persisted Timeline job remains queued beyond its start grace period without an active worker lease.
-- [ ] Bound hosted MP3 preparation storage reads so a stalled presign or source-range request records a retryable timeout instead of silently expiring the worker lease.
-- [ ] Recover the legacy high-bitrate MP3 plan by retaining only non-duplicated completed narration coverage and rebuilding its invalid unfinished duplicate ranges from saved media.
+- [x] Observe and diagnose the in-progress 16 min test upload of the 38-minute narration and six images; apply only a confirmed upload recovery if necessary.
+- [x] Persist long-MP3 narration preparation progress within the hosted callback budget so the 16 min job surfaces its chunk plan and resumes without repeated expired leases.
+- [x] Offer Resume server analysis when a persisted Timeline job remains queued beyond its start grace period without an active worker lease.
+- [x] Bound hosted MP3 preparation storage reads so a stalled presign or source-range request records a retryable timeout instead of silently expiring the worker lease.
+- [x] Recover the legacy high-bitrate MP3 plan by retaining only non-duplicated completed narration coverage and rebuilding its invalid unfinished duplicate ranges from saved media.
 - [x] Restart and verify the development service after the reported preview interruption without changing the active Timeline job or uploaded media.
 - [x] Save and synchronize the current VisualSync AI source project to the connected GitHub repository as a backup without committing secrets or uploaded media.
 - [x] Verify the official Manus Task Data Backup workflow for VisualSync AI; the authenticated account is reported as unaffected, so no separate Task Data Backup export is available or required.
