@@ -21,10 +21,10 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain('(Join-Path $segment.frameDirectory "frame_%06d.jpg")');
     expect(worker).toContain('(Join-Path $frameDirectory "frame_%06d.jpg")');
     expect(worker).toContain("Remove-Item -Recurse -Force $frameDirectory");
-    expect(worker).toContain('$transitionHalfSeconds = $transitionSeconds / 2.0');
-    expect(worker).toContain('$fadeStart = [double]$current.endSeconds - $transitionHalfSeconds');
-    expect(worker).toContain('$fadeEnd = [double]$current.endSeconds + $transitionHalfSeconds');
-    expect(worker).toContain('$nextLocalSeconds = [Math]::Max(0.0, $timeSeconds - [double]$next.startSeconds)');
+    expect(worker).toContain('$fadeStart = [double]$current.startSeconds');
+    expect(worker).toContain('$fadeEnd = $fadeStart + $transitionSeconds');
+    expect(worker).toContain('while ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge ([double]$segments[$segmentIndex].endSeconds))');
+    expect(worker).toContain('$previous = $segments[$segmentIndex - 1]');
     expect(worker).toContain("function Test-FinalEncoder");
     expect(worker).toContain('"-f", "lavfi", "-i", "color=c=black:s=1920x1080:r=30:d=0.1", "-frames:v", "1"');
     expect(worker).not.toContain('color=c=black:s=128x128:r=30:d=0.1');
@@ -56,7 +56,7 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain('"CIRCLE_OPEN"');
     expect(worker).toContain("function Get-TransitionType");
     expect(worker).toContain("return $enabledTransitions");
-    expect(worker).toContain("Draw-TransitionFrame $graphics $currentLayer $nextLayer $fadeProgress $activeTransition");
+    expect(worker).toContain("Draw-TransitionFrame $graphics $previousLayer $currentLayer $fadeProgress $activeTransition");
     expect(worker).toContain('$zoomEnabled = $true');
     expect(worker).toContain('if ($handoff.PSObject.Properties.Name -contains "zoom")');
     expect(worker).toContain('if (!$zoomEnabled)');
@@ -73,7 +73,7 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain('if ($renderedOutputPath) { Write-Output "RENDERED=$renderedOutputPath" }');
     expect(worker).toContain('CPU_BOUND_STAGES=none (Fast Render bypasses continuous zoom and alpha crossfade)');
     expect(worker).toContain('$transitionSeconds = $crossfadeDurationMs / 1000.0');
-    expect(worker).toContain('$transitionHalfSeconds = $transitionSeconds / 2.0');
+    expect(worker).not.toContain('$fadeStart = [double]$current.endSeconds - $transitionHalfSeconds');
     expect(worker).toContain('"-pix_fmt", "yuv420p", "-r", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-fps_mode", "cfr"');
     expect(worker).toContain("Every effect paints a complete outgoing canvas before revealing the incoming visual");
   });

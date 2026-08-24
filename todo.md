@@ -345,3 +345,5 @@
 - [x] Diagnose and fix the Timeline sidebar controls not appearing in the live rendered view.
 - [x] Confirm the prior published sidebar selector replaced the outer Timeline workspace; constrain the corrected selector to direct right-sidebar cards before republishing.
 - [x] Increase default Timeline visual-clip sizing so images are readable without needing extreme manual zoom.
+- [x] Audit AI-generated narration-to-visual alignment for late image changes without changing any timing, provider, prompt, or project data.
+- [x] Compare persisted API Timeline boundaries to local transition-render timing and permanently correct any early incoming-visual regression without changing the AI pipeline.

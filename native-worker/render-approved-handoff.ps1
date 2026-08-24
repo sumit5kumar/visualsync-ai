@@ -519,30 +519,31 @@ try {
   $segmentIndex = 0
   for ($outputFrameIndex = 0; $outputFrameIndex -lt $outputFrameCount; $outputFrameIndex++) {
     $timeSeconds = $outputFrameIndex / [double]$FrameRate
-    # Keep every full-canvas transition centered on the approved segment boundary.
-    # The incoming shot reaches full coverage only after its own approved start time, preserving narration cues.
-    while ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge ([double]$segments[$segmentIndex].endSeconds + $transitionHalfSeconds)) { $segmentIndex++ }
+    # The approved Timeline boundary is the earliest moment an incoming visual may appear.
+    # Starting an effect at the boundary preserves narration-to-visual alignment while
+    # continuing to draw the outgoing canvas underneath the transition window.
+    while ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge ([double]$segments[$segmentIndex].endSeconds)) { $segmentIndex++ }
     $current = $segments[$segmentIndex]
     $currentLocalSeconds = $timeSeconds - [double]$current.startSeconds
     $frame = New-Object System.Drawing.Bitmap($canvasWidth, $canvasHeight, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
     $graphics = [System.Drawing.Graphics]::FromImage($frame)
     $graphics.Clear([System.Drawing.Color]::Black)
     $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
-    $fadeStart = [double]$current.endSeconds - $transitionHalfSeconds
-    $fadeEnd = [double]$current.endSeconds + $transitionHalfSeconds
+    $fadeStart = [double]$current.startSeconds
+    $fadeEnd = $fadeStart + $transitionSeconds
     try {
-      $activeTransition = if ($segmentIndex -lt ($segments.Count - 1)) { Get-TransitionType $segmentIndex } else { "NONE" }
-      if ($segmentIndex -lt ($segments.Count - 1) -and $activeTransition -ne "NONE" -and $transitionSeconds -gt 0 -and $timeSeconds -ge $fadeStart -and $timeSeconds -lt $fadeEnd) {
+      $activeTransition = if ($segmentIndex -gt 0) { Get-TransitionType ($segmentIndex - 1) } else { "NONE" }
+      if ($segmentIndex -gt 0 -and $activeTransition -ne "NONE" -and $transitionSeconds -gt 0 -and $timeSeconds -ge $fadeStart -and $timeSeconds -lt $fadeEnd) {
         $fadeProgress = [Math]::Min(1.0, [Math]::Max(0.0, ($timeSeconds - $fadeStart) / $transitionSeconds))
+        $previous = $segments[$segmentIndex - 1]
+        $previousLocalSeconds = $timeSeconds - [double]$previous.startSeconds
+        $previousLayer = Open-ClipFrame $previous (Get-ClipFrameIndex $previous $previousLocalSeconds)
         $currentLayer = Open-ClipFrame $current (Get-ClipFrameIndex $current $currentLocalSeconds)
-        $next = $segments[$segmentIndex + 1]
-        $nextLocalSeconds = [Math]::Max(0.0, $timeSeconds - [double]$next.startSeconds)
-        $nextLayer = Open-ClipFrame $next (Get-ClipFrameIndex $next $nextLocalSeconds)
         try {
-          Draw-TransitionFrame $graphics $currentLayer $nextLayer $fadeProgress $activeTransition
+          Draw-TransitionFrame $graphics $previousLayer $currentLayer $fadeProgress $activeTransition
         } finally {
+          $previousLayer.Dispose()
           $currentLayer.Dispose()
-          $nextLayer.Dispose()
         }
       } else {
         $currentLayer = Open-ClipFrame $current (Get-ClipFrameIndex $current $currentLocalSeconds)
