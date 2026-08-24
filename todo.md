@@ -347,3 +347,13 @@
 - [x] Increase default Timeline visual-clip sizing so images are readable without needing extreme manual zoom.
 - [x] Audit AI-generated narration-to-visual alignment for late image changes without changing any timing, provider, prompt, or project data.
 - [x] Compare persisted API Timeline boundaries to local transition-render timing and permanently correct any early incoming-visual regression without changing the AI pipeline.
+- [x] Audit browser preview transition timing for early incoming visuals without changing the AI pipeline or saved Timeline data.
+- [ ] Investigate the newly created project’s persistent narration-to-visual mismatch end-to-end and permanently fix only the proven post-transition regression source.
+- [x] Compare the earlier working Finance project against both new post-transition Finance projects to isolate the exact alignment difference before changing any code.
+- [x] Compare the new Finance project’s timestamped transcript, AI image descriptions, and saved visual assignments position by position to locate the first divergence.
+- [x] Inventory and compare the uploaded earlier working source archive against the current narration-to-visual and transition paths before applying any compatibility fix.
+- [ ] Compare the earlier project’s saved render handoff and visual boundaries against the current project’s Timeline and preview behavior to isolate the practical regression.
+- [ ] Attempt a Timeline-only visual playback alignment fix without changing AI providers, transcription, image analysis, timeline generation, rendering, Zoom, Crossfade, media, or saved project data.
+- [ ] Restore the earlier verified beat-by-beat semantic image-selection behavior as a controlled Timeline auto-align operation, only after explicit approval and without changing provider configuration, transcription, rendering, Zoom, Crossfade, or existing project data.
+- [x] Reconcile every AI-selected image interval with the current final Timeline, browser preview selection, and local render-handoff boundaries second by second, without changing project data or AI behavior.
+- [x] Diagnose and make hosted Timeline Generation schedule updates resilient to the observed transient Heartbeat RST_STREAM cancellation without changing AI, Timeline, render, or media behavior.
