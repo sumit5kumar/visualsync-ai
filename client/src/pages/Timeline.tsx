@@ -45,6 +45,17 @@ function Workspace({ narrationUrl, projectName, segments, settings, approved, sa
   const durationMs = Math.max(1, segments.at(-1)?.endMs ?? 1); const duration = durationMs / 1000; const pps = 1.6 * zoom; const shown = useMemo(() => preview(segments, resize?.id ?? null, resize?.edge ?? null, draft), [segments, resize, draft]); const currentIndex = Math.max(0, shown.findIndex(segment => time * 1000 >= segment.startMs && time * 1000 < segment.endMs)); const current = shown[currentIndex] ?? shown.at(-1); const selected = shown.find(segment => segment.id === selectedId) ?? current; const transition = transitionLabel(settings.transitionType);
   useEffect(() => { setSelectedId(segments[0]?.id ?? 0); setTime(0); }, [segments]);
   useEffect(() => { setChoice(transitionLabel(settings.transitionType) as typeof choices[number]); }, [settings.transitionType]);
+  useEffect(() => {
+    const saveTimelineTransition = (event: MouseEvent) => {
+      const button = (event.target as Element | null)?.closest("button");
+      const label = button?.textContent?.trim();
+      if (!button || !isTimelineChoice(label)) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      setChoice(label); onTransitionChange(toTransitionType(label));
+    };
+    document.addEventListener("click", saveTimelineTransition, true);
+    return () => document.removeEventListener("click", saveTimelineTransition, true);
+  }, [onTransitionChange]);
   const seek = (seconds: number) => { const next = Math.max(0, Math.min(duration, seconds)); if (audio.current) audio.current.currentTime = next; setTime(next); }; const select = (segment: Segment) => { setSelectedId(segment.id); seek(segment.startMs / 1000); };
   const toggle = async () => { if (!audio.current) return; try { if (audio.current.paused) await audio.current.play(); else audio.current.pause(); } catch { toast.error("Audio preview could not start."); } };
   const beginResize = (event: React.PointerEvent<HTMLSpanElement>, segment: Segment, edge: "start" | "end") => { if (saving) return; event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); const original = edge === "start" ? segment.startMs : segment.endMs; setResize({ id: segment.id, edge, x: event.clientX, original }); setDraft(original); };
@@ -78,4 +89,5 @@ function formatTime(milliseconds: number) { const seconds = milliseconds / 1000;
 function normalizeTransition(value: string | null | undefined): TransitionType { return (["NONE", "CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN", "RANDOM"] as const).includes(value as TransitionType) ? value as TransitionType : "CROSSFADE"; }
 function normalizeEnabledTransitions(value: string | null | undefined): TransitionName[] { const supported: TransitionName[] = ["CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN"]; const enabled = (value ?? "CROSSFADE").split(",").filter((item): item is TransitionName => supported.includes(item as TransitionName)); return enabled.length ? enabled.filter((item, index) => enabled.indexOf(item) === index) : ["CROSSFADE"]; }
 function transitionLabel(type: TransitionType) { return ({ NONE: "None", CROSSFADE: "Crossfade", FADE_BLACK: "Fade to black", WIPE_LEFT: "Wipe left", WIPE_RIGHT: "Wipe right", SLIDE_LEFT: "Slide left", SLIDE_RIGHT: "Slide right", CIRCLE_OPEN: "Circle open", RANDOM: "Random" } as const)[type]; }
+function isTimelineChoice(value: string | undefined): value is typeof choices[number] { return Boolean(value && (choices as readonly string[]).includes(value)); }
 function toTransitionType(label: typeof choices[number]): TransitionType { return ({ "None": "NONE", "Crossfade": "CROSSFADE", "Fade to black": "FADE_BLACK", "Wipe left": "WIPE_LEFT", "Wipe right": "WIPE_RIGHT", "Slide left": "SLIDE_LEFT", "Slide right": "SLIDE_RIGHT", "Circle open": "CIRCLE_OPEN", "Random": "RANDOM" } as const)[label]; }

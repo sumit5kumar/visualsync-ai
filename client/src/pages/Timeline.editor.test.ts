@@ -26,5 +26,7 @@ describe("Timeline editor presentation", () => {
     expect(source).toContain('data-insert-placement="before"');
     expect(source).toContain("insertRef.current = next");
     expect(source).toContain("<TimelineTrack");
+    expect(source).toContain('document.addEventListener("click", saveTimelineTransition, true)');
+    expect(source).toContain("onTransitionChange(toTransitionType(label))");
   });
 });

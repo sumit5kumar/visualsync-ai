@@ -329,3 +329,4 @@
 - [x] Add one project-level transition selector and duration dropdown that applies the chosen transition and amount across the approved Timeline render.
 - [x] Add a random transition mode that selects only from the user-enabled transition set at each Timeline boundary.
 - [x] Ensure every working transition keeps full-canvas outgoing/incoming image coverage throughout the effect, preventing black frames or visual gaps.
+- [x] Replace the obsolete Timeline UI-only transition click handler so every choice persists the actual local render transition.
