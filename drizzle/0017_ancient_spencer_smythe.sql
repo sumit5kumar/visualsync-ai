@@ -1,1 +1,0 @@
-ALTER TABLE `projects` MODIFY COLUMN `enabledTransitions` varchar(200) NOT NULL DEFAULT 'CROSSFADE';

@@ -2,7 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { geminiApiKeys, groqApiKeys, mediaAssets, projects, timelineApprovals, timelineGenerationJobs, timelineSegments, type InsertUser, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
-import { canEditValidatedTimeline, planImageSubstitution, planTimelineBoundaryAdjustment, planTimelineVisualMove } from "./timelineEditing";
+import { canEditValidatedTimeline, planImageSubstitution } from "./timelineEditing";
 import { validateTimeline } from "./timelineValidation";
 import { buildProjectProcessingProgress } from "./projectProgress";
 import { narrationTranscriptionSummary } from "./narrationTranscription";
@@ -111,14 +111,11 @@ export async function updateProjectSetup(userId: number, projectId: number, inpu
   return { success: true } as const;
 }
 
-export async function updateProjectZoomSettings(userId: number, projectId: number, input: { enabled: boolean; amountPercent: 3 | 5 | 8 | 12; direction: "IN" | "OUT" | "AUTO"; crossfadeDurationMs: 0 | 300 | 500 | 800 | 1000 | 1200; transitionType?: "NONE" | "CROSSFADE" | "FADE_BLACK" | "WIPE_LEFT" | "WIPE_RIGHT" | "SLIDE_LEFT" | "SLIDE_RIGHT" | "CIRCLE_OPEN" | "RANDOM"; enabledTransitions?: Array<"CROSSFADE" | "FADE_BLACK" | "WIPE_LEFT" | "WIPE_RIGHT" | "SLIDE_LEFT" | "SLIDE_RIGHT" | "CIRCLE_OPEN">; enabledZoomDirections?: Array<"IN" | "OUT"> }) {
+export async function updateProjectZoomSettings(userId: number, projectId: number, input: { enabled: boolean; amountPercent: 3 | 5 | 8 | 12; direction: "IN" | "OUT" | "AUTO"; crossfadeDurationMs: 0 | 300 | 500 | 800 | 1000 | 1200 }) {
   const db = await requireDb();
   const project = await getUserProject(userId, projectId);
   if (!project) throw new Error("Project not found.");
-  const type = input.transitionType ?? project.transitionType ?? "CROSSFADE";
-  const enabledTransitions = input.enabledTransitions?.join(",") ?? project.enabledTransitions ?? "CROSSFADE";
-  const enabledZoomDirections = input.enabledZoomDirections?.join(",") ?? project.enabledZoomDirections ?? "IN,OUT";
-  await db.update(projects).set({ zoomEnabled: input.enabled, zoomAmountPercent: input.amountPercent, zoomDirection: input.direction, enabledZoomDirections, crossfadeDurationMs: input.crossfadeDurationMs, transitionType: type, enabledTransitions }).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
+  await db.update(projects).set({ zoomEnabled: input.enabled, zoomAmountPercent: input.amountPercent, zoomDirection: input.direction, crossfadeDurationMs: input.crossfadeDurationMs }).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
   return { success: true } as const;
 }
 
@@ -332,46 +329,6 @@ export async function substituteTimelineImage(userId: number, input: { projectId
   return { ...planned, approvalStatus: "revoked" as const };
 }
 
-export async function adjustTimelineBoundary(userId: number, input: { projectId: number; segmentId: number; edge: "start" | "end"; boundaryMs: number }) {
-  const project = await getUserProject(userId, input.projectId);
-  if (!project || !project.audioDurationMs || !canEditValidatedTimeline(project.status)) throw new Error("A validated timeline is required before clip timing can be adjusted.");
-  const db = await requireDb();
-  const allSegments = await db.select().from(timelineSegments).where(eq(timelineSegments.projectId, input.projectId)).orderBy(timelineSegments.startMs);
-  const existing = validateTimeline(project.audioDurationMs, allSegments.map(segment => ({ ...segment, confidence: Number(segment.confidence) })));
-  if (!existing.valid) throw new Error(`Timeline cannot be edited because its validated coverage is no longer intact: ${existing.issues.join(" ")}`);
-  const planned = planTimelineBoundaryAdjustment(allSegments, input.segmentId, input.edge, input.boundaryMs);
-  const changes = new Map(planned.changedSegments.map(segment => [segment.id, segment]));
-  const proposed = allSegments.map(segment => ({ ...segment, ...changes.get(segment.id), confidence: Number(segment.confidence) }));
-  const validation = validateTimeline(project.audioDurationMs, proposed);
-  if (!validation.valid) throw new Error(`That clip edit would break narration coverage: ${validation.issues.join(" ")}`);
-  await db.transaction(async transaction => {
-    for (const change of planned.changedSegments) await transaction.update(timelineSegments).set({ startMs: change.startMs, endMs: change.endMs }).where(eq(timelineSegments.id, change.id));
-    await transaction.insert(timelineApprovals).values({ projectId: input.projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
-    await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, input.projectId));
-  });
-  return { ...planned, approvalStatus: "revoked" as const, validation };
-}
-
-export async function moveTimelineVisual(userId: number, input: { projectId: number; sourceSegmentId: number; targetSegmentId: number; placement?: "swap" | "before" | "after" }) {
-  const project = await getUserProject(userId, input.projectId);
-  if (!project || !project.audioDurationMs || !canEditValidatedTimeline(project.status)) throw new Error("A validated timeline is required before a visual can be moved.");
-  const db = await requireDb();
-  const allSegments = await db.select().from(timelineSegments).where(eq(timelineSegments.projectId, input.projectId)).orderBy(timelineSegments.startMs);
-  const existing = validateTimeline(project.audioDurationMs, allSegments.map(segment => ({ ...segment, confidence: Number(segment.confidence) })));
-  if (!existing.valid) throw new Error(`Timeline cannot be edited because its validated coverage is no longer intact: ${existing.issues.join(" ")}`);
-  const planned = planTimelineVisualMove(allSegments, input.sourceSegmentId, input.targetSegmentId, input.placement);
-  const originalById = new Map(allSegments.map(segment => [segment.id, segment]));
-  await db.transaction(async transaction => {
-    for (const assignment of planned.assignments) {
-      const original = originalById.get(assignment.sourceSegmentId);
-      await transaction.update(timelineSegments).set({ imageAssetId: assignment.imageAssetId, decisionType: "CHANGE", selectionReason: `User placed the visual from Timeline clip ${assignment.sourceSegmentId} ${planned.placement === "before" ? "before" : planned.placement === "after" ? "after" : "at"} Timeline clip ${planned.targetSegmentId}; original rationale: ${original?.selectionReason ?? "saved Timeline visual"}` }).where(eq(timelineSegments.id, assignment.segmentId));
-    }
-    await transaction.insert(timelineApprovals).values({ projectId: input.projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
-    await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, input.projectId));
-  });
-  return { ...planned, approvalStatus: "revoked" as const };
-}
-
 export async function getApprovedRenderHandoff(userId: number, projectId: number) {
   const review = await getTimelineReview(userId, projectId);
   if (review.approval.status !== "approved" || !review.approval.approvedAt || !review.approval.approvedByUserId) throw new Error("Timeline approval is required before a native render handoff.");
@@ -381,11 +338,7 @@ export async function getApprovedRenderHandoff(userId: number, projectId: number
   if (!narration || review.segments.some(segment => !segment.imageAssetId)) throw new Error("Render handoff is missing required media assets.");
   const asWorkerAsset = (asset: typeof assets[number]) => ({ assetId: asset.id, filename: asset.originalFilename, storageKey: asset.storageKey, mimeType: asset.mimeType ?? "application/octet-stream", sequenceNumber: asset.sequenceNumber, contentHash: asset.contentHash, perceptualHash: asset.perceptualHash });
   const safeProjectName = review.project.name.replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || `project_${projectId}`;
-  const supportedTransitions = ["CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN"] as const;
-  const enabledTransitions = (review.project.enabledTransitions ?? "CROSSFADE").split(",").filter((type): type is typeof supportedTransitions[number] => supportedTransitions.includes(type as typeof supportedTransitions[number]));
-  const transitionType = ["NONE", ...supportedTransitions, "RANDOM"].includes(review.project.transitionType ?? "") ? review.project.transitionType : "CROSSFADE";
-  const enabledZoomDirections = (review.project.enabledZoomDirections ?? "IN,OUT").split(",").filter((direction): direction is "IN" | "OUT" => direction === "IN" || direction === "OUT");
-  return { projectId, projectName: review.project.name, approval: { approvedByUserId: review.approval.approvedByUserId, approvedAtMs: review.approval.approvedAt.getTime() }, nativePaths: { sourceDirectory: review.project.imageSourcePath, outputDirectory: review.project.outputPath }, output: { width: 1920 as const, height: 1080 as const, aspectRatio: "16:9" as const, container: "mp4" as const, filename: `${safeProjectName}_approved_1920x1080.mp4` }, zoom: { enabled: review.project.zoomEnabled, amountPercent: review.project.zoomAmountPercent as 3 | 5 | 8 | 12, direction: review.project.zoomDirection, enabledDirections: enabledZoomDirections.length ? enabledZoomDirections : ["IN", "OUT"] }, crossfade: { durationMs: review.project.crossfadeDurationMs as 0 | 300 | 500 | 800 | 1000 | 1200 }, transition: { type: transitionType, enabled: enabledTransitions.length ? enabledTransitions : ["CROSSFADE"] }, narration: asWorkerAsset(narration), images: assets.filter(asset => asset.assetType === "image").map(asWorkerAsset), timeline: review.segments.map(segment => ({ imageAssetId: segment.imageAssetId!, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText })) };
+  return { projectId, projectName: review.project.name, approval: { approvedByUserId: review.approval.approvedByUserId, approvedAtMs: review.approval.approvedAt.getTime() }, nativePaths: { sourceDirectory: review.project.imageSourcePath, outputDirectory: review.project.outputPath }, output: { width: 1920 as const, height: 1080 as const, aspectRatio: "16:9" as const, container: "mp4" as const, filename: `${safeProjectName}_approved_1920x1080.mp4` }, zoom: { enabled: review.project.zoomEnabled, amountPercent: review.project.zoomAmountPercent as 3 | 5 | 8 | 12, direction: review.project.zoomDirection }, crossfade: { durationMs: review.project.crossfadeDurationMs as 300 | 500 | 800 | 1000 | 1200 }, narration: asWorkerAsset(narration), images: assets.filter(asset => asset.assetType === "image").map(asWorkerAsset), timeline: review.segments.map(segment => ({ imageAssetId: segment.imageAssetId!, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText })) };
 }
 
 export async function deleteProjectRecord(userId: number, projectId: number) {

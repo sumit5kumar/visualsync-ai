@@ -1,1 +1,0 @@
-ALTER TABLE `projects` ADD `enabledZoomDirections` varchar(16) DEFAULT 'IN,OUT' NOT NULL;
