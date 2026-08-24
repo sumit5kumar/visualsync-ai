@@ -56,6 +56,7 @@ function Workspace({ narrationUrl, projectName, segments, settings, approved, sa
   useEffect(() => { setSelectedId(segments[0]?.id ?? 0); setTime(0); }, [segments]);
   useEffect(() => { setChoice(transitionLabel(settings.transitionType) as typeof choices[number]); }, [settings.transitionType]);
   useEffect(() => {
+    return;
     const saveTimelineTransition = (event: MouseEvent) => {
       const button = (event.target as Element | null)?.closest("button");
       const label = button?.textContent?.trim();
@@ -67,6 +68,7 @@ function Workspace({ narrationUrl, projectName, segments, settings, approved, sa
     return () => document.removeEventListener("click", saveTimelineTransition, true);
   }, [onTransitionChange]);
   useEffect(() => {
+    return;
     const panel = (document.querySelector<HTMLElement>("[data-timeline-render-controls]") ?? Array.from(document.querySelectorAll<HTMLElement>("section")).find(section => section.textContent?.includes("UI only")))!;
     return;
     panel.dataset.timelineRenderControls = "true";
@@ -92,7 +94,8 @@ function Workspace({ narrationUrl, projectName, segments, settings, approved, sa
     return () => { panel.removeEventListener("click", click); panel.removeEventListener("change", change); };
   }, [settings]);
   useEffect(() => {
-    const original = Array.from(document.querySelectorAll<HTMLElement>("section")).find(section => section.textContent?.includes("UI only"));
+    return;
+    const original = Array.from(document.querySelectorAll<HTMLElement>("section")).find(section => section.textContent?.includes("UI only"))!;
     if (!original) return;
     original.style.display = "none";
     const card = document.querySelector<HTMLElement>("[data-additional-render-controls]") ?? document.createElement("section");
