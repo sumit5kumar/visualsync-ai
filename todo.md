@@ -314,6 +314,8 @@
 - [x] Replace the fragmented Timeline editor with one integrated reference-style workspace containing preview, right-side controls, visual clips, timing ruler, audio track, playhead, and direct manipulation.
 - [x] Remove the separate lower Clip Editor strip and replace the visible horizontal scrollbar with smooth full-width Timeline pan/zoom controls.
 - [x] Make visual movement and clip-boundary resizing smooth direct manipulation inside the integrated Timeline while preserving server-side continuity validation and approval revocation.
+- [x] Correct the Timeline workspace’s oversized scale and replace unreliable drag/drop with smooth direct visual reordering and compact in-track timing manipulation.
+- [x] Refine the integrated narration track into a compact, legible editing-style waveform/timing view without changing the underlying audio or processing pipeline.
 - [x] Add a bounded direct-storage upload timeout that falls back to the existing authenticated application upload instead of leaving a 38 MB narration upload indefinitely pending after a successful ticket request.
 - [x] Diagnose and repair the Projects-page API gateway temporary-unavailability mutation error without disrupting the in-progress 16 min test upload.
 - [x] Expose Resume server analysis when a Timeline job remains queued behind an expired processing lease, so the signed-in app can safely resume it without re-uploading media.

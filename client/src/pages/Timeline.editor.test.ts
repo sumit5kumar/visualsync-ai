@@ -13,12 +13,13 @@ describe("Timeline editor presentation", () => {
     expect(source).toContain("Approve Timeline");
   });
 
-  it("represents existing effects and keeps Timeline view zoom presentation-only", () => {
-    expect(source).toContain("visualSettings.crossfadeDurationMs");
-    expect(source).toContain("resolvedZoomDirection(visualSettings, currentIndex)");
-    expect(source).toContain("Timeline view");
-    expect(source).toContain("activeRenderTransition");
-    expect(source).toContain("transitionChoices");
-    expect(source).toContain("non-crossfade transition choices affect only this Timeline interface");
+  it("uses one compact editor timeline with pointer drag, edge resizing, audio timing, and saved transition settings", () => {
+    expect(source).toContain("function Workspace");
+    expect(source).toContain("settings.crossfadeDurationMs");
+    expect(source).toContain('data-clip-id={segment.id}');
+    expect(source).toContain("onPointerMove={moveDrag}");
+    expect(source).toContain('aria-label="Resize end boundary"');
+    expect(source).toContain("narration waveform");
+    expect(source).toContain('transition === "Crossfade"');
   });
 });
