@@ -304,6 +304,10 @@
 - [x] Diagnose and repair the Heartbeat schedule-update deadline timeout that blocks a saved Timeline job restart without resetting uploaded media or completed work.
 - [x] Redesign only the Timeline page presentation into an editor-style interface with clips, audio visualization, ruler, playhead, view zoom, hover states, and visual-only existing effect markers.
 - [x] Preserve and verify the current Timeline timing, playback synchronization, Approve Timeline action, zoom/crossfade behavior, rendering/export controls, and all backend processing unchanged.
+- [x] Recompose only the Timeline page into a reference-inspired editor structure with a large preview, right-side export/scene/transition panels, and a thumbnail/audio timeline.
+- [x] Add truthful Timeline-only transition choices that clearly show direct Crossfade as the current supported render transition and do not modify the production rendering pipeline.
+- [x] Include Fade to black, Wipe left, Wipe right, Slide left, Slide right, and Circle open as Timeline editor choices marked UI-only until separately approved for the render pipeline.
+- [x] Verify that Timeline approval, persisted timing, preview playback, zoom/crossfade settings, processing, and rendering remain unchanged after the UI refinement.
 - [x] Add a bounded direct-storage upload timeout that falls back to the existing authenticated application upload instead of leaving a 38 MB narration upload indefinitely pending after a successful ticket request.
 - [x] Diagnose and repair the Projects-page API gateway temporary-unavailability mutation error without disrupting the in-progress 16 min test upload.
 - [x] Expose Resume server analysis when a Timeline job remains queued behind an expired processing lease, so the signed-in app can safely resume it without re-uploading media.

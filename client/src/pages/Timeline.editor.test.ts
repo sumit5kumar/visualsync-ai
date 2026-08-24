@@ -6,18 +6,19 @@ const source = readFileSync(resolve(process.cwd(), "client/src/pages/Timeline.ts
 
 describe("Timeline editor presentation", () => {
   it("uses saved clip timing and preserves the existing approval action", () => {
-    expect(source).toContain("Visual sequence editor");
+    expect(source).toContain("VisualSync <span className=\"text-cyan-200\">Timeline Editor</span>");
     expect(source).toContain("segment.startMs");
     expect(source).toContain("segment.endMs");
-    expect(source).toContain("onClick={() => approve.mutate(input)}");
-    expect(source).toContain("Approve timeline for render");
+    expect(source).toContain("onApprove={() => approve.mutate(input)}");
+    expect(source).toContain("Approve Timeline");
   });
 
   it("represents existing effects and keeps Timeline view zoom presentation-only", () => {
     expect(source).toContain("visualSettings.crossfadeDurationMs");
     expect(source).toContain("resolvedZoomDirection(visualSettings, currentIndex)");
     expect(source).toContain("Timeline view");
-    expect(source).toContain("original timing locked");
-    expect(source).toContain("affect only this review interface");
+    expect(source).toContain("activeRenderTransition");
+    expect(source).toContain("transitionChoices");
+    expect(source).toContain("non-crossfade transition choices affect only this Timeline interface");
   });
 });
