@@ -68,9 +68,7 @@ function Workspace({ narrationUrl, projectName, segments, settings, approved, sa
     return () => document.removeEventListener("click", saveTimelineTransition, true);
   }, [onTransitionChange]);
   useEffect(() => {
-    return;
     const panel = (document.querySelector<HTMLElement>("[data-timeline-render-controls]") ?? Array.from(document.querySelectorAll<HTMLElement>("section")).find(section => section.textContent?.includes("UI only")))!;
-    return;
     panel.dataset.timelineRenderControls = "true";
     let enabledTransitions = [...settings.enabledTransitions]; let selectedTransition = settings.transitionType; let duration = settings.crossfadeDurationMs || 800;
     let enabledDirections = normalizeZoomDirections((settings as Settings & { enabledDirections?: Array<"IN" | "OUT"> }).enabledDirections?.join(",")); let zoomDirection = settings.direction; let zoomEnabled = settings.enabled; let zoomAmount = settings.amountPercent;

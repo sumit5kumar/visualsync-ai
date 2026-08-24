@@ -340,3 +340,5 @@
 - [x] Remove duplicate Timeline transition controls and retain one compact Transition card plus one compact Effects card in the existing sidebar.
 - [x] Place all compact Transition, Zoom, duration, Random mix, and Fast Render controls inside the existing right-side Timeline sidebar cards.
 - [x] Remove all post-workspace Timeline DOM sidebar overrides and restore the exact original Timeline editor without additional controls.
+- [x] Replace the restored Timeline Transition card’s UI-only badge with an active Random mix control and persist selected transition choices plus duration in that same card.
+- [x] Add compact active Zoom/Effects controls within the same restored right-side Timeline control card without changing any other Timeline workspace surface.
