@@ -344,3 +344,4 @@
 - [x] Add compact active Zoom/Effects controls within the same restored right-side Timeline control card without changing any other Timeline workspace surface.
 - [x] Diagnose and fix the Timeline sidebar controls not appearing in the live rendered view.
 - [x] Confirm the prior published sidebar selector replaced the outer Timeline workspace; constrain the corrected selector to direct right-sidebar cards before republishing.
+- [x] Increase default Timeline visual-clip sizing so images are readable without needing extreme manual zoom.
