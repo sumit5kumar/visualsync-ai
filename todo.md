@@ -334,3 +334,6 @@
 - [x] Add a matching Timeline Effects panel for persisted Zoom selections and selected-only Random mix behavior.
 - [x] Move Zoom amount, selected-direction Random mix, and Fast Render controls into the Timeline sidebar alongside Transition controls.
 - [x] Remove duplicated render-settings controls from Preview while retaining playback, approved handoff download, saved Windows paths, and render guidance.
+- [x] Restore the prior Timeline workspace layout, visual/audio tracks, preview, and existing editing surfaces without removing them for render controls.
+- [x] Retain only the new Transition and Effects controls in the existing right-side Timeline panel after restoration.
+- [x] Preserve every original Timeline preview, visual/audio track, export, selected-clip, and editing surface unchanged; append new settings only as additional right-side cards.
