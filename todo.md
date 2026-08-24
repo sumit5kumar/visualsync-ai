@@ -342,3 +342,5 @@
 - [x] Remove all post-workspace Timeline DOM sidebar overrides and restore the exact original Timeline editor without additional controls.
 - [x] Replace the restored Timeline Transition card’s UI-only badge with an active Random mix control and persist selected transition choices plus duration in that same card.
 - [x] Add compact active Zoom/Effects controls within the same restored right-side Timeline control card without changing any other Timeline workspace surface.
+- [x] Diagnose and fix the Timeline sidebar controls not appearing in the live rendered view.
+- [x] Confirm the prior published sidebar selector replaced the outer Timeline workspace; constrain the corrected selector to direct right-sidebar cards before republishing.
