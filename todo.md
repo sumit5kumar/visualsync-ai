@@ -324,3 +324,8 @@
 - [x] Add horizontal scrolling only within the Timeline track and compact the track width to remove excess separation from the preview workspace.
 - [x] Change Timeline visual movement from target-clip swapping to direct insertion between two adjacent visual clips.
 - [x] Move the compact Timeline track directly beneath the video preview inside the left editor column, with right-side controls remaining alongside it.
+- [x] Document and preserve the existing direct-opacity Crossfade composition as the shared transition-rendering reference.
+- [x] Make every current Timeline transition choice render through the local Windows worker without changing providers, Timeline generation, or other workflows.
+- [x] Add one project-level transition selector and duration dropdown that applies the chosen transition and amount across the approved Timeline render.
+- [x] Add a random transition mode that selects only from the user-enabled transition set at each Timeline boundary.
+- [x] Ensure every working transition keeps full-canvas outgoing/incoming image coverage throughout the effect, preventing black frames or visual gaps.

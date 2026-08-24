@@ -27,6 +27,8 @@ export const projects = mysqlTable("projects", {
   zoomAmountPercent: int("zoomAmountPercent").notNull().default(8),
   zoomDirection: mysqlEnum("zoomDirection", ["IN", "OUT", "AUTO"]).notNull().default("IN"),
   crossfadeDurationMs: int("crossfadeDurationMs").notNull().default(800),
+  transitionType: varchar("transitionType", { length: 24 }).notNull().default("CROSSFADE"),
+  enabledTransitions: varchar("enabledTransitions", { length: 200 }).notNull().default("CROSSFADE"),
   status: mysqlEnum("status", ["draft", "ready", "analyzing", "timeline_ready", "rendering", "completed", "failed"]).notNull().default("draft"),
   workerState: mysqlEnum("workerState", ["unconfigured", "ready", "processing", "error"]).notNull().default("unconfigured"),
   processingStage: mysqlEnum("processingStage", ["idle", "transcribing", "analyzing_images", "building_timeline", "finalizing", "failed"]).notNull().default("idle"),

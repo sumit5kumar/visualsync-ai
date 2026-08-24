@@ -111,11 +111,13 @@ export async function updateProjectSetup(userId: number, projectId: number, inpu
   return { success: true } as const;
 }
 
-export async function updateProjectZoomSettings(userId: number, projectId: number, input: { enabled: boolean; amountPercent: 3 | 5 | 8 | 12; direction: "IN" | "OUT" | "AUTO"; crossfadeDurationMs: 0 | 300 | 500 | 800 | 1000 | 1200 }) {
+export async function updateProjectZoomSettings(userId: number, projectId: number, input: { enabled: boolean; amountPercent: 3 | 5 | 8 | 12; direction: "IN" | "OUT" | "AUTO"; crossfadeDurationMs: 0 | 300 | 500 | 800 | 1000 | 1200; transitionType?: "NONE" | "CROSSFADE" | "FADE_BLACK" | "WIPE_LEFT" | "WIPE_RIGHT" | "SLIDE_LEFT" | "SLIDE_RIGHT" | "CIRCLE_OPEN" | "RANDOM"; enabledTransitions?: Array<"CROSSFADE" | "FADE_BLACK" | "WIPE_LEFT" | "WIPE_RIGHT" | "SLIDE_LEFT" | "SLIDE_RIGHT" | "CIRCLE_OPEN"> }) {
   const db = await requireDb();
   const project = await getUserProject(userId, projectId);
   if (!project) throw new Error("Project not found.");
-  await db.update(projects).set({ zoomEnabled: input.enabled, zoomAmountPercent: input.amountPercent, zoomDirection: input.direction, crossfadeDurationMs: input.crossfadeDurationMs }).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
+  const type = input.transitionType ?? project.transitionType ?? "CROSSFADE";
+  const enabledTransitions = input.enabledTransitions?.join(",") ?? project.enabledTransitions ?? "CROSSFADE";
+  await db.update(projects).set({ zoomEnabled: input.enabled, zoomAmountPercent: input.amountPercent, zoomDirection: input.direction, crossfadeDurationMs: input.crossfadeDurationMs, transitionType: type, enabledTransitions }).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
   return { success: true } as const;
 }
 
@@ -378,7 +380,10 @@ export async function getApprovedRenderHandoff(userId: number, projectId: number
   if (!narration || review.segments.some(segment => !segment.imageAssetId)) throw new Error("Render handoff is missing required media assets.");
   const asWorkerAsset = (asset: typeof assets[number]) => ({ assetId: asset.id, filename: asset.originalFilename, storageKey: asset.storageKey, mimeType: asset.mimeType ?? "application/octet-stream", sequenceNumber: asset.sequenceNumber, contentHash: asset.contentHash, perceptualHash: asset.perceptualHash });
   const safeProjectName = review.project.name.replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || `project_${projectId}`;
-  return { projectId, projectName: review.project.name, approval: { approvedByUserId: review.approval.approvedByUserId, approvedAtMs: review.approval.approvedAt.getTime() }, nativePaths: { sourceDirectory: review.project.imageSourcePath, outputDirectory: review.project.outputPath }, output: { width: 1920 as const, height: 1080 as const, aspectRatio: "16:9" as const, container: "mp4" as const, filename: `${safeProjectName}_approved_1920x1080.mp4` }, zoom: { enabled: review.project.zoomEnabled, amountPercent: review.project.zoomAmountPercent as 3 | 5 | 8 | 12, direction: review.project.zoomDirection }, crossfade: { durationMs: review.project.crossfadeDurationMs as 300 | 500 | 800 | 1000 | 1200 }, narration: asWorkerAsset(narration), images: assets.filter(asset => asset.assetType === "image").map(asWorkerAsset), timeline: review.segments.map(segment => ({ imageAssetId: segment.imageAssetId!, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText })) };
+  const supportedTransitions = ["CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN"] as const;
+  const enabledTransitions = (review.project.enabledTransitions ?? "CROSSFADE").split(",").filter((type): type is typeof supportedTransitions[number] => supportedTransitions.includes(type as typeof supportedTransitions[number]));
+  const transitionType = ["NONE", ...supportedTransitions, "RANDOM"].includes(review.project.transitionType ?? "") ? review.project.transitionType : "CROSSFADE";
+  return { projectId, projectName: review.project.name, approval: { approvedByUserId: review.approval.approvedByUserId, approvedAtMs: review.approval.approvedAt.getTime() }, nativePaths: { sourceDirectory: review.project.imageSourcePath, outputDirectory: review.project.outputPath }, output: { width: 1920 as const, height: 1080 as const, aspectRatio: "16:9" as const, container: "mp4" as const, filename: `${safeProjectName}_approved_1920x1080.mp4` }, zoom: { enabled: review.project.zoomEnabled, amountPercent: review.project.zoomAmountPercent as 3 | 5 | 8 | 12, direction: review.project.zoomDirection }, crossfade: { durationMs: review.project.crossfadeDurationMs as 0 | 300 | 500 | 800 | 1000 | 1200 }, transition: { type: transitionType, enabled: enabledTransitions.length ? enabledTransitions : ["CROSSFADE"] }, narration: asWorkerAsset(narration), images: assets.filter(asset => asset.assetType === "image").map(asWorkerAsset), timeline: review.segments.map(segment => ({ imageAssetId: segment.imageAssetId!, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText })) };
 }
 
 export async function deleteProjectRecord(userId: number, projectId: number) {

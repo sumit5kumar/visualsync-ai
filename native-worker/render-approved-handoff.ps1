@@ -30,6 +30,8 @@ $zoomEnabled = $true
 $zoomAmountPercent = 8.0
 $zoomDirection = "IN"
 $crossfadeDurationMs = 800
+$transitionType = "CROSSFADE"
+$enabledTransitions = @("CROSSFADE")
 
 if ($handoff.PSObject.Properties.Name -contains "zoom") {
   $zoomSettings = $handoff.zoom
@@ -41,12 +43,22 @@ if ($handoff.PSObject.Properties.Name -contains "crossfade") {
   $crossfadeSettings = $handoff.crossfade
   if ($crossfadeSettings.PSObject.Properties.Name -contains "durationMs") { $crossfadeDurationMs = [int]$crossfadeSettings.durationMs }
 }
+if ($handoff.PSObject.Properties.Name -contains "transition") {
+  $transitionSettings = $handoff.transition
+  if ($transitionSettings.PSObject.Properties.Name -contains "type") { $transitionType = ([string]$transitionSettings.type).ToUpperInvariant() }
+  if ($transitionSettings.PSObject.Properties.Name -contains "enabled") { $enabledTransitions = @($transitionSettings.enabled | ForEach-Object { ([string]$_).ToUpperInvariant() }) }
+}
 if ($zoomAmountPercent -notin @(3.0, 5.0, 8.0, 12.0)) { $zoomAmountPercent = 8.0 }
 if ($zoomDirection -notin @("IN", "OUT", "AUTO")) { $zoomDirection = "IN" }
 if ($crossfadeDurationMs -notin @(0, 300, 500, 800, 1000, 1200)) { $crossfadeDurationMs = 800 }
+$supportedTransitions = @("CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN")
+if ($transitionType -notin @("NONE", "RANDOM") + $supportedTransitions) { $transitionType = "CROSSFADE" }
+$enabledTransitions = @($enabledTransitions | Where-Object { $_ -in $supportedTransitions } | Select-Object -Unique)
+if ($enabledTransitions.Count -eq 0) { $enabledTransitions = @("CROSSFADE") }
+if ($transitionType -eq "NONE") { $crossfadeDurationMs = 0 }
 $transitionSeconds = $crossfadeDurationMs / 1000.0
 $transitionHalfSeconds = $transitionSeconds / 2.0
-$fastRender = !$zoomEnabled -and $crossfadeDurationMs -eq 0
+$fastRender = !$zoomEnabled -and ($crossfadeDurationMs -eq 0 -or $transitionType -eq "NONE")
 
 $assetNames = @{}
 foreach ($image in $handoff.images) { $assetNames[[string]$image.assetId] = $image.filename }
@@ -292,6 +304,73 @@ function Draw-AlphaLayer([System.Drawing.Graphics]$graphics, [System.Drawing.Ima
   $attributes.Dispose()
 }
 
+function Get-TransitionType([int]$boundaryIndex) {
+  if ($transitionType -eq "RANDOM") {
+    # Deterministic selection makes one approved handoff reproduce exactly on later local renders.
+    return $enabledTransitions[(($boundaryIndex * 17) + 3) % $enabledTransitions.Count]
+  }
+  return $transitionType
+}
+
+function Draw-TransitionFrame([System.Drawing.Graphics]$graphics, [System.Drawing.Image]$currentLayer, [System.Drawing.Image]$nextLayer, [double]$progress, [string]$type) {
+  $progress = [Math]::Min(1.0, [Math]::Max(0.0, $progress))
+  $destination = New-Object System.Drawing.Rectangle(0, 0, $canvasWidth, $canvasHeight)
+  # Every effect paints a complete outgoing canvas before revealing the incoming visual.
+  # This preserves the accepted Crossfade's no-black-frame behavior.
+  switch ($type) {
+    "CROSSFADE" {
+      Draw-AlphaLayer $graphics $currentLayer (1.0 - $progress)
+      Draw-AlphaLayer $graphics $nextLayer $progress
+      break
+    }
+    "FADE_BLACK" {
+      Draw-AlphaLayer $graphics $currentLayer (1.0 - $progress)
+      Draw-AlphaLayer $graphics $nextLayer $progress
+      $shade = [int](64 * (1.0 - [Math]::Abs((2.0 * $progress) - 1.0)))
+      if ($shade -gt 0) { $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb($shade, 0, 0, 0)); try { $graphics.FillRectangle($brush, $destination) } finally { $brush.Dispose() } }
+      break
+    }
+    "WIPE_LEFT" {
+      Draw-AlphaLayer $graphics $currentLayer 1.0
+      $reveal = [int]([Math]::Round($canvasWidth * $progress))
+      if ($reveal -gt 0) { $rect = New-Object System.Drawing.Rectangle(0, 0, $reveal, $canvasHeight); $graphics.DrawImage($nextLayer, $rect, 0, 0, $reveal, $canvasHeight, [System.Drawing.GraphicsUnit]::Pixel) }
+      break
+    }
+    "WIPE_RIGHT" {
+      Draw-AlphaLayer $graphics $currentLayer 1.0
+      $reveal = [int]([Math]::Round($canvasWidth * $progress))
+      if ($reveal -gt 0) { $left = $canvasWidth - $reveal; $rect = New-Object System.Drawing.Rectangle($left, 0, $reveal, $canvasHeight); $graphics.DrawImage($nextLayer, $rect, $left, 0, $reveal, $canvasHeight, [System.Drawing.GraphicsUnit]::Pixel) }
+      break
+    }
+    "SLIDE_LEFT" {
+      Draw-AlphaLayer $graphics $currentLayer 1.0
+      $offset = [int]([Math]::Round($canvasWidth * (1.0 - $progress)))
+      $rect = New-Object System.Drawing.Rectangle($offset, 0, $canvasWidth, $canvasHeight)
+      $graphics.DrawImage($nextLayer, $rect, 0, 0, $canvasWidth, $canvasHeight, [System.Drawing.GraphicsUnit]::Pixel)
+      break
+    }
+    "SLIDE_RIGHT" {
+      Draw-AlphaLayer $graphics $currentLayer 1.0
+      $offset = -[int]([Math]::Round($canvasWidth * (1.0 - $progress)))
+      $rect = New-Object System.Drawing.Rectangle($offset, 0, $canvasWidth, $canvasHeight)
+      $graphics.DrawImage($nextLayer, $rect, 0, 0, $canvasWidth, $canvasHeight, [System.Drawing.GraphicsUnit]::Pixel)
+      break
+    }
+    "CIRCLE_OPEN" {
+      Draw-AlphaLayer $graphics $currentLayer 1.0
+      $radius = [Math]::Max(1, [int]([Math]::Ceiling(([Math]::Sqrt(($canvasWidth * $canvasWidth) + ($canvasHeight * $canvasHeight)) / 2.0) * $progress)))
+      $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+      try {
+        $path.AddEllipse(($canvasWidth / 2) - $radius, ($canvasHeight / 2) - $radius, $radius * 2, $radius * 2)
+        $state = $graphics.Save()
+        try { $graphics.SetClip($path); $graphics.DrawImage($nextLayer, $destination) } finally { $graphics.Restore($state) }
+      } finally { $path.Dispose() }
+      break
+    }
+    default { Draw-AlphaLayer $graphics $currentLayer 1.0 }
+  }
+}
+
 $segments = @()
 $clipRoot = Join-Path $OutputDirectory (".visualsync-subpixel-clips-" + [Guid]::NewGuid().ToString("N"))
 $frameDirectory = Join-Path $OutputDirectory (".visualsync-crossfade-" + [Guid]::NewGuid().ToString("N"))
@@ -436,10 +515,8 @@ try {
   $segmentIndex = 0
   for ($outputFrameIndex = 0; $outputFrameIndex -lt $outputFrameCount; $outputFrameIndex++) {
     $timeSeconds = $outputFrameIndex / [double]$FrameRate
-    # Keep the direct opacity transition centered on the approved segment boundary.
-    # The outgoing shot remains full-strength until the final half-transition; the incoming shot
-    # reaches full opacity only after its own approved start time. This prevents crossfades from
-    # moving visual cues early relative to the narration timeline.
+    # Keep every full-canvas transition centered on the approved segment boundary.
+    # The incoming shot reaches full coverage only after its own approved start time, preserving narration cues.
     while ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge ([double]$segments[$segmentIndex].endSeconds + $transitionHalfSeconds)) { $segmentIndex++ }
     $current = $segments[$segmentIndex]
     $currentLocalSeconds = $timeSeconds - [double]$current.startSeconds
@@ -450,15 +527,15 @@ try {
     $fadeStart = [double]$current.endSeconds - $transitionHalfSeconds
     $fadeEnd = [double]$current.endSeconds + $transitionHalfSeconds
     try {
-      if ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge $fadeStart -and $timeSeconds -lt $fadeEnd) {
+      $activeTransition = if ($segmentIndex -lt ($segments.Count - 1)) { Get-TransitionType $segmentIndex } else { "NONE" }
+      if ($segmentIndex -lt ($segments.Count - 1) -and $activeTransition -ne "NONE" -and $transitionSeconds -gt 0 -and $timeSeconds -ge $fadeStart -and $timeSeconds -lt $fadeEnd) {
         $fadeProgress = [Math]::Min(1.0, [Math]::Max(0.0, ($timeSeconds - $fadeStart) / $transitionSeconds))
         $currentLayer = Open-ClipFrame $current (Get-ClipFrameIndex $current $currentLocalSeconds)
         $next = $segments[$segmentIndex + 1]
         $nextLocalSeconds = [Math]::Max(0.0, $timeSeconds - [double]$next.startSeconds)
         $nextLayer = Open-ClipFrame $next (Get-ClipFrameIndex $next $nextLocalSeconds)
         try {
-          Draw-AlphaLayer $graphics $currentLayer (1.0 - $fadeProgress)
-          Draw-AlphaLayer $graphics $nextLayer $fadeProgress
+          Draw-TransitionFrame $graphics $currentLayer $nextLayer $fadeProgress $activeTransition
         } finally {
           $currentLayer.Dispose()
           $nextLayer.Dispose()
@@ -472,7 +549,7 @@ try {
       $graphics.Dispose()
       $frame.Dispose()
     }
-    if (($outputFrameIndex % $FrameRate) -eq 0) { Write-Progress -Activity "Applying existing direct crossfade" -Status "Frame $outputFrameIndex of $outputFrameCount" -PercentComplete (45 + (($outputFrameIndex / [double]$outputFrameCount) * 45)) }
+    if (($outputFrameIndex % $FrameRate) -eq 0) { Write-Progress -Activity "Applying full-canvas transitions" -Status "Frame $outputFrameIndex of $outputFrameCount" -PercentComplete (45 + (($outputFrameIndex / [double]$outputFrameCount) * 45)) }
   }
   $compositionStopwatch.Stop()
   $compositionTelemetry = Stop-StageTelemetry $compositionTelemetryJob
