@@ -2,7 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { geminiApiKeys, groqApiKeys, mediaAssets, projects, timelineApprovals, timelineGenerationJobs, timelineSegments, type InsertUser, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
-import { canEditValidatedTimeline, planImageSubstitution } from "./timelineEditing";
+import { canEditValidatedTimeline, planImageSubstitution, planTimelineBoundaryAdjustment, planTimelineVisualMove } from "./timelineEditing";
 import { validateTimeline } from "./timelineValidation";
 import { buildProjectProcessingProgress } from "./projectProgress";
 import { narrationTranscriptionSummary } from "./narrationTranscription";
@@ -323,6 +323,45 @@ export async function substituteTimelineImage(userId: number, input: { projectId
       decisionType: "CHANGE",
       selectionReason: `User selected ${candidate.originalFilename} from the analyzed candidate gallery. Original analysis rationale: ${originalReason}`,
     }).where(eq(timelineSegments.id, segment.id));
+    await transaction.insert(timelineApprovals).values({ projectId: input.projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
+    await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, input.projectId));
+  });
+  return { ...planned, approvalStatus: "revoked" as const };
+}
+
+export async function adjustTimelineBoundary(userId: number, input: { projectId: number; segmentId: number; edge: "start" | "end"; boundaryMs: number }) {
+  const project = await getUserProject(userId, input.projectId);
+  if (!project || !project.audioDurationMs || !canEditValidatedTimeline(project.status)) throw new Error("A validated timeline is required before clip timing can be adjusted.");
+  const db = await requireDb();
+  const allSegments = await db.select().from(timelineSegments).where(eq(timelineSegments.projectId, input.projectId)).orderBy(timelineSegments.startMs);
+  const existing = validateTimeline(project.audioDurationMs, allSegments.map(segment => ({ ...segment, confidence: Number(segment.confidence) })));
+  if (!existing.valid) throw new Error(`Timeline cannot be edited because its validated coverage is no longer intact: ${existing.issues.join(" ")}`);
+  const planned = planTimelineBoundaryAdjustment(allSegments, input.segmentId, input.edge, input.boundaryMs);
+  const changes = new Map(planned.changedSegments.map(segment => [segment.id, segment]));
+  const proposed = allSegments.map(segment => ({ ...segment, ...changes.get(segment.id), confidence: Number(segment.confidence) }));
+  const validation = validateTimeline(project.audioDurationMs, proposed);
+  if (!validation.valid) throw new Error(`That clip edit would break narration coverage: ${validation.issues.join(" ")}`);
+  await db.transaction(async transaction => {
+    for (const change of planned.changedSegments) await transaction.update(timelineSegments).set({ startMs: change.startMs, endMs: change.endMs }).where(eq(timelineSegments.id, change.id));
+    await transaction.insert(timelineApprovals).values({ projectId: input.projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
+    await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, input.projectId));
+  });
+  return { ...planned, approvalStatus: "revoked" as const, validation };
+}
+
+export async function moveTimelineVisual(userId: number, input: { projectId: number; sourceSegmentId: number; targetSegmentId: number }) {
+  const project = await getUserProject(userId, input.projectId);
+  if (!project || !project.audioDurationMs || !canEditValidatedTimeline(project.status)) throw new Error("A validated timeline is required before a visual can be moved.");
+  const db = await requireDb();
+  const allSegments = await db.select().from(timelineSegments).where(eq(timelineSegments.projectId, input.projectId)).orderBy(timelineSegments.startMs);
+  const existing = validateTimeline(project.audioDurationMs, allSegments.map(segment => ({ ...segment, confidence: Number(segment.confidence) })));
+  if (!existing.valid) throw new Error(`Timeline cannot be edited because its validated coverage is no longer intact: ${existing.issues.join(" ")}`);
+  const planned = planTimelineVisualMove(allSegments, input.sourceSegmentId, input.targetSegmentId);
+  const source = allSegments.find(segment => segment.id === input.sourceSegmentId)!;
+  const target = allSegments.find(segment => segment.id === input.targetSegmentId)!;
+  await db.transaction(async transaction => {
+    await transaction.update(timelineSegments).set({ imageAssetId: planned.targetImageAssetId, decisionType: "CHANGE", selectionReason: `User moved this visual from Timeline clip ${target.id}; original rationale: ${source.selectionReason}` }).where(eq(timelineSegments.id, source.id));
+    await transaction.update(timelineSegments).set({ imageAssetId: planned.sourceImageAssetId, decisionType: "CHANGE", selectionReason: `User moved this visual from Timeline clip ${source.id}; original rationale: ${target.selectionReason}` }).where(eq(timelineSegments.id, target.id));
     await transaction.insert(timelineApprovals).values({ projectId: input.projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
     await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, input.projectId));
   });

@@ -5,7 +5,7 @@ import { parse as parseCookie } from "cookie";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
-import { activateGeminiKey, activateGroqKey, approveTimeline, createProjectRecord, deleteAllProjectRecords, deleteProjectRecord, getApprovedRenderHandoff, getRenderedProjectVideo, getStoredGeminiKey, getStoredGroqKey, getTimelineReview, listProjectTimeline, listRenderedProjectVideos, listTimelineCandidates, listUserProjects, listVisibleGeminiKeys, listVisibleGroqKeys, prepareProjectMediaImport, recordGeminiKeyTest, recordGroqKeyTest, recordGroqProjectVerification, removeGeminiKey, removeGroqKey, saveValidatedGeminiKey, saveValidatedGroqKey, substituteTimelineImage, updateProjectSetup, updateProjectZoomSettings } from "./db";
+import { activateGeminiKey, activateGroqKey, adjustTimelineBoundary, approveTimeline, createProjectRecord, deleteAllProjectRecords, deleteProjectRecord, getApprovedRenderHandoff, getRenderedProjectVideo, getStoredGeminiKey, getStoredGroqKey, getTimelineReview, listProjectTimeline, listRenderedProjectVideos, listTimelineCandidates, listUserProjects, listVisibleGeminiKeys, listVisibleGroqKeys, moveTimelineVisual, prepareProjectMediaImport, recordGeminiKeyTest, recordGroqKeyTest, recordGroqProjectVerification, removeGeminiKey, removeGroqKey, saveValidatedGeminiKey, saveValidatedGroqKey, substituteTimelineImage, updateProjectSetup, updateProjectZoomSettings } from "./db";
 import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { getTimelineGenerationJob, queueTimelineGenerationJob, runTimelineGenerationJob, setTimelineGenerationSchedule, TIMELINE_JOB_CRON } from "./timelineGenerationJobs";
 import { signTimelineScheduleTask } from "./timelineScheduleAuth";
@@ -105,6 +105,8 @@ export const appRouter = router({
     candidates: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).query(({ ctx, input }) => listTimelineCandidates(ctx.user.id, input.projectId)),
     approve: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => approveTimeline(ctx.user.id, input.projectId)),
     substituteImage: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), segmentId: z.number().int().positive(), newImageAssetId: z.number().int().positive() })).mutation(({ ctx, input }) => substituteTimelineImage(ctx.user.id, input)),
+    adjustBoundary: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), segmentId: z.number().int().positive(), edge: z.enum(["start", "end"]), boundaryMs: z.number().int().nonnegative() })).mutation(({ ctx, input }) => adjustTimelineBoundary(ctx.user.id, input)),
+    moveVisual: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), sourceSegmentId: z.number().int().positive(), targetSegmentId: z.number().int().positive() })).mutation(({ ctx, input }) => moveTimelineVisual(ctx.user.id, input)),
     validate: protectedProcedure.input(z.object({ audioDurationMs: z.number().finite().positive(), segments: z.array(proposedSegment).min(1) })).mutation(({ input }) => validateTimeline(input.audioDurationMs, input.segments)),
   }),
   worker: router({

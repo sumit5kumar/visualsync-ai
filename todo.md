@@ -308,6 +308,9 @@
 - [x] Add truthful Timeline-only transition choices that clearly show direct Crossfade as the current supported render transition and do not modify the production rendering pipeline.
 - [x] Include Fade to black, Wipe left, Wipe right, Slide left, Slide right, and Circle open as Timeline editor choices marked UI-only until separately approved for the render pipeline.
 - [x] Verify that Timeline approval, persisted timing, preview playback, zoom/crossfade settings, processing, and rendering remain unchanged after the UI refinement.
+- [x] Add real Timeline clip move and duration-resize editing that persists validated timing changes while retaining continuous narration coverage.
+- [x] Revoke approval after a persisted timing edit and require fresh Timeline approval before the existing render handoff can be used.
+- [x] Preserve image selection, provider processing, zoom/crossfade settings, local render behavior, and all non-Timeline pages while adding editable clip timing.
 - [x] Add a bounded direct-storage upload timeout that falls back to the existing authenticated application upload instead of leaving a 38 MB narration upload indefinitely pending after a successful ticket request.
 - [x] Diagnose and repair the Projects-page API gateway temporary-unavailability mutation error without disrupting the in-progress 16 min test upload.
 - [x] Expose Resume server analysis when a Timeline job remains queued behind an expired processing lease, so the signed-in app can safely resume it without re-uploading media.
