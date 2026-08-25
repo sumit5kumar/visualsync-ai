@@ -122,6 +122,25 @@ export async function updateProjectZoomSettings(userId: number, projectId: numbe
   return { success: true } as const;
 }
 
+const supportedRenderOutputs = [
+  { width: 1920, height: 1080, aspectRatio: "16:9" as const },
+  { width: 1280, height: 720, aspectRatio: "16:9" as const },
+  { width: 854, height: 480, aspectRatio: "16:9" as const },
+  { width: 1080, height: 1920, aspectRatio: "9:16" as const },
+  { width: 720, height: 1280, aspectRatio: "9:16" as const },
+  { width: 480, height: 854, aspectRatio: "9:16" as const },
+];
+
+export async function updateProjectOutputFormat(userId: number, projectId: number, input: { width: number; height: number; aspectRatio: "16:9" | "9:16" }) {
+  const output = supportedRenderOutputs.find(candidate => candidate.width === input.width && candidate.height === input.height && candidate.aspectRatio === input.aspectRatio);
+  if (!output) throw new Error("Choose one of the supported 1080p, 720p, or 480p output presets.");
+  const db = await requireDb();
+  const project = await getUserProject(userId, projectId);
+  if (!project) throw new Error("Project not found.");
+  await db.update(projects).set({ resolutionWidth: output.width, resolutionHeight: output.height, aspectRatio: output.aspectRatio }).where(and(eq(projects.id, projectId), eq(projects.userId, userId)));
+  return { success: true as const, output };
+}
+
 export async function prepareProjectMediaImport(userId: number, projectId: number) {
   const db = await requireDb();
   const project = await getUserProject(userId, projectId);
@@ -385,7 +404,8 @@ export async function getApprovedRenderHandoff(userId: number, projectId: number
   const enabledTransitions = (review.project.enabledTransitions ?? "CROSSFADE").split(",").filter((type): type is typeof supportedTransitions[number] => supportedTransitions.includes(type as typeof supportedTransitions[number]));
   const transitionType = ["NONE", ...supportedTransitions, "RANDOM"].includes(review.project.transitionType ?? "") ? review.project.transitionType : "CROSSFADE";
   const enabledZoomDirections = (review.project.enabledZoomDirections ?? "IN,OUT").split(",").filter((direction): direction is "IN" | "OUT" | "PAN_LEFT" | "PAN_RIGHT" | "DIAGONAL" | "KEN_BURNS" => ["IN", "OUT", "PAN_LEFT", "PAN_RIGHT", "DIAGONAL", "KEN_BURNS"].includes(direction));
-  return { projectId, projectName: review.project.name, approval: { approvedByUserId: review.approval.approvedByUserId, approvedAtMs: review.approval.approvedAt.getTime() }, nativePaths: { sourceDirectory: review.project.imageSourcePath, outputDirectory: review.project.outputPath }, output: { width: 1920 as const, height: 1080 as const, aspectRatio: "16:9" as const, container: "mp4" as const, filename: `${safeProjectName}_approved_1920x1080.mp4` }, zoom: { enabled: review.project.zoomEnabled, amountPercent: review.project.zoomAmountPercent as 3 | 5 | 8 | 12, direction: review.project.zoomDirection, enabledDirections: enabledZoomDirections.length ? enabledZoomDirections : ["IN", "OUT"] }, crossfade: { durationMs: review.project.crossfadeDurationMs as 0 | 300 | 500 | 800 | 1000 | 1200 }, transition: { type: transitionType, enabled: enabledTransitions.length ? enabledTransitions : ["CROSSFADE"] }, narration: asWorkerAsset(narration), images: assets.filter(asset => asset.assetType === "image").map(asWorkerAsset), timeline: review.segments.map(segment => ({ imageAssetId: segment.imageAssetId!, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText })) };
+  const output = supportedRenderOutputs.find(candidate => candidate.width === review.project.resolutionWidth && candidate.height === review.project.resolutionHeight && candidate.aspectRatio === review.project.aspectRatio) ?? supportedRenderOutputs[0];
+  return { projectId, projectName: review.project.name, approval: { approvedByUserId: review.approval.approvedByUserId, approvedAtMs: review.approval.approvedAt.getTime() }, nativePaths: { sourceDirectory: review.project.imageSourcePath, outputDirectory: review.project.outputPath }, output: { ...output, container: "mp4" as const, filename: `${safeProjectName}_approved_${output.width}x${output.height}.mp4` }, zoom: { enabled: review.project.zoomEnabled, amountPercent: review.project.zoomAmountPercent as 3 | 5 | 8 | 12, direction: review.project.zoomDirection, enabledDirections: enabledZoomDirections.length ? enabledZoomDirections : ["IN", "OUT"] }, crossfade: { durationMs: review.project.crossfadeDurationMs as 0 | 300 | 500 | 800 | 1000 | 1200 }, transition: { type: transitionType, enabled: enabledTransitions.length ? enabledTransitions : ["CROSSFADE"] }, narration: asWorkerAsset(narration), images: assets.filter(asset => asset.assetType === "image").map(asWorkerAsset), timeline: review.segments.map(segment => ({ imageAssetId: segment.imageAssetId!, startMs: segment.startMs, endMs: segment.endMs, narrationText: segment.narrationText })) };
 }
 
 export async function deleteProjectRecord(userId: number, projectId: number) {

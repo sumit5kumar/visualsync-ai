@@ -26,7 +26,8 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain('while ($segmentIndex -lt ($segments.Count - 1) -and $timeSeconds -ge ([double]$segments[$segmentIndex].endSeconds))');
     expect(worker).toContain('$previous = $segments[$segmentIndex - 1]');
     expect(worker).toContain("function Test-FinalEncoder");
-    expect(worker).toContain('"-f", "lavfi", "-i", "color=c=black:s=1920x1080:r=30:d=0.1", "-frames:v", "1"');
+    expect(worker).toContain('$supportedOutputPresets = @("1920x1080:16:9", "1280x720:16:9", "854x480:16:9", "1080x1920:9:16", "720x1280:9:16", "480x854:9:16")');
+    expect(worker).toContain('color=c=black:s=$canvasWidth`x$canvasHeight:r=30:d=0.1');
     expect(worker).not.toContain('color=c=black:s=128x128:r=30:d=0.1');
     expect(worker).toContain('[ValidateSet("AUTO", "GPU", "CPU")][string]$RenderMode = "AUTO"');
     expect(worker).toContain("function Start-StageTelemetry");

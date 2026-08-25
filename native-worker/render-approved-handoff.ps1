@@ -19,12 +19,14 @@ Add-Type -AssemblyName System.Drawing
 
 $handoff = Get-Content -Raw $HandoffPath | ConvertFrom-Json
 if (!$handoff.approval.approvedAtMs -or !$handoff.approval.approvedByUserId) { throw "Rendering is blocked because the timeline handoff is not approved." }
-if ($handoff.output.width -ne 1920 -or $handoff.output.height -ne 1080 -or $handoff.output.container -ne "mp4" -or !$handoff.output.filename) { throw "The worker accepts only the approved project-specific 1920x1080 MP4 contract." }
+$supportedOutputPresets = @("1920x1080:16:9", "1280x720:16:9", "854x480:16:9", "1080x1920:9:16", "720x1280:9:16", "480x854:9:16")
+$outputPreset = "$($handoff.output.width)x$($handoff.output.height):$($handoff.output.aspectRatio)"
+if ($outputPreset -notin $supportedOutputPresets -or $handoff.output.container -ne "mp4" -or !$handoff.output.filename) { throw "The worker accepts only approved 1080p, 720p, or 480p 16:9 or 9:16 MP4 presets." }
 
-$canvasWidth = 1920
-$canvasHeight = 1080
-$oversizedWidth = 2112
-$oversizedHeight = 1188
+$canvasWidth = [int]$handoff.output.width
+$canvasHeight = [int]$handoff.output.height
+$oversizedWidth = [int]([Math]::Ceiling(($canvasWidth * 1.1) / 2.0) * 2)
+$oversizedHeight = [int]([Math]::Ceiling(($canvasHeight * 1.1) / 2.0) * 2)
 $transitionSeconds = 0.8
 $zoomEnabled = $true
 $zoomAmountPercent = 8.0
@@ -267,12 +269,12 @@ function Render-GeqFallbackFrames([object]$segment) {
 function Test-FinalEncoder([string[]]$encoderArguments) {
   $probePath = Join-Path $OutputDirectory (".visualsync-encoder-probe-" + [Guid]::NewGuid().ToString("N") + ".mp4")
   try {
-    # Probe at the same 1920x1080 geometry used by the final encoder. Some NVENC
+    # Probe at the selected output geometry used by the final encoder. Some NVENC
     # driver profiles reject the old 128x128 test with an invalid-parameter error
     # despite successfully encoding the approved output contract.
     $probeArguments = @(
       "-hide_banner", "-loglevel", "error",
-      "-f", "lavfi", "-i", "color=c=black:s=1920x1080:r=30:d=0.1", "-frames:v", "1"
+      "-f", "lavfi", "-i", "color=c=black:s=$canvasWidth`x$canvasHeight:r=30:d=0.1", "-frames:v", "1"
     ) + $encoderArguments + @("-pix_fmt", "yuv420p", "-y", $probePath)
     $previousErrorActionPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
