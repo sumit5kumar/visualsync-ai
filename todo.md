@@ -353,3 +353,4 @@
 - [x] Inspect and document the current proven stable zoom-rendering method for use as the only allowed basis for future motion effects.
 - [x] Add only deterministic Pan left, Pan right, Diagonal pan, and Ken Burns mix effects while preserving all existing effects, transitions, Timeline behavior, and protected workflows.
 - [x] Add only future-render 1080p, 720p, and 480p presets with 16:9 default and optional 9:16 aspect selection, preserving all protected workflows and existing renders.
+- [x] Refine only the UI color system, contrast, surfaces, borders, and hierarchy for a more professional visual presentation while preserving all behavior.
