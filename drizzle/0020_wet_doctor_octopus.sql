@@ -1,0 +1,1 @@
+ALTER TABLE `projects` MODIFY COLUMN `enabledZoomDirections` varchar(100) NOT NULL DEFAULT 'IN,OUT';

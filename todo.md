@@ -350,3 +350,5 @@
 - [x] Restore the pre-rollback multiple-transition version and reapply only the validated active per-image pacing protection.
 - [x] Restore transient Heartbeat schedule-update cancellation recovery without changing Timeline pacing, transitions, rendering, providers, or saved project data.
 - [x] Smooth only the existing non-Crossfade local transition curves and add explicit None choices for Transition and Effects without changing any protected workflow.
+- [x] Inspect and document the current proven stable zoom-rendering method for use as the only allowed basis for future motion effects.
+- [x] Add only deterministic Pan left, Pan right, Diagonal pan, and Ken Burns mix effects while preserving all existing effects, transitions, Timeline behavior, and protected workflows.

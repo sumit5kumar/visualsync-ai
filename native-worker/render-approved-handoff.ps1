@@ -52,7 +52,8 @@ if ($handoff.PSObject.Properties.Name -contains "transition") {
 }
 if ($zoomAmountPercent -notin @(3.0, 5.0, 8.0, 12.0)) { $zoomAmountPercent = 8.0 }
 if ($zoomDirection -notin @("IN", "OUT", "AUTO")) { $zoomDirection = "IN" }
-$enabledZoomDirections = @($enabledZoomDirections | Where-Object { $_ -in @("IN", "OUT") } | Select-Object -Unique)
+$supportedEffectDirections = @("IN", "OUT", "PAN_LEFT", "PAN_RIGHT", "DIAGONAL", "KEN_BURNS")
+$enabledZoomDirections = @($enabledZoomDirections | Where-Object { $_ -in $supportedEffectDirections } | Select-Object -Unique)
 if ($enabledZoomDirections.Count -eq 0) { $enabledZoomDirections = @("IN", "OUT") }
 if ($crossfadeDurationMs -notin @(0, 300, 500, 800, 1000, 1200)) { $crossfadeDurationMs = 800 }
 $supportedTransitions = @("CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN")
@@ -132,16 +133,28 @@ function Stop-StageTelemetry([object]$job) {
 
 function Get-ZoomPlan([int]$segmentIndex) {
   if (!$zoomEnabled) {
-    return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0; direction = "OFF" }
+    return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0; startPanX = 0.0; endPanX = 0.0; startPanY = 0.0; endPanY = 0.0; direction = "OFF" }
   }
 
   $amount = $zoomAmountPercent / 100.0
   $direction = $zoomDirection
   if ($direction -eq "AUTO") { $direction = $enabledZoomDirections[(($segmentIndex * 13) + 1) % $enabledZoomDirections.Count] }
   if ($direction -eq "OUT") {
-    return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0; direction = "OUT" }
+    return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0; startPanX = 0.0; endPanX = 0.0; startPanY = 0.0; endPanY = 0.0; direction = "OUT" }
   }
-  return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; direction = "IN" }
+  if ($direction -eq "PAN_LEFT") {
+    return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0 + $amount; startPanX = 1.0; endPanX = -1.0; startPanY = 0.0; endPanY = 0.0; direction = "PAN_LEFT" }
+  }
+  if ($direction -eq "PAN_RIGHT") {
+    return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0 + $amount; startPanX = -1.0; endPanX = 1.0; startPanY = 0.0; endPanY = 0.0; direction = "PAN_RIGHT" }
+  }
+  if ($direction -eq "DIAGONAL") {
+    return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0 + $amount; startPanX = -1.0; endPanX = 1.0; startPanY = -1.0; endPanY = 1.0; direction = "DIAGONAL" }
+  }
+  if ($direction -eq "KEN_BURNS") {
+    return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = -0.65; endPanX = 0.65; startPanY = -0.35; endPanY = 0.35; direction = "KEN_BURNS" }
+  }
+  return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = 0.0; endPanX = 0.0; startPanY = 0.0; endPanY = 0.0; direction = "IN" }
 }
 
 function New-SubpixelCenteredZoomFilter([double]$startZoom, [double]$endZoom, [int]$frameCount) {
@@ -194,8 +207,10 @@ function Render-DeterministicProductionFrames([object]$segment, [System.Drawing.
       $zoom = $segment.zoomStart + (($segment.zoomEnd - $segment.zoomStart) * $progress)
       $sourceWidth = $oversizedWidth / $zoom
       $sourceHeight = $oversizedHeight / $zoom
-      $sourceX = ($oversizedWidth - $sourceWidth) / 2.0
-      $sourceY = ($oversizedHeight - $sourceHeight) / 2.0
+      $panX = $segment.startPanX + (($segment.endPanX - $segment.startPanX) * $progress)
+      $panY = $segment.startPanY + (($segment.endPanY - $segment.startPanY) * $progress)
+      $sourceX = (($oversizedWidth - $sourceWidth) / 2.0) * (1.0 + $panX)
+      $sourceY = (($oversizedHeight - $sourceHeight) / 2.0) * (1.0 + $panY)
       $cropSamples += [pscustomobject]@{ frame = $frameIndex; sourceX = $sourceX; sourceY = $sourceY; sourceWidth = $sourceWidth; sourceHeight = $sourceHeight }
       $frame = New-Object System.Drawing.Bitmap($canvasWidth, $canvasHeight, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
       $graphics = [System.Drawing.Graphics]::FromImage($frame)
@@ -225,7 +240,10 @@ function Test-DeterministicProductionFrames([object]$segment, [object[]]$cropSam
   }
   $expectedSign = [Math]::Sign([double]$cropSamples[-1].sourceWidth - [double]$cropSamples[0].sourceWidth)
   $reversals = @($widthSteps | Where-Object { [Math]::Sign($_) -ne 0 -and [Math]::Sign($_) -ne $expectedSign }).Count
-  return $reversals -eq 0
+  $xSteps = @(); $ySteps = @()
+  for ($index = 1; $index -lt $cropSamples.Count; $index++) { $xSteps += ([double]$cropSamples[$index].sourceX - [double]$cropSamples[$index - 1].sourceX); $ySteps += ([double]$cropSamples[$index].sourceY - [double]$cropSamples[$index - 1].sourceY) }
+  $hasAxisReversal = { param([double[]]$steps) $signs = @($steps | ForEach-Object { [Math]::Sign($_) } | Where-Object { $_ -ne 0 } | Select-Object -Unique); return $signs.Count -gt 1 }
+  return $reversals -eq 0 -and -not (& $hasAxisReversal $xSteps) -and -not (& $hasAxisReversal $ySteps)
 }
 
 function Render-GeqFallbackFrames([object]$segment) {
@@ -408,6 +426,10 @@ foreach ($segmentIndex in 0..($handoff.timeline.Count - 1)) {
     frameDirectory = (Join-Path $clipRoot ("clip_{0:D4}" -f $segmentIndex))
     zoomStart = $plan.startZoom
     zoomEnd = $plan.endZoom
+    startPanX = $plan.startPanX
+    endPanX = $plan.endPanX
+    startPanY = $plan.startPanY
+    endPanY = $plan.endPanY
     zoomDirection = $plan.direction
   }
 }

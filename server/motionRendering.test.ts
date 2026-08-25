@@ -78,6 +78,9 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain("Every effect paints a complete outgoing canvas before revealing the incoming visual");
     expect(worker).toContain('$progress = $progress * $progress * (3.0 - (2.0 * $progress))');
     expect(worker).toContain('if ($type -ne "CROSSFADE" -and $type -ne "NONE")');
+    expect(worker).toContain('"PAN_LEFT", "PAN_RIGHT", "DIAGONAL", "KEN_BURNS"');
+    expect(worker).toContain('startPanX');
+    expect(worker).toContain('Test-DeterministicProductionFrames');
   });
 
   it("keeps explicit None controls in the Timeline sidebar without changing the transition or zoom contracts", () => {
@@ -86,6 +89,10 @@ describe("middle-origin motion rendering", () => {
     expect(timeline).toContain('data-zoom-none="true"');
     expect(timeline).toContain('selectedTransition = "NONE"');
     expect(timeline).toContain('zoomEnabled = false');
+    expect(timeline).toContain('"Pan left"');
+    expect(timeline).toContain('"Pan right"');
+    expect(timeline).toContain('"Diagonal pan"');
+    expect(timeline).toContain('"Ken Burns mix"');
   });
 
   it("uses a center origin for every zoomed browser preview layer", () => {

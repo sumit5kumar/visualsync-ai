@@ -62,7 +62,7 @@ export const workerRenderHandoffSchema = z.object({
   approval: z.object({ approvedByUserId: z.number().int().positive(), approvedAtMs: z.number().int().positive() }),
   nativePaths: z.object({ sourceDirectory: z.string().nullable(), outputDirectory: z.string().nullable() }),
   output: z.object({ width: z.literal(1920), height: z.literal(1080), aspectRatio: z.literal("16:9"), container: z.literal("mp4"), filename: z.string().regex(/^[A-Za-z0-9_-]+_approved_1920x1080\.mp4$/) }),
-  zoom: z.object({ enabled: z.boolean(), amountPercent: z.union([z.literal(3), z.literal(5), z.literal(8), z.literal(12)]), direction: z.enum(["IN", "OUT", "AUTO"]), enabledDirections: z.array(z.enum(["IN", "OUT"])).min(1) }),
+  zoom: z.object({ enabled: z.boolean(), amountPercent: z.union([z.literal(3), z.literal(5), z.literal(8), z.literal(12)]), direction: z.enum(["IN", "OUT", "AUTO"]), enabledDirections: z.array(z.enum(["IN", "OUT", "PAN_LEFT", "PAN_RIGHT", "DIAGONAL", "KEN_BURNS"])).min(1) }),
   crossfade: z.object({ durationMs: z.union([z.literal(0), z.literal(300), z.literal(500), z.literal(800), z.literal(1000), z.literal(1200)]) }),
   transition: z.object({ type: z.enum(["NONE", "CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN", "RANDOM"]), enabled: z.array(z.enum(["CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN"])).min(1) }),
   narration: workerAssetSchema,
