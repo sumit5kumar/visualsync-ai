@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `zoomRandomMix` boolean DEFAULT false NOT NULL;

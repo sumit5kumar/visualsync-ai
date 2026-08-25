@@ -1,8 +1,8 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "0245bf86-38e9-4fd1-9cde-72d1ed7d417d",
-  "prevId": "e977eae4-6b76-486c-88dd-66a93fd84be4",
+  "id": "2255cbd5-5751-412c-bd24-f27a9e70b459",
+  "prevId": "0245bf86-38e9-4fd1-9cde-72d1ed7d417d",
   "tables": {
     "geminiApiKeys": {
       "name": "geminiApiKeys",
@@ -623,6 +623,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'IN'"
+        },
+        "zoomRandomMix": {
+          "name": "zoomRandomMix",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "enabledZoomDirections": {
           "name": "enabledZoomDirections",

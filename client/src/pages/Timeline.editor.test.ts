@@ -33,6 +33,9 @@ describe("Timeline editor presentation", () => {
     expect(source).toContain("data-zoom-amount");
     expect(source).toContain("Fast Render · no zoom / no transitions");
     expect(source).toContain("enabledZoomDirections");
+    expect(source).toContain("randomMix = !randomMix");
+    expect(source).toContain("Select one or more effects");
+    expect(source).toContain("enabledDirections.includes(direction) && enabledDirections.length > 1");
     expect(source).toContain('aria-label="Render aspect ratio"');
     expect(source).toContain('aria-label="Future render quality"');
     expect(source).toContain("Existing videos and Timeline timing stay unchanged.");

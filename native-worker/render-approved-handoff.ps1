@@ -31,6 +31,7 @@ $transitionSeconds = 0.8
 $zoomEnabled = $true
 $zoomAmountPercent = 8.0
 $zoomDirection = "IN"
+$zoomRandomMix = $false
 $enabledZoomDirections = @("IN", "OUT")
 $crossfadeDurationMs = 800
 $transitionType = "CROSSFADE"
@@ -41,6 +42,7 @@ if ($handoff.PSObject.Properties.Name -contains "zoom") {
   if ($zoomSettings.PSObject.Properties.Name -contains "enabled") { $zoomEnabled = [bool]$zoomSettings.enabled }
   if ($zoomSettings.PSObject.Properties.Name -contains "amountPercent") { $zoomAmountPercent = [double]$zoomSettings.amountPercent }
   if ($zoomSettings.PSObject.Properties.Name -contains "direction") { $zoomDirection = ([string]$zoomSettings.direction).ToUpperInvariant() }
+  if ($zoomSettings.PSObject.Properties.Name -contains "randomMix") { $zoomRandomMix = [bool]$zoomSettings.randomMix }
   if ($zoomSettings.PSObject.Properties.Name -contains "enabledDirections") { $enabledZoomDirections = @($zoomSettings.enabledDirections | ForEach-Object { ([string]$_).ToUpperInvariant() }) }
 }
 if ($handoff.PSObject.Properties.Name -contains "crossfade") {
@@ -140,7 +142,8 @@ function Get-ZoomPlan([int]$segmentIndex) {
 
   $amount = $zoomAmountPercent / 100.0
   $direction = $zoomDirection
-  if ($direction -eq "AUTO") { $direction = $enabledZoomDirections[(($segmentIndex * 13) + 1) % $enabledZoomDirections.Count] }
+  if ($zoomRandomMix) { $direction = $enabledZoomDirections[(($segmentIndex * 13) + 1) % $enabledZoomDirections.Count] }
+  elseif ($direction -eq "AUTO") { $direction = $enabledZoomDirections[0] }
   if ($direction -eq "OUT") {
     return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0; startPanX = 0.0; endPanX = 0.0; startPanY = 0.0; endPanY = 0.0; direction = "OUT" }
   }
