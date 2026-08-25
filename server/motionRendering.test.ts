@@ -57,6 +57,11 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain('"CIRCLE_OPEN"');
     expect(worker).toContain("function Get-TransitionType");
     expect(worker).toContain("return $enabledTransitions");
+    expect(worker).toContain("function Get-DeterministicMixIndex");
+    expect(worker).toContain('Get-DeterministicMixIndex "effect" $segmentSeed $enabledZoomDirections.Count');
+    expect(worker).toContain('Get-DeterministicMixIndex "transition" $boundarySeed $enabledTransitions.Count');
+    expect(worker).not.toContain('(($boundaryIndex * 17) + 3) % $enabledTransitions.Count');
+    expect(worker).not.toContain('(($segmentIndex * 13) + 1) % $enabledZoomDirections.Count');
     expect(worker).toContain("Draw-TransitionFrame $graphics $previousLayer $currentLayer $fadeProgress $activeTransition");
     expect(worker).toContain('$zoomEnabled = $true');
     expect(worker).toContain('if ($handoff.PSObject.Properties.Name -contains "zoom")');

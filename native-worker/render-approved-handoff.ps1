@@ -135,14 +135,25 @@ function Stop-StageTelemetry([object]$job) {
   }
 }
 
-function Get-ZoomPlan([int]$segmentIndex) {
+function Get-DeterministicMixIndex([string]$scope, [string]$seed, [int]$choiceCount) {
+  if ($choiceCount -le 1) { return 0 }
+  $hasher = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $hash = $hasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes("$scope|$($handoff.projectId)|$seed"))
+    return [int]((([int]$hash[0] * 256) + [int]$hash[1]) % $choiceCount)
+  } finally {
+    $hasher.Dispose()
+  }
+}
+
+function Get-ZoomPlan([int]$segmentIndex, [string]$segmentSeed) {
   if (!$zoomEnabled) {
     return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0; startPanX = 0.0; endPanX = 0.0; startPanY = 0.0; endPanY = 0.0; direction = "OFF" }
   }
 
   $amount = $zoomAmountPercent / 100.0
   $direction = $zoomDirection
-  if ($zoomRandomMix) { $direction = $enabledZoomDirections[(($segmentIndex * 13) + 1) % $enabledZoomDirections.Count] }
+  if ($zoomRandomMix) { $direction = $enabledZoomDirections[(Get-DeterministicMixIndex "effect" $segmentSeed $enabledZoomDirections.Count)] }
   elseif ($direction -eq "AUTO") { $direction = $enabledZoomDirections[0] }
   if ($direction -eq "OUT") {
     return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0; startPanX = 0.0; endPanX = 0.0; startPanY = 0.0; endPanY = 0.0; direction = "OUT" }
@@ -331,10 +342,10 @@ function Draw-AlphaLayer([System.Drawing.Graphics]$graphics, [System.Drawing.Ima
   $attributes.Dispose()
 }
 
-function Get-TransitionType([int]$boundaryIndex) {
+function Get-TransitionType([int]$boundaryIndex, [string]$boundarySeed) {
   if ($transitionType -eq "RANDOM") {
-    # Deterministic selection makes one approved handoff reproduce exactly on later local renders.
-    return $enabledTransitions[(($boundaryIndex * 17) + 3) % $enabledTransitions.Count]
+    # A timeline-bound hash is reproducible for this approved handoff but avoids a visible modulo sequence.
+    return $enabledTransitions[(Get-DeterministicMixIndex "transition" $boundarySeed $enabledTransitions.Count)]
   }
   return $transitionType
 }
@@ -420,7 +431,7 @@ foreach ($segmentIndex in 0..($handoff.timeline.Count - 1)) {
   $durationSeconds = $endSeconds - $startSeconds
   if ($durationSeconds -le 0) { throw "Timeline contains a non-positive duration for image: $filename" }
   $frameCount = [Math]::Max(1, [int][Math]::Ceiling($durationSeconds * $FrameRate))
-  $plan = Get-ZoomPlan $segmentIndex
+  $plan = Get-ZoomPlan $segmentIndex "$($timelineSegment.imageAssetId):$($timelineSegment.startMs):$($timelineSegment.endMs)"
   $segments += [pscustomobject]@{
     filename = $filename
     imagePath = $imagePath
@@ -564,7 +575,7 @@ try {
     $fadeStart = [double]$current.startSeconds
     $fadeEnd = $fadeStart + $transitionSeconds
     try {
-      $activeTransition = if ($segmentIndex -gt 0) { Get-TransitionType ($segmentIndex - 1) } else { "NONE" }
+      $activeTransition = if ($segmentIndex -gt 0) { Get-TransitionType ($segmentIndex - 1) "$($segments[$segmentIndex - 1].filename):$($current.filename):$($current.startSeconds)" } else { "NONE" }
       if ($segmentIndex -gt 0 -and $activeTransition -ne "NONE" -and $transitionSeconds -gt 0 -and $timeSeconds -ge $fadeStart -and $timeSeconds -lt $fadeEnd) {
         $fadeProgress = [Math]::Min(1.0, [Math]::Max(0.0, ($timeSeconds - $fadeStart) / $transitionSeconds))
         $previous = $segments[$segmentIndex - 1]

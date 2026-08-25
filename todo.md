@@ -355,3 +355,4 @@
 - [x] Add only future-render 1080p, 720p, and 480p presets with 16:9 default and optional 9:16 aspect selection, preserving all protected workflows and existing renders.
 - [x] Refine only the UI color system, contrast, surfaces, borders, and hierarchy for a more professional visual presentation while preserving all behavior.
 - [x] Fix only the Timeline Effects Random mix toggle so it can turn off, and restore reliable multi-effect selection without changing other Timeline or rendering behavior.
+- [x] Fix only Random mix selection so chosen transitions do not visibly repeat as a fixed sequence and chosen effects do not fall back to Zoom In for every clip.
