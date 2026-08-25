@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canEditValidatedTimeline, planImageSubstitution } from "./timelineEditing";
+import { canEditValidatedTimeline, MIN_TIMELINE_CLIP_DURATION_MS, planImageSubstitution, planTimelineBoundaryAdjustment, planTimelineVisualMove } from "./timelineEditing";
 
 const segments = [
   { id: 31, imageAssetId: 7, startMs: 0, endMs: 1360 },
@@ -23,5 +23,23 @@ describe("canEditValidatedTimeline", () => {
     expect(canEditValidatedTimeline("completed")).toBe(true);
     expect(canEditValidatedTimeline("draft")).toBe(false);
     expect(canEditValidatedTimeline("analyzing")).toBe(false);
+  });
+});
+
+describe("real Timeline timing edits", () => {
+  it("moves only the shared boundary between adjacent clips while keeping both clips readable", () => {
+    expect(planTimelineBoundaryAdjustment(segments, 31, "end", 2000)).toEqual({ segmentId: 31, edge: "end", boundaryMs: 2000, changedSegments: [{ id: 31, startMs: 0, endMs: 2000 }, { id: 32, startMs: 2000, endMs: 4920 }] });
+  });
+
+  it("rejects first or last outer boundaries and invalid short clip edits", () => {
+    expect(() => planTimelineBoundaryAdjustment(segments, 31, "start", 200)).toThrow("first clip");
+    expect(() => planTimelineBoundaryAdjustment(segments, 32, "end", 4000)).toThrow("last clip");
+    expect(() => planTimelineBoundaryAdjustment(segments, 31, "end", MIN_TIMELINE_CLIP_DURATION_MS - 1)).toThrow("at least");
+  });
+
+  it("plans a visual insertion before a target Timeline position without modifying timing", () => {
+    const ordered = [...segments, { id: 33, imageAssetId: 9, startMs: 4920, endMs: 7310 }];
+    expect(planTimelineVisualMove(ordered, 31, 33, "before").assignments).toEqual([{ segmentId: 31, sourceSegmentId: 32, imageAssetId: 8 }, { segmentId: 32, sourceSegmentId: 31, imageAssetId: 7 }]);
+    expect(planTimelineVisualMove(ordered, 31, 33, "before").placement).toBe("before");
   });
 });
