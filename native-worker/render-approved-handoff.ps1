@@ -146,6 +146,13 @@ function Get-DeterministicMixIndex([string]$scope, [string]$seed, [int]$choiceCo
   }
 }
 
+function Get-BalancedMotionCornerIndex([string]$scope, [int]$segmentIndex) {
+  $projectSeed = [string]$handoff.projectId
+  $offset = Get-DeterministicMixIndex "$scope-start" $projectSeed 4
+  $step = if ((Get-DeterministicMixIndex "$scope-step" $projectSeed 2) -eq 0) { 1 } else { 3 }
+  return ($offset + ($segmentIndex * $step)) % 4
+}
+
 function Get-ZoomPlan([int]$segmentIndex, [string]$segmentSeed) {
   if (!$zoomEnabled) {
     return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0; startPanX = 0.0; endPanX = 0.0; startPanY = 0.0; endPanY = 0.0; direction = "OFF" }
@@ -165,13 +172,20 @@ function Get-ZoomPlan([int]$segmentIndex, [string]$segmentSeed) {
     return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0 + $amount; startPanX = -1.0; endPanX = 1.0; startPanY = 0.0; endPanY = 0.0; direction = "PAN_RIGHT" }
   }
   if ($direction -eq "DIAGONAL") {
-    return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0 + $amount; startPanX = -1.0; endPanX = 1.0; startPanY = -1.0; endPanY = 1.0; direction = "DIAGONAL" }
+    switch (Get-BalancedMotionCornerIndex "diagonal" $segmentIndex) {
+      0 { return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0 + $amount; startPanX = -1.0; endPanX = 1.0; startPanY = -1.0; endPanY = 1.0; direction = "DIAGONAL_TL_BR" } }
+      1 { return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0 + $amount; startPanX = 1.0; endPanX = -1.0; startPanY = -1.0; endPanY = 1.0; direction = "DIAGONAL_TR_BL" } }
+      2 { return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0 + $amount; startPanX = 1.0; endPanX = -1.0; startPanY = 1.0; endPanY = -1.0; direction = "DIAGONAL_BR_TL" } }
+      default { return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0 + $amount; startPanX = -1.0; endPanX = 1.0; startPanY = 1.0; endPanY = -1.0; direction = "DIAGONAL_BL_TR" } }
+    }
   }
   if ($direction -eq "KEN_BURNS") {
-    if ((Get-DeterministicMixIndex "ken-burns-direction" $segmentSeed 2) -eq 1) {
-      return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = 0.65; endPanX = -0.65; startPanY = 0.35; endPanY = -0.35; direction = "KEN_BURNS_REVERSE" }
+    switch (Get-BalancedMotionCornerIndex "ken-burns" $segmentIndex) {
+      0 { return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = -0.65; endPanX = 0.65; startPanY = -0.35; endPanY = 0.35; direction = "KEN_BURNS_TL_BR" } }
+      1 { return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = 0.65; endPanX = -0.65; startPanY = -0.35; endPanY = 0.35; direction = "KEN_BURNS_TR_BL" } }
+      2 { return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = 0.65; endPanX = -0.65; startPanY = 0.35; endPanY = -0.35; direction = "KEN_BURNS_BR_TL" } }
+      default { return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = -0.65; endPanX = 0.65; startPanY = 0.35; endPanY = -0.35; direction = "KEN_BURNS_BL_TR" } }
     }
-    return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = -0.65; endPanX = 0.65; startPanY = -0.35; endPanY = 0.35; direction = "KEN_BURNS" }
   }
   return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = 0.0; endPanX = 0.0; startPanY = 0.0; endPanY = 0.0; direction = "IN" }
 }
