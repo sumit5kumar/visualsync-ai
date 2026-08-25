@@ -22,7 +22,29 @@ const NARRATION_SOURCE_PREPARATION_VERSION = 6;
 const MP3_PREPARATION_SCAN_BYTES = 256 * 1024;
 const MP3_OVERLAP_BYTE_BUDGET = Math.floor(SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES * 0.25);
 const HOSTED_STORAGE_READ_TIMEOUT_MS = 20_000;
+const MAX_ACTIVE_PACING_QUALITY_RETRIES = 1;
 export function buildBoundedPacingBatches<T>(items: T[], batchSize = MAX_PACING_IMAGES_PER_REQUEST) { const batches: T[][] = []; for (let index = 0; index < items.length; index += batchSize) batches.push(items.slice(index, index + batchSize)); return batches; }
+
+export function isGenericLinearPacingRamp(weights: number[]) {
+  if (weights.length < 4 || weights.some(weight => !Number.isFinite(weight) || weight <= 0)) return false;
+  const steps = weights.slice(1).map((weight, index) => weight - weights[index]);
+  const strictlyIncreasing = steps.every(step => step > 0);
+  const strictlyDecreasing = steps.every(step => step < 0);
+  if (!strictlyIncreasing && !strictlyDecreasing) return false;
+  const magnitudes = steps.map(step => Math.abs(step));
+  const averageStep = magnitudes.reduce((sum, step) => sum + step, 0) / magnitudes.length;
+  const stepSpread = Math.max(...magnitudes) - Math.min(...magnitudes);
+  return stepSpread <= Math.max(0.001, averageStep * 0.025);
+}
+
+function activePacingPrompt(batchIndex: number, batchCount: number, batch: Array<{ sequence: number | null; scene: string }>, narrationDigest: string, corrective = false) {
+  return `Create content-specific variable pacing weights for contiguous ordered image batch ${batchIndex + 1}/${batchCount}. Reply only {"weights":[...]} with exactly ${batch.length} positive non-equal decimals. Assign every weight independently from the narration and the visible scene: important, dense, or concept-changing scenes may need longer holds; simple bridge scenes may need shorter holds. Do not use image number as a proxy for duration. Do not return an ascending or descending sequence, arithmetic progression, evenly spaced ramp, or a repeated pattern.${corrective ? " The previous answer was rejected because it was a generic sequential ramp; recalculate each image from its actual scene and narrative role." : ""} Narration digest: ${JSON.stringify(narrationDigest)}. Image batch: ${JSON.stringify(batch)}`;
+}
+
+function assertActivePacingWeights(weights: number[], expectedLength: number) {
+  if (weights.length !== expectedLength || weights.some(weight => !Number.isFinite(weight) || weight <= 0)) throw new Error("Groq returned an invalid active per-image pacing plan.");
+  if (isGenericLinearPacingRamp(weights)) throw new Error("Groq returned a generic linear pacing ramp instead of content-specific per-image pacing.");
+}
 export async function mapWithConcurrency<T, Result>(items: T[], concurrency: number, operation: (item: T, index: number) => Promise<Result>) {
   const results = new Array<Result>(items.length);
   let nextIndex = 0;
@@ -259,10 +281,22 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
     let pacingProviderKey: { label: string; maskedKey: string } | null = null;
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
-      const prompt = `Create variable pacing weights for contiguous ordered image batch ${batchIndex + 1}/${batches.length}. Reply only {"weights":[...]} with exactly ${batch.length} positive non-equal decimals. Larger means longer hold. Narration digest: ${JSON.stringify(narrationDigest)}. Image batch: ${JSON.stringify(batch)}`;
-      const pacingRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completePacingPlan({ prompt }), key }));
-      const batchWeights = Array.isArray((pacingRun.value as { weights?: unknown }).weights) ? (pacingRun.value as { weights: unknown[] }).weights.map(weight => Number(weight)) : [];
-      if (batchWeights.length !== batch.length || batchWeights.some(weight => !Number.isFinite(weight) || weight <= 0)) throw new Error("Groq returned an invalid bounded pacing plan.");
+      let pacingRun: { value: unknown; key: { label: string; maskedKey: string } } | null = null;
+      let batchWeights: number[] = [];
+      for (let qualityAttempt = 0; qualityAttempt <= MAX_ACTIVE_PACING_QUALITY_RETRIES; qualityAttempt += 1) {
+        const prompt = activePacingPrompt(batchIndex, batches.length, batch, narrationDigest, qualityAttempt > 0);
+        const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completePacingPlan({ prompt }), key }));
+        const candidateWeights = Array.isArray((run.value as { weights?: unknown }).weights) ? (run.value as { weights: unknown[] }).weights.map(weight => Number(weight)) : [];
+        try {
+          assertActivePacingWeights(candidateWeights, batch.length);
+          pacingRun = run;
+          batchWeights = candidateWeights;
+          break;
+        } catch (error) {
+          if (qualityAttempt === MAX_ACTIVE_PACING_QUALITY_RETRIES) throw error;
+        }
+      }
+      if (!pacingRun) throw new Error("Groq did not return an active per-image pacing plan.");
       weights.push(...batchWeights);
       pacingProviderKey = pacingRun.key;
     }
@@ -296,6 +330,7 @@ export type TimelineGenerationWorkState = {
   nextPacingBatch?: number;
   pacingProviderKeyLabel?: string | null;
   pacingProviderKeyMasked?: string | null;
+  pacingQualityRetries?: number;
 };
 
 export type TimelineGenerationSliceResult = {
@@ -313,6 +348,7 @@ export function normalizeTimelineGenerationWorkState(value: unknown): TimelineGe
     nextPacingBatch: Number.isInteger(record.nextPacingBatch) && Number(record.nextPacingBatch) >= 0 ? Number(record.nextPacingBatch) : 0,
     pacingProviderKeyLabel: typeof record.pacingProviderKeyLabel === "string" ? record.pacingProviderKeyLabel : null,
     pacingProviderKeyMasked: typeof record.pacingProviderKeyMasked === "string" ? record.pacingProviderKeyMasked : null,
+    pacingQualityRetries: Number.isInteger(record.pacingQualityRetries) && Number(record.pacingQualityRetries) >= 0 ? Number(record.pacingQualityRetries) : 0,
   };
 }
 
@@ -401,11 +437,17 @@ export async function processProjectTimelineSlice(userId: number, projectId: num
   if (nextPacingBatch < batches.length) {
     await db.update(projects).set({ processingStage: "building_timeline", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
     const batch = batches[nextPacingBatch];
-    const prompt = `Create variable pacing weights for contiguous ordered image batch ${nextPacingBatch + 1}/${batches.length}. Reply only {"weights":[...]} with exactly ${batch.length} positive non-equal decimals. Larger means longer hold. Narration digest: ${JSON.stringify(fullNarration.slice(0, MAX_PACING_NARRATION_CHARACTERS))}. Image batch: ${JSON.stringify(batch)}`;
+    const prompt = activePacingPrompt(nextPacingBatch, batches.length, batch, fullNarration.slice(0, MAX_PACING_NARRATION_CHARACTERS), (workState.pacingQualityRetries ?? 0) > 0);
     const pacingRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completePacingPlan({ prompt, timeoutMs: 20_000 }), key }), { maxAttempts: 1 });
     const batchWeights = Array.isArray((pacingRun.value as { weights?: unknown }).weights) ? (pacingRun.value as { weights: unknown[] }).weights.map(Number) : [];
-    if (batchWeights.length !== batch.length || batchWeights.some(weight => !Number.isFinite(weight) || weight <= 0)) throw new Error("Groq returned an invalid bounded pacing plan.");
-    return { stage: "building_timeline", workState: { ...workState, pacingWeights: [...(workState.pacingWeights ?? []), ...batchWeights], nextPacingBatch: nextPacingBatch + 1, pacingProviderKeyLabel: pacingRun.key.label, pacingProviderKeyMasked: pacingRun.key.maskedKey } };
+    try {
+      assertActivePacingWeights(batchWeights, batch.length);
+    } catch (error) {
+      const pacingQualityRetries = (workState.pacingQualityRetries ?? 0) + 1;
+      if (pacingQualityRetries > MAX_ACTIVE_PACING_QUALITY_RETRIES) throw error;
+      return { stage: "building_timeline", workState: { ...workState, pacingQualityRetries } };
+    }
+    return { stage: "building_timeline", workState: { ...workState, pacingQualityRetries: 0, pacingWeights: [...(workState.pacingWeights ?? []), ...batchWeights], nextPacingBatch: nextPacingBatch + 1, pacingProviderKeyLabel: pacingRun.key.label, pacingProviderKeyMasked: pacingRun.key.maskedKey } };
   }
 
   const weights = workState.pacingWeights ?? [];

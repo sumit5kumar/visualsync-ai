@@ -347,3 +347,4 @@
 - [x] Increase default Timeline visual-clip sizing so images are readable without needing extreme manual zoom.
 - [x] Audit AI-generated narration-to-visual alignment for late image changes without changing any timing, provider, prompt, or project data.
 - [x] Compare persisted API Timeline boundaries to local transition-render timing and permanently correct any early incoming-visual regression without changing the AI pipeline.
+- [x] Restore the pre-rollback multiple-transition version and reapply only the validated active per-image pacing protection.
