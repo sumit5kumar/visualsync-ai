@@ -318,6 +318,11 @@ function Get-TransitionType([int]$boundaryIndex) {
 
 function Draw-TransitionFrame([System.Drawing.Graphics]$graphics, [System.Drawing.Image]$currentLayer, [System.Drawing.Image]$nextLayer, [double]$progress, [string]$type) {
   $progress = [Math]::Min(1.0, [Math]::Max(0.0, $progress))
+  # Keep the accepted Crossfade curve untouched. Every other visual transition
+  # eases in and out so it starts and settles gently without changing its timing window.
+  if ($type -ne "CROSSFADE" -and $type -ne "NONE") {
+    $progress = $progress * $progress * (3.0 - (2.0 * $progress))
+  }
   $destination = New-Object System.Drawing.Rectangle(0, 0, $canvasWidth, $canvasHeight)
   # Every effect paints a complete outgoing canvas before revealing the incoming visual.
   # This preserves the accepted Crossfade's no-black-frame behavior.

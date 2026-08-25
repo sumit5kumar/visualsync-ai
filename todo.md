@@ -349,3 +349,4 @@
 - [x] Compare persisted API Timeline boundaries to local transition-render timing and permanently correct any early incoming-visual regression without changing the AI pipeline.
 - [x] Restore the pre-rollback multiple-transition version and reapply only the validated active per-image pacing protection.
 - [x] Restore transient Heartbeat schedule-update cancellation recovery without changing Timeline pacing, transitions, rendering, providers, or saved project data.
+- [x] Smooth only the existing non-Crossfade local transition curves and add explicit None choices for Transition and Effects without changing any protected workflow.

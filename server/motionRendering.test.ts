@@ -76,6 +76,16 @@ describe("middle-origin motion rendering", () => {
     expect(worker).not.toContain('$fadeStart = [double]$current.endSeconds - $transitionHalfSeconds');
     expect(worker).toContain('"-pix_fmt", "yuv420p", "-r", $FrameRate.ToString([System.Globalization.CultureInfo]::InvariantCulture), "-fps_mode", "cfr"');
     expect(worker).toContain("Every effect paints a complete outgoing canvas before revealing the incoming visual");
+    expect(worker).toContain('$progress = $progress * $progress * (3.0 - (2.0 * $progress))');
+    expect(worker).toContain('if ($type -ne "CROSSFADE" -and $type -ne "NONE")');
+  });
+
+  it("keeps explicit None controls in the Timeline sidebar without changing the transition or zoom contracts", () => {
+    const timeline = readFileSync(resolve(projectRoot, "client/src/pages/Timeline.tsx"), "utf8");
+    expect(timeline).toContain('data-transition-none="true"');
+    expect(timeline).toContain('data-zoom-none="true"');
+    expect(timeline).toContain('selectedTransition = "NONE"');
+    expect(timeline).toContain('zoomEnabled = false');
   });
 
   it("uses a center origin for every zoomed browser preview layer", () => {
