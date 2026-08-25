@@ -34,6 +34,8 @@ describe("Timeline editor presentation", () => {
     expect(source).toContain("Fast Render · no zoom / no transitions");
     expect(source).toContain("enabledZoomDirections");
     expect(source).toContain("randomMix = !randomMix");
+    expect(source).toContain("zoomEnabled = true; zoomDirection = \"AUTO\"");
+    expect(source).toContain("renderSettingsQueueRef.current = renderSettingsQueueRef.current.catch(() => undefined).then");
     expect(source).toContain("Select one or more effects");
     expect(source).toContain("enabledDirections.includes(direction) && enabledDirections.length > 1");
     expect(source).toContain("restoreSnapshot");

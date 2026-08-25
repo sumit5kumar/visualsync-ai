@@ -358,3 +358,4 @@
 - [x] Fix only Random mix selection so chosen transitions do not visibly repeat as a fixed sequence and chosen effects do not fall back to Zoom In for every clip.
 - [x] Add Timeline-only Undo and Redo for user visual moves, visual replacements, and timing edits without changing AI analysis, rendering, or other workflows.
 - [x] Correct only Ken Burns mix so it deterministically uses both diagonal directions while preserving the stable frame-by-frame renderer and all other effects.
+- [x] Fix only Timeline Transition and Effects controls so selecting None does not prevent later Random mix or manual option selection.
