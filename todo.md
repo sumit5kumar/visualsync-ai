@@ -306,3 +306,8 @@
 - [x] Diagnose and repair the Projects-page API gateway temporary-unavailability mutation error without disrupting the in-progress 16 min test upload.
 - [x] Expose Resume server analysis when a Timeline job remains queued behind an expired processing lease, so the signed-in app can safely resume it without re-uploading media.
 - [x] Diagnose and repair the Projects-page temporary API gateway mutation failure reported at 19:30 IST, while preserving the 16 min test's uploaded media and durable Timeline state.
+- [x] Compare the auto-Timeline implementation at the August 20 reference-video baseline against later revisions to identify the exact regression without changing the app.
+- [x] Inspect the provided reference-video folder read-only and compare its render artifacts with current Timeline boundary behavior before proposing any correction.
+- [x] Compare the user’s new project created from the exact reference folder against the saved reference handoff image by image and millisecond by millisecond once it reaches Timeline Ready.
+- [x] Restore the reference active per-image pacing behavior and prevent generic linear pacing ramps from being accepted, without changing transcription, image analysis, provider configuration, or rendering.
+- [x] Verify that the pacing-only restoration leaves image order, provider configuration, Timeline UI, transitions, Zoom, render worker, audio sync, uploads, and saved project data unchanged.
