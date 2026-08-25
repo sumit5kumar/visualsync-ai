@@ -85,6 +85,8 @@ describe("middle-origin motion rendering", () => {
     expect(worker).toContain('$progress = $progress * $progress * (3.0 - (2.0 * $progress))');
     expect(worker).toContain('if ($type -ne "CROSSFADE" -and $type -ne "NONE")');
     expect(worker).toContain('"PAN_LEFT", "PAN_RIGHT", "DIAGONAL", "KEN_BURNS"');
+    expect(worker).toContain('Get-DeterministicMixIndex "ken-burns-direction" $segmentSeed 2');
+    expect(worker).toContain('direction = "KEN_BURNS_REVERSE"');
     expect(worker).toContain('startPanX');
     expect(worker).toContain('Test-DeterministicProductionFrames');
   });

@@ -168,6 +168,9 @@ function Get-ZoomPlan([int]$segmentIndex, [string]$segmentSeed) {
     return [pscustomobject]@{ startZoom = 1.0 + $amount; endZoom = 1.0 + $amount; startPanX = -1.0; endPanX = 1.0; startPanY = -1.0; endPanY = 1.0; direction = "DIAGONAL" }
   }
   if ($direction -eq "KEN_BURNS") {
+    if ((Get-DeterministicMixIndex "ken-burns-direction" $segmentSeed 2) -eq 1) {
+      return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = 0.65; endPanX = -0.65; startPanY = 0.35; endPanY = -0.35; direction = "KEN_BURNS_REVERSE" }
+    }
     return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = -0.65; endPanX = 0.65; startPanY = -0.35; endPanY = 0.35; direction = "KEN_BURNS" }
   }
   return [pscustomobject]@{ startZoom = 1.0; endZoom = 1.0 + $amount; startPanX = 0.0; endPanX = 0.0; startPanY = 0.0; endPanY = 0.0; direction = "IN" }
