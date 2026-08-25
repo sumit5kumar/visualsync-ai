@@ -40,6 +40,29 @@ export async function getUserByOpenId(openId: string) {
   return (await db.select().from(users).where(eq(users.openId, openId)).limit(1))[0];
 }
 
+export const VISUALSYNC_RECORDED_MEDIA_BUDGET_BYTES = 10 * 1024 * 1024 * 1024;
+export const VISUALSYNC_RECORDED_MEDIA_WARNING_BYTES = 8 * 1024 * 1024 * 1024;
+
+export function summarizeUserMediaStorage(byteSizes: Array<number | null | undefined>) {
+  const recordedBytes = byteSizes
+    .map(byteSize => typeof byteSize === "number" && Number.isFinite(byteSize) && byteSize > 0 ? byteSize : 0)
+    .reduce<number>((total, byteSize) => total + byteSize, 0);
+  return {
+    recordedBytes,
+    budgetBytes: VISUALSYNC_RECORDED_MEDIA_BUDGET_BYTES,
+    warningBytes: VISUALSYNC_RECORDED_MEDIA_WARNING_BYTES,
+    remainingBudgetBytes: Math.max(0, VISUALSYNC_RECORDED_MEDIA_BUDGET_BYTES - recordedBytes),
+    percentOfBudget: Math.min(100, Math.round(recordedBytes / VISUALSYNC_RECORDED_MEDIA_BUDGET_BYTES * 1000) / 10),
+    isNearLimit: recordedBytes >= VISUALSYNC_RECORDED_MEDIA_WARNING_BYTES,
+  };
+}
+
+export async function getUserMediaStorageUsage(userId: number) {
+  const db = await requireDb();
+  const assets = await db.select({ byteSize: mediaAssets.byteSize }).from(mediaAssets).where(eq(mediaAssets.userId, userId));
+  return summarizeUserMediaStorage(assets.map(asset => asset.byteSize));
+}
+
 export async function listUserProjects(userId: number) {
   const db = await requireDb();
   const [projectRecords, assets, activeGroqKeys, generationJobs] = await Promise.all([

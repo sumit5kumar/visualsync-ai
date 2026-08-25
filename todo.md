@@ -363,3 +363,7 @@
 - [x] Correct only Ken Burns and Diagonal pan direction selection so every supported diagonal travel direction is applied reliably using the existing stable renderer.
 - [x] Add only a global one-at-a-time Timeline Generation queue that releases the next waiting project 10 minutes after the prior project reaches timeline_ready, preserving all existing pipelines.
 - [x] Fix only the Projects Timeline start/resume gateway interruption so saved queue state is recovered safely without duplicate processing.
+- [x] Define a separate sellable VisualSync desktop-app architecture that preserves the existing web app unchanged and supports authenticated provider setup, local files, preview, and rendering.
+- [ ] Build a separate Windows-first signed-in desktop app that uses the existing hosted Timeline queue after successful upload while keeping local folders, preview, and rendering on the user device.
+- [x] Supersede the proposed automatic retention cleanup in favor of the user-requested non-destructive storage warning and existing manual project-deletion controls.
+- [x] Add per-user app-recorded media-usage accounting and an 8 GB early-warning state while preserving all project data until the user explicitly deletes it.
