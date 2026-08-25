@@ -391,6 +391,30 @@ export async function moveTimelineVisual(userId: number, input: { projectId: num
   return { ...planned, approvalStatus: "revoked" as const };
 }
 
+export async function restoreTimelineSnapshot(userId: number, input: { projectId: number; segments: Array<{ id: number; imageAssetId: number; startMs: number; endMs: number; selectionReason: string; decisionType: "KEEP" | "CHANGE" | "SKIP" | "FALLBACK" }> }) {
+  const project = await getUserProject(userId, input.projectId);
+  if (!project || !project.audioDurationMs || !canEditValidatedTimeline(project.status)) throw new Error("A validated timeline is required before an editor history step can be restored.");
+  const db = await requireDb();
+  const current = await db.select().from(timelineSegments).where(eq(timelineSegments.projectId, input.projectId)).orderBy(timelineSegments.startMs);
+  const currentById = new Map(current.map(segment => [segment.id, segment]));
+  if (current.length !== input.segments.length || input.segments.some(segment => !currentById.has(segment.id))) throw new Error("Timeline history no longer matches the current project state. Make a new edit before using Undo or Redo.");
+  const imageIds = Array.from(new Set(input.segments.map(segment => segment.imageAssetId)));
+  const images = await db.select({ id: mediaAssets.id }).from(mediaAssets).where(and(eq(mediaAssets.projectId, input.projectId), eq(mediaAssets.assetType, "image"), inArray(mediaAssets.id, imageIds)));
+  if (images.length !== imageIds.length) throw new Error("Timeline history references a project image that is no longer available.");
+  const proposed = input.segments.map(snapshot => {
+    const existing = currentById.get(snapshot.id)!;
+    return { ...existing, ...snapshot, confidence: Number(existing.confidence) };
+  }).sort((left, right) => left.startMs - right.startMs);
+  const validation = validateTimeline(project.audioDurationMs, proposed);
+  if (!validation.valid) throw new Error(`Timeline history cannot be restored because it would break narration coverage: ${validation.issues.join(" ")}`);
+  await db.transaction(async transaction => {
+    for (const snapshot of input.segments) await transaction.update(timelineSegments).set({ imageAssetId: snapshot.imageAssetId, startMs: snapshot.startMs, endMs: snapshot.endMs, selectionReason: snapshot.selectionReason, decisionType: snapshot.decisionType }).where(and(eq(timelineSegments.id, snapshot.id), eq(timelineSegments.projectId, input.projectId)));
+    await transaction.insert(timelineApprovals).values({ projectId: input.projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
+    await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready" }).where(eq(projects.id, input.projectId));
+  });
+  return { success: true as const, approvalStatus: "revoked" as const };
+}
+
 export async function getApprovedRenderHandoff(userId: number, projectId: number) {
   const review = await getTimelineReview(userId, projectId);
   if (review.approval.status !== "approved" || !review.approval.approvedAt || !review.approval.approvedByUserId) throw new Error("Timeline approval is required before a native render handoff.");

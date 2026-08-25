@@ -36,6 +36,9 @@ describe("Timeline editor presentation", () => {
     expect(source).toContain("randomMix = !randomMix");
     expect(source).toContain("Select one or more effects");
     expect(source).toContain("enabledDirections.includes(direction) && enabledDirections.length > 1");
+    expect(source).toContain("restoreSnapshot");
+    expect(source).toContain('aria-label="Undo timeline edit"');
+    expect(source).toContain('aria-label="Redo timeline edit"');
     expect(source).toContain('aria-label="Render aspect ratio"');
     expect(source).toContain('aria-label="Future render quality"');
     expect(source).toContain("Existing videos and Timeline timing stay unchanged.");
