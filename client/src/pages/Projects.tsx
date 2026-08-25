@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { trpc } from "@/lib/trpc";
 import { AudioLines, Clock3, FolderOpen, FolderPlus, HardDrive, ImageIcon, LoaderCircle, Plus, RefreshCw, Sparkles, Trash2, TriangleAlert, Upload, X } from "lucide-react";
 import { toast } from "sonner";
+import { hasRecoverableSavedTimelineJob } from "@/lib/timelineGatewayRecovery";
 
 type ProjectProcessingProgress = { stage: string; label: string; message: string; completedPercent: number; narration: { status: "pending" | "processing" | "completed"; durationMs: number | null; chunks: { totalChunks: number; completedChunks: number; activeChunkIndex: number; chunkOverlapMs: number; state: "processing" | "waiting" | "completed"; lastError: { category: string; message: string; retryAfterMs?: number; httpStatus?: number; requestDurationMs: number } | null } | null }; images: { completed: number; total: number }; elapsedMs: number; startedAtMs: number; estimatedRemainingMs: number | null; estimatedRemainingRange: { lowerMs: number; upperMs: number } | null; estimatedAtMs: number; initialEstimatedTotalMs: number; estimateSource: "preparing" | "observed"; resumeRecommended: boolean };
 type ProjectSummary = { id: number; name: string; narrationOriginalName: string | null; imageSourcePath: string | null; outputPath: string | null; audioDurationMs: number | null; sourceImageCount: number; sourcesAttached: boolean; status: string; workerState: string; analysisBlocker: string | null; processingProgress: ProjectProcessingProgress | null; timelineGenerationJob: { status: string; currentStage: string; retryAt: number | null; lastError: unknown } | null };
@@ -144,7 +145,7 @@ export default function Projects() {
   const processTimeline = trpc.project.processGlobalTimeline.useMutation();
   const removeProject = trpc.project.remove.useMutation({ onSuccess: async () => { await Promise.all([utils.project.list.invalidate(), utils.timeline.review.invalidate(), utils.timeline.candidates.invalidate(), utils.worker.renderHandoff.invalidate(), utils.worker.renderedVideo.invalidate()]); toast.success("Project removed from the workspace."); }, onError: error => toast.error(error.message) });
   const removeAllProjects = trpc.project.removeAll.useMutation({ onSuccess: async result => { await Promise.all([utils.project.list.invalidate(), utils.timeline.review.invalidate(), utils.timeline.candidates.invalidate(), utils.worker.renderHandoff.invalidate(), utils.worker.renderedVideo.invalidate()]); toast.success(`${result.deletedCount} project${result.deletedCount === 1 ? "" : "s"} removed from the workspace.`); }, onError: error => toast.error(error.message) });
-  const queueTimelineStart = async (projectId: number, previousStartedAtMs = 0) => {
+  const queueTimelineStart = async (projectId: number) => {
     try {
       await processTimeline.mutateAsync({ projectId });
     } catch (error) {
@@ -152,8 +153,7 @@ export default function Projects() {
       if (!message.includes("not automatically retried to avoid duplicate processing")) throw error;
       const refreshed = await projects.refetch();
       const savedProject = refreshed.data?.find(project => project.id === projectId);
-      const savedStartedAtMs = savedProject?.processingProgress?.startedAtMs ?? 0;
-      if (savedStartedAtMs <= previousStartedAtMs) throw error;
+      if (!hasRecoverableSavedTimelineJob(savedProject?.timelineGenerationJob)) throw error;
       await Promise.all([utils.project.list.invalidate(), utils.timeline.review.invalidate({ projectId })]);
       return { confirmedAfterGatewayResponse: true } as const;
     }
@@ -216,7 +216,7 @@ export default function Projects() {
   const retryAnalysis = async (project: ProjectSummary) => {
     try {
       setBusyLabel("Restarting Groq analysis with your existing uploaded media…");
-      const queued = await queueTimelineStart(project.id, project.processingProgress?.startedAtMs ?? 0);
+      const queued = await queueTimelineStart(project.id);
       toast.success(queued.confirmedAfterGatewayResponse ? "The gateway interrupted its reply, but the saved Timeline job was confirmed as resumed." : "Hosted Timeline Generation is queued from the saved progress state.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Project analysis could not be restarted.");

@@ -362,3 +362,4 @@
 - [x] Improve only large-narration upload resilience so a 38 MB narration does not fail after avoidable interrupted-connection retries, preserving later processing and saved project media.
 - [x] Correct only Ken Burns and Diagonal pan direction selection so every supported diagonal travel direction is applied reliably using the existing stable renderer.
 - [x] Add only a global one-at-a-time Timeline Generation queue that releases the next waiting project 10 minutes after the prior project reaches timeline_ready, preserving all existing pipelines.
+- [x] Fix only the Projects Timeline start/resume gateway interruption so saved queue state is recovered safely without duplicate processing.
