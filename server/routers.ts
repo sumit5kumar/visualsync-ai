@@ -52,10 +52,16 @@ export const appRouter = router({
       return { jobId: job.id, status: "queued" as const, scheduled: true, scheduleRefreshDeferred, dispatch };
     }
     const schedule = await createHeartbeatJob({ name: `timeline-generation-${input.projectId}`, cron: TIMELINE_JOB_CRON, path: "/api/scheduled/timeline-generation", method: "POST", payload: {}, description: `Persistent Timeline Generation for project ${input.projectId}` }, sessionToken);
-    await updateHeartbeatJob(schedule.taskUid, { payload: { taskUid: schedule.taskUid, signature: signTimelineScheduleTask(schedule.taskUid) } }, sessionToken);
+    let scheduleRefreshDeferred = false;
+    try {
+      await updateHeartbeatJob(schedule.taskUid, { payload: { taskUid: schedule.taskUid, signature: signTimelineScheduleTask(schedule.taskUid) } }, sessionToken);
+    } catch (error) {
+      if (!isAmbiguousHeartbeatUpdateTimeout(error)) throw error;
+      scheduleRefreshDeferred = true;
+    }
     await setTimelineGenerationSchedule(ctx.user.id, input.projectId, schedule.taskUid);
     const dispatch = await runTimelineGenerationJob(job.id);
-    return { jobId: job.id, status: "queued" as const, scheduled: true, nextExecutionAt: schedule.nextExecutionAt ?? null, dispatch };
+    return { jobId: job.id, status: "queued" as const, scheduled: true, scheduleRefreshDeferred, nextExecutionAt: schedule.nextExecutionAt ?? null, dispatch };
   }), readablePacingPolicy: protectedProcedure.query(() => ({ useEverySourceImageInOrder: true, provider: "groq", preferredMinimumDurationMs: 2200, adaptiveMinimum: true, equalDurationFallbackAllowed: false })) }),
   gemini: router({
     model: publicProcedure.query(() => GEMINI_MODEL),

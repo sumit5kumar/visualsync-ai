@@ -6,6 +6,10 @@ describe("Timeline Heartbeat schedule recovery", () => {
     expect(isAmbiguousHeartbeatUpdateTimeout(new Error('Heartbeat UpdateHeartbeatJob failed (500): {"code":"internal","message":"temporal schedule update: context deadline exceeded"}'))).toBe(true);
   });
 
+  it("allows immediate durable dispatch after the observed platform RST_STREAM cancellation", () => {
+    expect(isAmbiguousHeartbeatUpdateTimeout(new Error('Heartbeat UpdateHeartbeatJob failed (500): {"code":"internal","message":"temporal schedule update: stream terminated by RST_STREAM with error code: CANCEL"}'))).toBe(true);
+  });
+
   it("does not mask unrelated Heartbeat errors", () => {
     expect(isAmbiguousHeartbeatUpdateTimeout(new Error("Heartbeat UpdateHeartbeatJob failed (403): forbidden"))).toBe(false);
     expect(isAmbiguousHeartbeatUpdateTimeout(new Error("network unavailable"))).toBe(false);
