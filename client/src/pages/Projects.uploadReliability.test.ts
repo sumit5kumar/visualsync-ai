@@ -12,11 +12,15 @@ describe("project media upload transport recovery", () => {
     expect(source).toContain("Keep this page open and use Source media to retry this saved project.");
     expect(source).toContain("/api/project-media/direct-ticket");
     expect(source).toContain("/api/project-media/direct-complete");
-    expect(source).toContain("const DIRECT_UPLOAD_STALL_TIMEOUT_MS = 45_000;");
-    expect(source).toContain("const DIRECT_UPLOAD_HARD_TIMEOUT_MS = 15 * 60_000;");
+    expect(source).toContain("const DIRECT_UPLOAD_MAX_ATTEMPTS = 4;");
+    expect(source).toContain("const DIRECT_UPLOAD_RETRY_DELAYS_MS = [1_500, 5_000, 12_000];");
+    expect(source).toContain("const DIRECT_UPLOAD_STALL_TIMEOUT_MS = 2 * 60_000;");
+    expect(source).toContain("const DIRECT_UPLOAD_HARD_TIMEOUT_MS = 25 * 60_000;");
     expect(source).toContain("function directStoragePut");
     expect(source).toContain("Direct storage upload stopped making progress.");
     expect(source).toContain("async function completeDirectUpload");
-    expect(source).toContain("return uploadMediaViaApplication");
+    expect(source).toContain("for (let attempt = 0; attempt < DIRECT_UPLOAD_MAX_ATTEMPTS; attempt += 1)");
+    expect(source).toContain("Secure direct upload could not complete after ${DIRECT_UPLOAD_MAX_ATTEMPTS} attempts");
+    expect(source).toContain("return await uploadMediaViaApplication");
   });
 });

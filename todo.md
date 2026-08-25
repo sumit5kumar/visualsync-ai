@@ -359,3 +359,4 @@
 - [x] Add Timeline-only Undo and Redo for user visual moves, visual replacements, and timing edits without changing AI analysis, rendering, or other workflows.
 - [x] Correct only Ken Burns mix so it deterministically uses both diagonal directions while preserving the stable frame-by-frame renderer and all other effects.
 - [x] Fix only Timeline Transition and Effects controls so selecting None does not prevent later Random mix or manual option selection.
+- [x] Improve only large-narration upload resilience so a 38 MB narration does not fail after avoidable interrupted-connection retries, preserving later processing and saved project media.

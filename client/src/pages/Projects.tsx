@@ -19,8 +19,10 @@ const formatElapsed = (milliseconds: number) => { const seconds = Math.max(0, Ma
 const fileOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const MEDIA_UPLOAD_MAX_ATTEMPTS = 3;
 const MEDIA_UPLOAD_RETRY_DELAYS_MS = [1_000, 3_000];
-const DIRECT_UPLOAD_STALL_TIMEOUT_MS = 45_000;
-const DIRECT_UPLOAD_HARD_TIMEOUT_MS = 15 * 60_000;
+const DIRECT_UPLOAD_MAX_ATTEMPTS = 4;
+const DIRECT_UPLOAD_RETRY_DELAYS_MS = [1_500, 5_000, 12_000];
+const DIRECT_UPLOAD_STALL_TIMEOUT_MS = 2 * 60_000;
+const DIRECT_UPLOAD_HARD_TIMEOUT_MS = 25 * 60_000;
 
 function emptySelection(): Selection { return { narration: null, images: [], sourceFolderName: "", outputFolderName: "", nativeSourceDirectory: "", nativeOutputDirectory: "" }; }
 
@@ -102,17 +104,27 @@ async function completeDirectUpload(ticket: string, signal: AbortSignal) {
 }
 
 async function uploadMediaFile(projectId: number, assetType: "narration" | "image", file: File, signal: AbortSignal, sequenceNumber?: number, durationMs?: number, onProgress?: (loadedBytes: number, totalBytes: number) => void) {
-  try {
-    const metadata = { projectId, assetType, originalFilename: file.name, mimeType: file.type || "application/octet-stream", byteSize: file.size, sequenceNumber: sequenceNumber ?? null, audioDurationMs: durationMs ?? null };
-    const ticketResponse = await fetch("/api/project-media/direct-ticket", { method: "POST", credentials: "include", signal, headers: { "content-type": "application/json" }, body: JSON.stringify(metadata) });
-    const ticketPayload = await ticketResponse.json().catch(() => null) as { uploadUrl?: string; ticket?: string } | null;
-    if (!ticketResponse.ok || !ticketPayload?.uploadUrl || !ticketPayload.ticket) throw new Error("Direct upload preparation was unavailable.");
-    await directStoragePut(ticketPayload.uploadUrl, file, metadata.mimeType, signal, onProgress);
-    await completeDirectUpload(ticketPayload.ticket, signal);
-  } catch (error) {
-    if (signal.aborted) throw error;
-    return uploadMediaViaApplication(projectId, assetType, file, signal, sequenceNumber, durationMs);
+  const metadata = { projectId, assetType, originalFilename: file.name, mimeType: file.type || "application/octet-stream", byteSize: file.size, sequenceNumber: sequenceNumber ?? null, audioDurationMs: durationMs ?? null };
+  let directError: unknown = null;
+  for (let attempt = 0; attempt < DIRECT_UPLOAD_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const ticketResponse = await fetch("/api/project-media/direct-ticket", { method: "POST", credentials: "include", signal, headers: { "content-type": "application/json" }, body: JSON.stringify(metadata) });
+      const ticketPayload = await ticketResponse.json().catch(() => null) as { uploadUrl?: string; ticket?: string } | null;
+      if (!ticketResponse.ok || !ticketPayload?.uploadUrl || !ticketPayload.ticket) throw new Error("Direct upload preparation was unavailable.");
+      await directStoragePut(ticketPayload.uploadUrl, file, metadata.mimeType, signal, onProgress);
+      await completeDirectUpload(ticketPayload.ticket, signal);
+      return;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      directError = error;
+      if (attempt + 1 < DIRECT_UPLOAD_MAX_ATTEMPTS) await new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(resolve, DIRECT_UPLOAD_RETRY_DELAYS_MS[attempt] ?? 12_000);
+        signal.addEventListener("abort", () => { window.clearTimeout(timer); reject(new DOMException("Upload cancelled by user.", "AbortError")); }, { once: true });
+      });
+    }
   }
+  try { return await uploadMediaViaApplication(projectId, assetType, file, signal, sequenceNumber, durationMs); }
+  catch { throw directError instanceof Error ? new Error(`Secure direct upload could not complete after ${DIRECT_UPLOAD_MAX_ATTEMPTS} attempts, then fallback upload also failed: ${directError.message}`) : directError; }
 }
 
 export default function Projects() {
