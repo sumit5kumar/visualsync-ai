@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TIMELINE_RETRY_MS, isRetryableTimelineFailure, resolveTimelineRetryAt, shouldContinueTimelineRecovery, TIMELINE_CALLBACK_WORK_BUDGET_MS, TIMELINE_JOB_CRON, timelineJobAvailability } from "./timelineGenerationJobs";
+import { DEFAULT_TIMELINE_RETRY_MS, isRetryableTimelineFailure, resolveTimelineQueueGate, resolveTimelineRetryAt, shouldContinueTimelineRecovery, TIMELINE_CALLBACK_WORK_BUDGET_MS, TIMELINE_JOB_CRON, TIMELINE_QUEUE_RELEASE_DELAY_MS, timelineJobAvailability } from "./timelineGenerationJobs";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { GroqRequestError } from "./groqClient";
@@ -66,6 +66,17 @@ describe("durable Timeline Generation retry policy", () => {
     expect(timelineJobAvailability({ status: "processing", retryAt: null, leaseExpiresAt: new Date(now + 1) }, now)).toMatchObject({ outcome: "leased" });
     expect(timelineJobAvailability({ status: "queued", retryAt: new Date(now + 1), leaseExpiresAt: null }, now)).toMatchObject({ outcome: "waiting" });
     expect(timelineJobAvailability({ status: "queued", retryAt: null, leaseExpiresAt: new Date(now - 1) }, now)).toMatchObject({ outcome: "claimable" });
+  });
+
+  it("keeps later projects queued behind the first active project and releases only ten minutes after a completed timeline", () => {
+    const now = 1_000_000;
+    const createdAt = new Date(now - 30_000);
+    const active = { id: 1, projectId: 101, status: "processing" as const, startedAt: new Date(now - 20_000), createdAt, completedAt: null };
+    const queued = { id: 2, projectId: 102, status: "queued" as const, startedAt: new Date(now - 10_000), createdAt, completedAt: null };
+    expect(resolveTimelineQueueGate([active, queued], queued.id, now)).toMatchObject({ outcome: "waiting_for_prior_project", priorProjectId: 101 });
+    const completed = { ...active, status: "completed" as const, completedAt: new Date(now) };
+    expect(resolveTimelineQueueGate([completed, queued], queued.id, now + TIMELINE_QUEUE_RELEASE_DELAY_MS - 1)).toMatchObject({ outcome: "waiting_for_release_delay", priorProjectId: 101 });
+    expect(resolveTimelineQueueGate([completed, queued], queued.id, now + TIMELINE_QUEUE_RELEASE_DELAY_MS)).toMatchObject({ outcome: "ready" });
   });
 
   it("performs immediate protected dispatch after schedule persistence while retaining the cron recovery path", () => {

@@ -13,9 +13,11 @@ import { isProjectVerifiedForAutomaticRotation } from "./groqRotation";
 export const TIMELINE_JOB_CRON = "0 * * * * *";
 export const DEFAULT_TIMELINE_RETRY_MS = 120_000;
 export const TIMELINE_CALLBACK_WORK_BUDGET_MS = 25_000;
+export const TIMELINE_QUEUE_RELEASE_DELAY_MS = 10 * 60_000;
 
 type JobStatus = "queued" | "processing" | "waiting_for_retry" | "completed" | "failed";
 type JobStage = "queued" | "transcribing" | "analyzing_images" | "building_timeline" | "finalizing" | "completed" | "failed";
+type QueueGateJob = { id: number; projectId: number; status: JobStatus; startedAt: Date | null; createdAt: Date; completedAt: Date | null };
 
 function preflightCategory(status: "verified" | "invalid" | "permission_restricted" | "quota_limited" | "request_too_large" | "prompt_error" | "unavailable") {
   if (status === "invalid") return "invalid_key" as const;
@@ -73,6 +75,20 @@ export function timelineJobAvailability(job: { status: JobStatus; retryAt: Date 
   if (job.retryAt && job.retryAt.getTime() > nowMs) return { outcome: "waiting" as const, retryAt: job.retryAt };
   if (job.leaseExpiresAt && job.leaseExpiresAt.getTime() > nowMs) return { outcome: "leased" as const };
   return { outcome: "claimable" as const };
+}
+
+export function resolveTimelineQueueGate(jobs: QueueGateJob[], jobId: number, nowMs = Date.now()) {
+  const activeJobs = jobs
+    .filter(job => job.status !== "completed" && job.status !== "failed")
+    .sort((left, right) => (left.startedAt ?? left.createdAt).getTime() - (right.startedAt ?? right.createdAt).getTime() || left.id - right.id);
+  const head = activeJobs[0];
+  if (!head || head.id !== jobId) return { outcome: "waiting_for_prior_project" as const, priorProjectId: head?.projectId ?? null, retryAt: new Date(nowMs + 60_000) };
+  const latestCompletion = jobs
+    .filter(job => job.status === "completed" && job.completedAt)
+    .sort((left, right) => (right.completedAt?.getTime() ?? 0) - (left.completedAt?.getTime() ?? 0))[0];
+  const releaseAt = latestCompletion?.completedAt ? new Date(latestCompletion.completedAt.getTime() + TIMELINE_QUEUE_RELEASE_DELAY_MS) : null;
+  if (releaseAt && releaseAt.getTime() > nowMs) return { outcome: "waiting_for_release_delay" as const, priorProjectId: latestCompletion.projectId, retryAt: releaseAt };
+  return { outcome: "ready" as const, priorProjectId: null, retryAt: null };
 }
 
 async function requireDb() {
@@ -141,6 +157,15 @@ export async function runTimelineGenerationJob(jobId: number) {
   if (availability.outcome !== "claimable") return availability;
 
   const claimStartedAtMs = Date.now();
+  const userJobs = await db.select({ id: timelineGenerationJobs.id, projectId: timelineGenerationJobs.projectId, status: timelineGenerationJobs.status, startedAt: timelineGenerationJobs.startedAt, createdAt: timelineGenerationJobs.createdAt, completedAt: timelineGenerationJobs.completedAt }).from(timelineGenerationJobs).where(eq(timelineGenerationJobs.userId, job.userId));
+  const queueGate = resolveTimelineQueueGate(userJobs, job.id, claimStartedAtMs);
+  if (queueGate.outcome !== "ready") {
+    const waitMessage = queueGate.outcome === "waiting_for_release_delay"
+      ? `Timeline Generation is queued. Project ${queueGate.priorProjectId} reached Timeline Ready; this project will start 10 minutes later.`
+      : `Timeline Generation is queued behind active project ${queueGate.priorProjectId}. It will start after that project reaches Timeline Ready, then waits 10 minutes.`;
+    await db.update(timelineGenerationJobs).set({ status: "queued", currentStage: "queued", retryAt: queueGate.retryAt, lastError: { category: "queue_wait", message: waitMessage, retryAfterMs: Math.max(0, queueGate.retryAt.getTime() - claimStartedAtMs) }, leaseToken: null, leaseExpiresAt: null }).where(eq(timelineGenerationJobs.id, job.id));
+    return { outcome: "queue_wait" as const, queueState: queueGate.outcome, retryAt: queueGate.retryAt, priorProjectId: queueGate.priorProjectId };
+  }
   const leaseToken = crypto.randomUUID();
   const leaseExpiresAt = new Date(claimStartedAtMs + 110_000);
   await db.update(timelineGenerationJobs).set({ status: "processing", leaseToken, leaseExpiresAt, attemptCount: job.attemptCount + 1 }).where(and(

@@ -10,7 +10,7 @@ type ProgressInput = {
   narrationAnalyzed: boolean;
   audioDurationMs: number | null;
   narrationChunks?: { totalChunks: number; completedChunks: number; activeChunkIndex: number; chunkOverlapMs: number; state: "processing" | "waiting" | "completed"; lastError: { category: string; message: string; retryAfterMs?: number; httpStatus?: number; requestDurationMs: number } | null } | null;
-  backgroundJob?: { status: "queued" | "processing" | "waiting_for_retry" | "completed" | "failed"; retryAt: Date | null; leaseExpiresAt?: Date | null; lastError: { message?: string } | null } | null;
+  backgroundJob?: { status: "queued" | "processing" | "waiting_for_retry" | "completed" | "failed"; retryAt: Date | null; leaseExpiresAt?: Date | null; lastError: { message?: string; category?: string } | null } | null;
   now?: Date;
 };
 
@@ -82,7 +82,13 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
     message = "The last processing attempt did not complete. You can retry once the reported issue is resolved.";
   }
 
-  if (input.backgroundJob?.status === "queued") {
+  const isIntentionalQueueWait = input.backgroundJob?.status === "queued" && input.backgroundJob.lastError?.category === "queue_wait";
+  if (isIntentionalQueueWait) {
+    const retryAtMs = input.backgroundJob?.retryAt?.getTime();
+    completedPercent = 0;
+    label = "Queued for Timeline Generation";
+    message = `${input.backgroundJob?.lastError?.message ?? "This project is waiting for the active project to finish."}${retryAtMs ? ` Next check is in about ${Math.max(0, Math.ceil((retryAtMs - now.getTime()) / 60_000))} minutes.` : ""}`;
+  } else if (input.backgroundJob?.status === "queued") {
     completedPercent = 0;
     label = "Preparing Timeline Generation";
     message = "The hosted job is registered and starting now. It will continue independently of this browser.";
@@ -94,7 +100,7 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
 
   const workerLeaseExpired = input.backgroundJob?.status === "processing"
     && Boolean(input.backgroundJob.leaseExpiresAt && input.backgroundJob.leaseExpiresAt.getTime() <= now.getTime());
-  const queuedStartGraceExpired = input.backgroundJob?.status === "queued" && stageElapsedMs >= QUEUED_TIMELINE_START_GRACE_MS;
+  const queuedStartGraceExpired = input.backgroundJob?.status === "queued" && !isIntentionalQueueWait && stageElapsedMs >= QUEUED_TIMELINE_START_GRACE_MS;
   const resumeRecommended = workerLeaseExpired || queuedStartGraceExpired;
   if (resumeRecommended) {
     label = "Timeline worker needs a safe resume";

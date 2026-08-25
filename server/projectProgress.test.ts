@@ -53,6 +53,12 @@ describe("project processing progress", () => {
     expect(progress?.message).toContain("remained queued beyond its normal start window");
   });
 
+  it("keeps an intentionally queued project out of the safe-resume warning while it waits for its turn", () => {
+    const progress = buildProjectProcessingProgress({ status: "analyzing", processingStage: "transcribing", processingStartedAt: new Date("2026-08-21T19:30:00.000Z"), processingStageStartedAt: new Date("2026-08-21T19:30:00.000Z"), totalImageCount: 6, completedImageCount: 0, narrationAnalyzed: false, audioDurationMs: 1_000_512, backgroundJob: { status: "queued", retryAt: new Date("2026-08-21T19:42:00.000Z"), lastError: { category: "queue_wait", message: "Timeline Generation is queued." } }, now: new Date("2026-08-21T19:35:00.000Z") });
+    expect(progress).toMatchObject({ label: "Queued for Timeline Generation", resumeRecommended: false });
+    expect(progress?.message).toContain("Timeline Generation is queued.");
+  });
+
   it("does not invent live progress for projects that are not currently analyzing", () => {
     expect(buildProjectProcessingProgress({ status: "timeline_ready", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null, totalImageCount: 300, completedImageCount: 300, narrationAnalyzed: true, audioDurationMs: 30 * 60 * 1000 })).toBeNull();
   });
