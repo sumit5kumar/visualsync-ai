@@ -301,18 +301,18 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
       pacingProviderKey = pacingRun.key;
     }
     if (weights.length !== images.length || weights.some(weight => !Number.isFinite(weight) || weight <= 0) || new Set(weights.map(weight => weight.toFixed(3))).size === 1) throw new Error("Groq returned an invalid variable pacing plan.");
-    const pacing = buildGlobalReadableImageDurations(project.audioDurationMs, weights);
+    const pacing = buildGlobalReadableImageDurations(project.audioDurationMs, weights, project.readableHoldMode ?? "MIN_2_SECONDS");
     let cursor = 0;
     const rebuilt = images.map((image, index) => {
       const startMs = cursor; const endMs = startMs + pacing.durations[index]; cursor = endMs;
-      return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: 0, selectionReason: `Groq retained user-supplied image ${image.sequenceNumber} in chronological script order and assigned a variable full-narration pacing weight of ${weights[index]}. The global readable-hold rule set a minimum of ${pacing.minimumDurationMs} ms.`, decisionType: "KEEP" as const };
+      return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: 0, selectionReason: `Groq retained user-supplied image ${image.sequenceNumber} in chronological script order and assigned a variable full-narration pacing weight of ${weights[index]}. The ${project.readableHoldMode === "NO_MINIMUM" ? "no-minimum-hold mode applied no artificial duration floor" : `global readable-hold rule set a minimum of ${pacing.minimumDurationMs} ms`}.`, decisionType: "KEEP" as const };
     });
     const validation = validateTimeline(project.audioDurationMs, rebuilt);
     if (!validation.valid || cursor !== project.audioDurationMs) throw new Error(`Generated timeline failed validation: ${validation.issues.join(" ")}`);
     await db.update(projects).set({ processingStage: "finalizing", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
     await db.transaction(async transaction => {
       await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId));
-      await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: pacingProviderKey?.label ?? null, pacingProviderKeyMasked: pacingProviderKey?.maskedKey ?? null, allImagesRequired: true, minReadableDurationMs: pacing.minimumDurationMs, pacingMethod: "bounded-global-full-narration-sequence" } })));
+      await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: pacingProviderKey?.label ?? null, pacingProviderKeyMasked: pacingProviderKey?.maskedKey ?? null, allImagesRequired: true, minReadableDurationMs: pacing.minimumDurationMs, holdMode: project.readableHoldMode ?? "MIN_2_SECONDS", pacingMethod: "bounded-global-full-narration-sequence" } })));
       await transaction.insert(timelineApprovals).values({ projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
       await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null }).where(eq(projects.id, projectId));
     });
@@ -452,14 +452,14 @@ export async function processProjectTimelineSlice(userId: number, projectId: num
 
   const weights = workState.pacingWeights ?? [];
   if (weights.length !== refreshedImages.length || new Set(weights.map(weight => weight.toFixed(3))).size === 1) throw new Error("Persisted Groq pacing state is incomplete or invalid.");
-  const pacing = buildGlobalReadableImageDurations(project.audioDurationMs, weights);
+  const pacing = buildGlobalReadableImageDurations(project.audioDurationMs, weights, project.readableHoldMode ?? "MIN_2_SECONDS");
   let cursor = 0;
-  const rebuilt = refreshedImages.map((image, index) => { const startMs = cursor; const endMs = startMs + pacing.durations[index]; cursor = endMs; return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: 0, selectionReason: `Groq retained user-supplied image ${image.sequenceNumber} in chronological script order and assigned a variable full-narration pacing weight of ${weights[index]}. The global readable-hold rule set a minimum of ${pacing.minimumDurationMs} ms.`, decisionType: "KEEP" as const }; });
+  const rebuilt = refreshedImages.map((image, index) => { const startMs = cursor; const endMs = startMs + pacing.durations[index]; cursor = endMs; return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: 0, selectionReason: `Groq retained user-supplied image ${image.sequenceNumber} in chronological script order and assigned a variable full-narration pacing weight of ${weights[index]}. The ${project.readableHoldMode === "NO_MINIMUM" ? "no-minimum-hold mode applied no artificial duration floor" : `global readable-hold rule set a minimum of ${pacing.minimumDurationMs} ms`}.`, decisionType: "KEEP" as const }; });
   const validation = validateTimeline(project.audioDurationMs, rebuilt);
   if (!validation.valid || cursor !== project.audioDurationMs) throw new Error(`Generated timeline failed validation: ${validation.issues.join(" ")}`);
   await db.transaction(async transaction => {
     await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId));
-    await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: workState.pacingProviderKeyLabel ?? null, pacingProviderKeyMasked: workState.pacingProviderKeyMasked ?? null, allImagesRequired: true, minReadableDurationMs: pacing.minimumDurationMs, pacingMethod: "bounded-global-full-narration-sequence" } })));
+    await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: workState.pacingProviderKeyLabel ?? null, pacingProviderKeyMasked: workState.pacingProviderKeyMasked ?? null, allImagesRequired: true, minReadableDurationMs: pacing.minimumDurationMs, holdMode: project.readableHoldMode ?? "MIN_2_SECONDS", pacingMethod: "bounded-global-full-narration-sequence" } })));
     await transaction.insert(timelineApprovals).values({ projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
     await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null }).where(eq(projects.id, projectId));
   });

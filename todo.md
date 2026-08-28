@@ -367,3 +367,5 @@
 - [x] Build and validate a separate Windows-first signed-in desktop companion that uses the existing hosted Timeline queue after successful upload while keeping local folders, preview, and rendering on the user device.
 - [x] Supersede the proposed automatic retention cleanup in favor of the user-requested non-destructive storage warning and existing manual project-deletion controls.
 - [x] Add per-user app-recorded media-usage accounting and an 8 GB early-warning state while preserving all project data until the user explicitly deletes it.
+- [x] Add a hosted Timeline hold-mode selector with the existing 2-second minimum as default and a no-minimum option, without changing other workflows or the desktop companion.
+- [x] Add focused tests and validate the hosted-only hold-mode change.

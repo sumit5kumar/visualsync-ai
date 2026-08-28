@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `readableHoldMode` enum('MIN_2_SECONDS','NO_MINIMUM') DEFAULT 'MIN_2_SECONDS' NOT NULL;

@@ -26,4 +26,17 @@ describe("distributeReadableWeightedDurations", () => {
     expect(plan.durations.reduce((sum, duration) => sum + duration, 0)).toBe(12_000);
     expect(new Set(plan.durations).size).toBeGreaterThan(1);
   });
+
+  it("supports no artificial minimum hold while preserving positive complete coverage", () => {
+    const plan = buildGlobalReadableImageDurations(12_000, [0.8, 1.1, 1.3, 0.9, 1.4, 1.0], "NO_MINIMUM");
+
+    expect(plan.minimumDurationMs).toBe(0);
+    expect(plan.durations.every(duration => duration > 0)).toBe(true);
+    expect(plan.durations.reduce((sum, duration) => sum + duration, 0)).toBe(12_000);
+    expect(plan.durations.some(duration => duration < MIN_READABLE_IMAGE_DURATION_MS)).toBe(true);
+  });
+
+  it("keeps the current two-second mode as the default", () => {
+    expect(buildGlobalReadableImageDurations(67_451, [1, 2, 3]).minimumDurationMs).toBe(MIN_READABLE_IMAGE_DURATION_MS);
+  });
 });
