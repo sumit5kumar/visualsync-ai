@@ -376,5 +376,5 @@
 - [x] Compare minimum-2-second and NO_MINIMUM 5-minute Timeline durations; no code defect confirmed because both tested projects were configured as NO_MINIMUM.
 - [x] Diagnose saved Groq narration timestamps versus Timeline/image clip boundaries; confirmed the saved WAV is 144,325 ms while the project duration is incorrectly recorded as 288,651 ms, causing later Timeline clips to stretch beyond the real narration.
 - [x] Compare the matched “still try” short project with the affected 5-minute project and design an exact speech-boundary sync approach that preserves uploaded image order without changing providers.
-- [ ] Apply only the WAV timing normalization and multi-chunk timestamp-offset synchronization correction; preserve image order, providers, AI workflow, Timeline editing, rendering, and desktop app.
-- [ ] Add focused regression tests, reprocess only the affected cached project state, and verify corrected continuous coverage.
+- [x] Apply only the WAV timing normalization and multi-chunk timestamp-offset synchronization correction; preserve image order, providers, AI workflow, Timeline editing, rendering, and desktop app.
+- [x] Add focused regression tests, reprocess only the affected cached project state, and verify corrected continuous coverage.

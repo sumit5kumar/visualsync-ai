@@ -31,6 +31,31 @@ const DIRECT_UPLOAD_HARD_TIMEOUT_MS = 25 * 60_000;
 function emptySelection(readableHoldMode: HoldMode = "MIN_2_SECONDS"): Selection { return { narration: null, images: [], sourceFolderName: "", outputFolderName: "", nativeSourceDirectory: "", nativeOutputDirectory: "", readableHoldMode }; }
 
 async function audioDurationMs(file: File) {
+  const isWav = file.type === "audio/wav" || file.type === "audio/x-wav" || file.name.toLowerCase().endsWith(".wav");
+  if (isWav) {
+    try {
+      const header = new Uint8Array(await file.slice(0, 65_536).arrayBuffer());
+      const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+      const ascii = (offset: number, length: number) => { let value = ""; for (let index = 0; index < length; index += 1) value += String.fromCharCode(header[offset + index] ?? 0); return value; };
+      if (ascii(0, 4) === "RIFF" && ascii(8, 4) === "WAVE") {
+        let offset = 12;
+        let sampleRate = 0;
+        let blockAlign = 0;
+        let dataLength = 0;
+        while (offset + 8 <= header.length) {
+          const chunkId = ascii(offset, 4);
+          const chunkLength = view.getUint32(offset + 4, true);
+          const payloadOffset = offset + 8;
+          if (chunkId === "fmt " && chunkLength >= 16) { sampleRate = view.getUint32(payloadOffset + 4, true); blockAlign = view.getUint16(payloadOffset + 12, true); }
+          if (chunkId === "data") { dataLength = chunkLength; break; }
+          if (payloadOffset + chunkLength > header.length) break;
+          offset = payloadOffset + chunkLength + (chunkLength % 2);
+        }
+        const byteRate = sampleRate * blockAlign;
+        if (sampleRate > 0 && blockAlign > 0 && dataLength > 0 && byteRate > 0 && dataLength <= file.size) return Math.round(dataLength / byteRate * 1000);
+      }
+    } catch { /* Fall back to browser metadata for non-standard WAV containers. */ }
+  }
   return await new Promise<number>((resolve, reject) => {
     const audio = document.createElement("audio");
     const objectUrl = URL.createObjectURL(file);

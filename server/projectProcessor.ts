@@ -18,7 +18,7 @@ function transcriptForRange(segments: Array<{ start: number; end: number; text: 
 
 const MAX_PACING_IMAGES_PER_REQUEST = 24;
 const MAX_PACING_NARRATION_CHARACTERS = 3600;
-const NARRATION_SOURCE_PREPARATION_VERSION = 6;
+const NARRATION_SOURCE_PREPARATION_VERSION = 7;
 const MP3_PREPARATION_SCAN_BYTES = 256 * 1024;
 const MP3_OVERLAP_BYTE_BUDGET = Math.floor(SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES * 0.25);
 const HOSTED_STORAGE_READ_TIMEOUT_MS = 20_000;
@@ -153,8 +153,7 @@ function isMp3Narration(narration: Pick<typeof mediaAssets.$inferSelect, "mimeTy
 export async function prepareNarrationChunks(projectId: number, narration: typeof mediaAssets.$inferSelect, db: Exclude<Awaited<ReturnType<typeof getDb>>, null>): Promise<NarrationTranscriptionState> {
   const cached = readNarrationTranscriptionState(narration.analysisJson);
   const wavNarration = isWavNarration(narration);
-  const hasCompletedChunk = cached?.chunks.some(chunk => chunk.status === "completed" && chunk.transcript);
-  if (cached?.sourcePrepared && (cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk)) return cached;
+  if (cached?.sourcePrepared && cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION) return cached;
   if (!isMp3Narration(narration) && !wavNarration) throw new Error("This narration must be uploaded as WAV or MP3 for automatic safe transcription chunking.");
   if (isMp3Narration(narration)) {
     const repairedCached = recoverLegacyInflatedMp3Preparation(cached);

@@ -8,7 +8,7 @@ function mpeg1Layer3Frame() {
   return frame;
 }
 
-function pcmWav(dataLength: number) {
+function pcmWav(dataLength: number, declaredByteRate = 32_000) {
   const bytes = new Uint8Array(44 + dataLength);
   const view = new DataView(bytes.buffer);
   bytes.set([0x52, 0x49, 0x46, 0x46], 0);
@@ -18,7 +18,7 @@ function pcmWav(dataLength: number) {
   view.setUint16(20, 1, true);
   view.setUint16(22, 1, true);
   view.setUint32(24, 16_000, true);
-  view.setUint32(28, 32_000, true);
+  view.setUint32(28, declaredByteRate, true);
   view.setUint16(32, 2, true);
   view.setUint16(34, 16, true);
   bytes.set([0x64, 0x61, 0x74, 0x61], 36);
@@ -93,6 +93,15 @@ describe("WAV transcription preparation", () => {
     expect(SAFE_GROQ_DIRECT_WAV_BYTES).toBe(24 * 1024 * 1024);
     expect(chunks).toHaveLength(1);
     expect(chunks[0]?.bytes).toEqual(source);
+  });
+
+  it("ignores an inflated WAV byte-rate header when planning duration-bounded chunks", () => {
+    const source = pcmWav(3_200_000, 64_000);
+    const chunks = splitPcmWavForTranscription(source);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]?.contentEndMs).toBeLessThanOrEqual(SAFE_GROQ_DIRECT_WAV_DURATION_MS);
+    expect(chunks.at(-1)?.contentEndMs).toBe(100_000);
+    expect(new DataView(chunks[0]!.bytes.buffer).getUint32(28, true)).toBe(32_000);
   });
 
   it("splits a long but file-size-safe PCM WAV into callback-safe duration chunks", () => {

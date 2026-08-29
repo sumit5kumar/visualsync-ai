@@ -57,7 +57,7 @@ describe("public managed narration URLs", () => {
 
   it("uses one persisted source-preparation marker instead of a separate WAV byte-only direct-upload branch", () => {
     const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
-    expect(source).toContain("cached?.sourcePrepared && (cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk)");
+    expect(source).toContain("cached?.sourcePrepared && cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION");
     expect(source).toContain("const plan = planPcmWavTranscriptionRanges(new Uint8Array(await headerResponse.arrayBuffer()), sourceByteLength);");
     expect(source).toContain('fetchNarrationStorageRange(narration.storageKey, "bytes=0-65535")');
     expect(source).not.toContain("if (byteSize <= directLimit)");
@@ -65,8 +65,8 @@ describe("public managed narration URLs", () => {
 
   it("versions unstarted WAV preparation plans while retaining any plan that already has completed transcription progress", () => {
     const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
-    expect(source).toContain("const NARRATION_SOURCE_PREPARATION_VERSION = 6;");
-    expect(source).toContain("cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION || hasCompletedChunk");
+    expect(source).toContain("const NARRATION_SOURCE_PREPARATION_VERSION = 7;");
+    expect(source).toContain("cached.sourcePreparationVersion === NARRATION_SOURCE_PREPARATION_VERSION");
   });
 
   it("persists frame-aligned MP3 source ranges immediately instead of uploading every prepared child before progress can be saved", () => {
@@ -83,6 +83,6 @@ describe("public managed narration URLs", () => {
     const completed = (endMs: number, endByteExclusive: number) => ({ storageKey: "narration.mp3", sourceRange: { kind: "mp3" as const, startByte: 223, endByteExclusive }, startMs: 0, endMs, contentStartMs: 0, contentEndMs: endMs, byteSize: endByteExclusive - 223, status: "completed" as const, attempts: 1, transcript: { text: "saved", segments: [] } });
     const repaired = recoverLegacyInflatedMp3Preparation({ version: 2, chunkOverlapMs: 4_000, sourcePrepared: false, sourcePreparationVersion: 5, chunks: [completed(3264, 130_783), completed(3288, 131_743), { storageKey: "narration.mp3", sourceRange: { kind: "mp3", startByte: 223, endByteExclusive: 132_703 }, startMs: 0, endMs: 3312, contentStartMs: 0, contentEndMs: 3312, byteSize: 132_480, status: "pending", attempts: 0 }] });
 
-    expect(repaired).toMatchObject({ sourcePreparationVersion: 6, sourcePrepared: false, chunks: [completed(3264, 130_783)], mp3Preparation: { nextByteOffset: 130_783, nextTimestampMs: 3264 } });
+    expect(repaired).toMatchObject({ sourcePreparationVersion: 7, sourcePrepared: false, chunks: [completed(3264, 130_783)], mp3Preparation: { nextByteOffset: 130_783, nextTimestampMs: 3264 } });
   });
 });
