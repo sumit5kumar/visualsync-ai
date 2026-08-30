@@ -208,6 +208,15 @@ export class GroqClient {
     try { return JSON.parse(content) as unknown; } catch { throw localError("Groq returned malformed timeline-selection JSON.", "prompt_error", "client_request", durationMs); }
   }
 
+  async completeSemanticSyncPlan(input: { prompt: string; timeoutMs?: number }) {
+    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 1_500, reasoning_effort: "none", reasoning_format: "hidden", response_format: { type: "json_object" }, messages: [{ role: "user", content: input.prompt }] }) }, input.timeoutMs ?? 90_000);
+    if (!response.ok) { const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null; throw classifyGroqError(response, payload?.error?.message ?? "", durationMs); }
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = payload.choices?.[0]?.message?.content?.trim();
+    if (!content) throw localError("Groq returned no usable semantic sync content.", "unavailable", "unknown", durationMs);
+    try { return { value: JSON.parse(content) as unknown, requestMetadata: responseMetadata(response, durationMs, "unknown") }; } catch { throw localError("Groq returned malformed semantic sync JSON.", "prompt_error", "client_request", durationMs); }
+  }
+
   async completePacingPlan(input: { prompt: string; timeoutMs?: number }) {
     const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 500, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: input.prompt }] }) }, input.timeoutMs ?? 60_000);
     if (!response.ok) { const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null; throw classifyGroqError(response, payload?.error?.message ?? "", durationMs); }

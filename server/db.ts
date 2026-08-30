@@ -118,16 +118,17 @@ export async function createProjectRecord(userId: number, input: { name: string;
   return { projectId: Number(result[0].insertId) };
 }
 
-export function projectSetupUpdateValues(input: { narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM" }) {
-  const values: { narrationOriginalName?: string | null; imageSourcePath?: string | null; outputPath?: string | null; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM" } = {};
+export function projectSetupUpdateValues(input: { narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM"; timelineSyncMode?: "ORDERED_PACING" | "SEMANTIC_WEIGHTED" }) {
+  const values: { narrationOriginalName?: string | null; imageSourcePath?: string | null; outputPath?: string | null; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM"; timelineSyncMode?: "ORDERED_PACING" | "SEMANTIC_WEIGHTED" } = {};
   if (input.narrationOriginalName !== undefined) values.narrationOriginalName = input.narrationOriginalName.trim() || null;
   if (input.imageSourcePath !== undefined) values.imageSourcePath = input.imageSourcePath.trim() || null;
   if (input.outputPath !== undefined) values.outputPath = input.outputPath.trim() || null;
   if (input.readableHoldMode !== undefined) values.readableHoldMode = input.readableHoldMode;
+  if (input.timelineSyncMode !== undefined) values.timelineSyncMode = input.timelineSyncMode;
   return values;
 }
 
-export async function updateProjectSetup(userId: number, projectId: number, input: { narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM" }) {
+export async function updateProjectSetup(userId: number, projectId: number, input: { narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM"; timelineSyncMode?: "ORDERED_PACING" | "SEMANTIC_WEIGHTED" }) {
   const db = await requireDb();
   const project = await getUserProject(userId, projectId);
   if (!project) throw new Error("Project not found.");

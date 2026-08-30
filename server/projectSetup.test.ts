@@ -14,4 +14,10 @@ describe("project setup path persistence", () => {
     expect(projectSetupUpdateValues({ readableHoldMode: "NO_MINIMUM" })).toEqual({ readableHoldMode: "NO_MINIMUM" });
     expect(projectSetupUpdateValues({ readableHoldMode: "MIN_2_SECONDS" })).toEqual({ readableHoldMode: "MIN_2_SECONDS" });
   });
+
+  it("persists either semantic sync mode and keeps omitted sync mode untouched", () => {
+    expect(projectSetupUpdateValues({ timelineSyncMode: "SEMANTIC_WEIGHTED" })).toEqual({ timelineSyncMode: "SEMANTIC_WEIGHTED" });
+    expect(projectSetupUpdateValues({ timelineSyncMode: "ORDERED_PACING" })).toEqual({ timelineSyncMode: "ORDERED_PACING" });
+    expect(projectSetupUpdateValues({ outputPath: "D:\\Output" })).toEqual({ outputPath: "D:\\Output" });
+  });
 });

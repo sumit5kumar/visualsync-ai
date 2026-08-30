@@ -24,6 +24,7 @@ export const projects = mysqlTable("projects", {
   resolutionHeight: int("resolutionHeight").notNull().default(1080),
   aspectRatio: varchar("aspectRatio", { length: 12 }).notNull().default("16:9"),
   readableHoldMode: mysqlEnum("readableHoldMode", ["MIN_2_SECONDS", "NO_MINIMUM"]).notNull().default("MIN_2_SECONDS"),
+  timelineSyncMode: mysqlEnum("timelineSyncMode", ["ORDERED_PACING", "SEMANTIC_WEIGHTED"]).notNull().default("ORDERED_PACING"),
   zoomEnabled: boolean("zoomEnabled").notNull().default(true),
   zoomAmountPercent: int("zoomAmountPercent").notNull().default(8),
   zoomDirection: mysqlEnum("zoomDirection", ["IN", "OUT", "AUTO"]).notNull().default("IN"),

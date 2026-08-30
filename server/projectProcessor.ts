@@ -6,6 +6,7 @@ import { executeWithGroqRotation, GroqPoolExhaustedError } from "./groqPool";
 import { buildGlobalReadableImageDurations } from "./readablePacing";
 import { storageGetSignedUrl } from "./storage";
 import { validateTimeline } from "./timelineValidation";
+import { buildSemanticWeightedTimeline, type SemanticAssignment, type SemanticImage, type SemanticTranscriptSegment } from "./semanticTimeline";
 import { makePcmWavChunk, planPcmWavTranscriptionRanges, SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, scanMp3FrameRanges } from "./audioChunking";
 import { mp3ToMonoWav } from "./audioTranscoding";
 import { ADAPTIVE_PCM_WAV_RANGE_SPLIT_AFTER_ATTEMPTS, mergeChunkTranscripts, readNarrationTranscriptionState, splitRepeatedlyFailingPcmWavRange, summarizeNarrationText, type Mp3PreparationActiveChunk, type Mp3PreparationFrame, type Mp3PreparationState, type NarrationTranscriptionState, type PersistedNarrationChunk } from "./narrationTranscription";
@@ -17,6 +18,7 @@ function transcriptForRange(segments: Array<{ start: number; end: number; text: 
 }
 
 const MAX_PACING_IMAGES_PER_REQUEST = 24;
+const MAX_SEMANTIC_IMAGES_PER_REQUEST = 20;
 const MAX_PACING_NARRATION_CHARACTERS = 3600;
 const NARRATION_SOURCE_PREPARATION_VERSION = 7;
 const MP3_PREPARATION_SCAN_BYTES = 256 * 1024;
@@ -39,6 +41,44 @@ export function isGenericLinearPacingRamp(weights: number[]) {
 
 function activePacingPrompt(batchIndex: number, batchCount: number, batch: Array<{ sequence: number | null; scene: string }>, narrationDigest: string, corrective = false) {
   return `Create content-specific variable pacing weights for contiguous ordered image batch ${batchIndex + 1}/${batchCount}. Reply only {"weights":[...]} with exactly ${batch.length} positive non-equal decimals. Assign every weight independently from the narration and the visible scene: important, dense, or concept-changing scenes may need longer holds; simple bridge scenes may need shorter holds. Do not use image number as a proxy for duration. Do not return an ascending or descending sequence, arithmetic progression, evenly spaced ramp, or a repeated pattern.${corrective ? " The previous answer was rejected because it was a generic sequential ramp; recalculate each image from its actual scene and narrative role." : ""} Narration digest: ${JSON.stringify(narrationDigest)}. Image batch: ${JSON.stringify(batch)}`;
+}
+
+function semanticSyncPrompt(batch: Array<{ sequence: number | null; scene: string }>, transcriptSegments: SemanticTranscriptSegment[], audioDurationMs: number) {
+  const transcript = transcriptSegments.map((segment, index) => ({ index, startMs: Math.round(segment.start * 1000), endMs: Math.round(segment.end * 1000), text: segment.text.trim() }));
+  return `Map every image in this batch to the most semantically relevant timestamped narration segment. Preserve the image’s visible meaning, not its filename or numeric order. Reply only with JSON {"assignments":[{"imageSequence":number,"transcriptSegmentIndex":number,"weight":number}]}. Return exactly one assignment for every image in the batch, never omit or duplicate an image, use only the supplied transcriptSegmentIndex values, and use positive weights from 0.5 to 3.0. The image sequence identifies the uploaded image. This is a semantic mapping request, not a duration request; do not invent timestamps. The server will calculate continuous durations from the selected transcript windows. Full narration duration is ${audioDurationMs} ms. Timestamped narration segments: ${JSON.stringify(transcript)}. Image batch: ${JSON.stringify(batch)}`;
+}
+
+function parseSemanticAssignments(value: unknown): SemanticAssignment[] {
+  const raw = value && typeof value === "object" && Array.isArray((value as { assignments?: unknown }).assignments) ? (value as { assignments: unknown[] }).assignments : [];
+  return raw.map(item => {
+    const record = item && typeof item === "object" ? item as Record<string, unknown> : {};
+    return { sequence: Number(record.imageSequence), segmentIndex: Number(record.transcriptSegmentIndex), weight: Number(record.weight) };
+  }).filter(assignment => Number.isFinite(assignment.sequence) && Number.isFinite(assignment.segmentIndex) && Number.isFinite(assignment.weight));
+}
+
+function assertSemanticBatchAssignments(assignments: SemanticAssignment[], batch: Array<{ sequence: number | null; scene: string }>, transcriptSegments: SemanticTranscriptSegment[]) {
+  const expected = new Set(batch.map(item => item.sequence));
+  if (assignments.length !== batch.length || assignments.some(item => !expected.has(item.sequence)) || new Set(assignments.map(item => item.sequence)).size !== batch.length) throw new Error("Groq did not return exactly one semantic assignment for every image batch item.");
+  if (assignments.some(item => !Number.isInteger(item.segmentIndex) || item.segmentIndex < 0 || item.segmentIndex >= transcriptSegments.length || !Number.isFinite(item.weight) || item.weight <= 0)) throw new Error("Groq returned an invalid semantic transcript assignment.");
+}
+
+async function collectSemanticAssignments(userId: number, visualCatalog: Array<{ sequence: number | null; scene: string }>, transcriptSegments: SemanticTranscriptSegment[], audioDurationMs: number, timeoutMs = 60_000) {
+  const batches = buildBoundedPacingBatches(visualCatalog, MAX_SEMANTIC_IMAGES_PER_REQUEST);
+  const assignments: SemanticAssignment[] = [];
+  let providerKey: { label: string; maskedKey: string } | null = null;
+  for (const batch of batches) {
+    const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completeSemanticSyncPlan({ prompt: semanticSyncPrompt(batch, transcriptSegments, audioDurationMs), timeoutMs }), key }));
+    const batchAssignments = parseSemanticAssignments(run.value);
+    assertSemanticBatchAssignments(batchAssignments, batch, transcriptSegments);
+    assignments.push(...batchAssignments);
+    providerKey = run.key;
+  }
+  return { assignments, providerKey };
+}
+
+function buildSemanticRebuiltSegments(audioDurationMs: number, transcriptSegments: SemanticTranscriptSegment[], images: SemanticImage[], assignments: SemanticAssignment[], holdMode: "MIN_2_SECONDS" | "NO_MINIMUM") {
+  const clips = buildSemanticWeightedTimeline({ audioDurationMs, transcriptSegments, images, assignments, holdMode });
+  return clips.map(clip => ({ imageAssetId: clip.imageAssetId, startMs: clip.startMs, endMs: clip.endMs, narrationText: transcriptForRange(transcriptSegments, clip.startMs, clip.endMs), confidence: 0, selectionReason: `Semantic weighted sync matched uploaded image ${clip.sourceSequence} to transcript segment ${clip.transcriptSegmentIndex} and reordered it by narration relevance.`, decisionType: "KEEP" as const }));
 }
 
 function assertActivePacingWeights(weights: number[], expectedLength: number) {
@@ -275,6 +315,20 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
     const fullNarration = transcriptSegments.map(segment => segment.text.trim()).join(" ");
     const narrationDigest = fullNarration.slice(0, MAX_PACING_NARRATION_CHARACTERS);
     const visualCatalog = imageAnalyses.map(({ image, analysis }) => ({ sequence: image.sequenceNumber, scene: String(analysis.sceneDescription).replace(/\s+/g, " ").slice(0, 84) }));
+    if (project.timelineSyncMode === "SEMANTIC_WEIGHTED") {
+      const semantic = await collectSemanticAssignments(userId, visualCatalog, transcriptSegments, project.audioDurationMs);
+      const rebuilt = buildSemanticRebuiltSegments(project.audioDurationMs, transcriptSegments, imageAnalyses.map(({ image, analysis }) => ({ id: image.id, sequence: image.sequenceNumber, scene: String(analysis.sceneDescription) })), semantic.assignments, project.readableHoldMode ?? "MIN_2_SECONDS");
+      const validation = validateTimeline(project.audioDurationMs, rebuilt);
+      if (!validation.valid) throw new Error(`Generated semantic timeline failed validation: ${validation.issues.join(" ")}`);
+      await db.update(projects).set({ processingStage: "finalizing", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
+      await db.transaction(async transaction => {
+        await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId));
+        await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, semanticProviderKeyLabel: semantic.providerKey?.label ?? null, semanticProviderKeyMasked: semantic.providerKey?.maskedKey ?? null, allImagesRequired: true, holdMode: project.readableHoldMode ?? "MIN_2_SECONDS", pacingMethod: "semantic-transcript-boundary-weighted" } })));
+        await transaction.insert(timelineApprovals).values({ projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
+        await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null }).where(eq(projects.id, projectId));
+      });
+      return { imageCount: rebuilt.length, minimumDurationMs: project.readableHoldMode === "MIN_2_SECONDS" ? 2_200 : 0, validation };
+    }
     const batches = buildBoundedPacingBatches(visualCatalog);
     const weights: number[] = [];
     let pacingProviderKey: { label: string; maskedKey: string } | null = null;
@@ -330,6 +384,10 @@ export type TimelineGenerationWorkState = {
   pacingProviderKeyLabel?: string | null;
   pacingProviderKeyMasked?: string | null;
   pacingQualityRetries?: number;
+  semanticAssignments?: SemanticAssignment[];
+  nextSemanticBatch?: number;
+  semanticProviderKeyLabel?: string | null;
+  semanticProviderKeyMasked?: string | null;
 };
 
 export type TimelineGenerationSliceResult = {
@@ -348,6 +406,10 @@ export function normalizeTimelineGenerationWorkState(value: unknown): TimelineGe
     pacingProviderKeyLabel: typeof record.pacingProviderKeyLabel === "string" ? record.pacingProviderKeyLabel : null,
     pacingProviderKeyMasked: typeof record.pacingProviderKeyMasked === "string" ? record.pacingProviderKeyMasked : null,
     pacingQualityRetries: Number.isInteger(record.pacingQualityRetries) && Number(record.pacingQualityRetries) >= 0 ? Number(record.pacingQualityRetries) : 0,
+    semanticAssignments: Array.isArray(record.semanticAssignments) ? record.semanticAssignments.map(item => { const value = item && typeof item === "object" ? item as Record<string, unknown> : {}; return { sequence: Number(value.sequence), segmentIndex: Number(value.segmentIndex), weight: Number(value.weight) }; }).filter(item => Number.isFinite(item.sequence) && Number.isFinite(item.segmentIndex) && Number.isFinite(item.weight)) : [],
+    nextSemanticBatch: Number.isInteger(record.nextSemanticBatch) && Number(record.nextSemanticBatch) >= 0 ? Number(record.nextSemanticBatch) : 0,
+    semanticProviderKeyLabel: typeof record.semanticProviderKeyLabel === "string" ? record.semanticProviderKeyLabel : null,
+    semanticProviderKeyMasked: typeof record.semanticProviderKeyMasked === "string" ? record.semanticProviderKeyMasked : null,
   };
 }
 
@@ -431,6 +493,29 @@ export async function processProjectTimelineSlice(userId: number, projectId: num
   if (transcriptSegments.length === 0) throw new Error("Persisted narration transcript is unavailable for timeline construction.");
   const fullNarration = transcriptSegments.map(segment => segment.text.trim()).join(" ");
   const visualCatalog = refreshedImages.map(image => ({ sequence: image.sequenceNumber, scene: String((image.analysisJson as Record<string, unknown> | null)?.sceneDescription ?? "").replace(/\s+/g, " ").slice(0, 84) }));
+  if (project.timelineSyncMode === "SEMANTIC_WEIGHTED") {
+    const semanticBatches = buildBoundedPacingBatches(visualCatalog, MAX_SEMANTIC_IMAGES_PER_REQUEST);
+    const nextSemanticBatch = workState.nextSemanticBatch ?? 0;
+    if (nextSemanticBatch < semanticBatches.length) {
+      await db.update(projects).set({ processingStage: "building_timeline", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
+      const batch = semanticBatches[nextSemanticBatch];
+      const semanticRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completeSemanticSyncPlan({ prompt: semanticSyncPrompt(batch, transcriptSegments, project.audioDurationMs!), timeoutMs: 20_000 }), key }), { maxAttempts: 1 });
+      const batchAssignments = parseSemanticAssignments(semanticRun.value);
+      assertSemanticBatchAssignments(batchAssignments, batch, transcriptSegments);
+      return { stage: "building_timeline", workState: { ...workState, semanticAssignments: [...(workState.semanticAssignments ?? []), ...batchAssignments], nextSemanticBatch: nextSemanticBatch + 1, semanticProviderKeyLabel: semanticRun.key.label, semanticProviderKeyMasked: semanticRun.key.maskedKey } };
+    }
+    const assignments = workState.semanticAssignments ?? [];
+    const rebuilt = buildSemanticRebuiltSegments(project.audioDurationMs!, transcriptSegments, refreshedImages.map(image => ({ id: image.id, sequence: image.sequenceNumber, scene: String((image.analysisJson as Record<string, unknown> | null)?.sceneDescription ?? "") })), assignments, project.readableHoldMode ?? "MIN_2_SECONDS");
+    const validation = validateTimeline(project.audioDurationMs, rebuilt);
+    if (!validation.valid) throw new Error(`Generated semantic timeline failed validation: ${validation.issues.join(" ")}`);
+    await db.transaction(async transaction => {
+      await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId));
+      await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, semanticProviderKeyLabel: workState.semanticProviderKeyLabel ?? null, semanticProviderKeyMasked: workState.semanticProviderKeyMasked ?? null, allImagesRequired: true, holdMode: project.readableHoldMode ?? "MIN_2_SECONDS", pacingMethod: "semantic-transcript-boundary-weighted" } })));
+      await transaction.insert(timelineApprovals).values({ projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
+      await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null }).where(eq(projects.id, projectId));
+    });
+    return { stage: "completed", workState };
+  }
   const batches = buildBoundedPacingBatches(visualCatalog);
   const nextPacingBatch = workState.nextPacingBatch ?? 0;
   if (nextPacingBatch < batches.length) {
