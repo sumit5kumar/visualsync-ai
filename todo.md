@@ -380,6 +380,6 @@
 - [x] Add focused regression tests, reprocess only the affected cached project state, and verify corrected continuous coverage.
 - [x] Create a fresh project from the saved 5-minute narration and images, run chunks/Groq transcription/image analysis/pacing from scratch, and leave it Timeline Ready without changing existing projects.
 - [x] Diagnose why the fresh full-analysis project still has poor narration-to-image synchronization by comparing transcript windows with generated clip boundaries; confirmed the source WAV independently reports 288.651 seconds and the current global pacing builder does not bind each image to semantic speech boundaries.
-- [ ] Create a new fresh-analysis 5-minute project using the corrected 288,651 ms duration and verify full-duration Timeline coverage.
+- [x] Create a new fresh-analysis 5-minute project using the corrected 288,651 ms duration and verify full-duration Timeline coverage.
 - [x] Add an additive hosted upload/setup option for semantic weighted synchronization that preserves current ordered mode and binds image order/durations to narration transcript ranges.
 - [x] Add focused tests validating strict semantic-boundary output and legacy-mode compatibility.
