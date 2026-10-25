@@ -50,6 +50,14 @@ describe("durable Timeline Generation retry policy", () => {
     expect(TIMELINE_JOB_CRON.split(" ")).toHaveLength(6);
   });
 
+  it("keeps a size-wording 429 inside automatic recovery instead of failing the job permanently", () => {
+    const rateLimitSizedMessage = new GroqRequestError("The narration exceeds Groq's file-size limit. VisualSync will prepare safe audio chunks before retrying.", "request_too_large", { durationMs: 1, category: "file_too_large", httpStatus: 429, retryAfterMs: 3_000 });
+    const genuineOversizedRequest = new GroqRequestError("Request too large for model.", "request_too_large", { durationMs: 1, category: "file_too_large", httpStatus: 413 });
+    expect(isRetryableTimelineFailure(rateLimitSizedMessage)).toBe(true);
+    expect(resolveTimelineRetryAt(rateLimitSizedMessage, 1, 1_000).getTime()).toBe(4_000);
+    expect(isRetryableTimelineFailure(genuineOversizedRequest)).toBe(false);
+  });
+
   it("covers 429, 5xx, timeout, network, invalid-key, and permission-restricted production classifications", () => {
     const rateLimited = new GroqRequestError("429", "quota_limited", { durationMs: 1, category: "rate_limited" });
     const serverError = new GroqRequestError("503", "unavailable", { durationMs: 1, category: "server_error" });

@@ -36,6 +36,10 @@ function failureMetadata(error: unknown): GroqRequestMetadata | undefined {
 export function isRetryableTimelineFailure(error: unknown) {
   const metadata = failureMetadata(error);
   if (metadata?.category === "rate_limited" || metadata?.category === "audio_quota_exhausted" || metadata?.category === "server_error" || metadata?.category === "network_failure" || metadata?.category === "timeout" || metadata?.category === "unknown") return true;
+  // Groq uses 429 exclusively for rate-limit and quota semantics, even when the
+  // message happens to mention size limits. Genuine oversized-request rejections
+  // arrive as 400/413 and must stay fatal so the job is not retried pointlessly.
+  if (metadata?.category === "file_too_large" && metadata?.httpStatus === 429) return true;
   return error instanceof Error && /fetch failed|econnreset|network|connection reset|timed out|timeout/i.test(error.message);
 }
 
