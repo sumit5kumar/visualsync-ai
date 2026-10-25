@@ -1,11 +1,12 @@
 import crypto from "crypto";
 import express, { type Express } from "express";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { sdk } from "./_core/sdk";
 import { saveRenderedProjectVideo, saveUploadedProjectMedia } from "./db";
-import { storagePresignPut, storagePut } from "./storage";
+import { storageKeyPath, storagePresignPut, storagePut } from "./storage";
 
-const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const DIRECT_UPLOAD_TICKET_TTL_MS = 15 * 60 * 1000;
 const safeFilename = (filename: string) => filename.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+/, "").slice(0, 180) || "upload";
 export const projectMediaBodyParserOptions = { type: () => true, limit: MAX_UPLOAD_BYTES };
@@ -95,6 +96,12 @@ export function registerProjectMediaRoutes(app: Express) {
       const token = typeof req.body?.ticket === "string" ? req.body.ticket : "";
       const ticket = readDirectUploadTicket(token);
       if (!ticket || ticket.userId !== user.id) return res.status(400).json({ error: "The direct upload ticket is invalid or expired. Retry the selected file." });
+      try {
+        const stat = await fs.stat(storageKeyPath(ticket.storageKey));
+        if (stat.size !== ticket.byteSize) return res.status(400).json({ error: "The uploaded file does not match the prepared upload. Retry the selected file." });
+      } catch {
+        return res.status(400).json({ error: "The upload was not received. Retry the selected file." });
+      }
       await saveUploadedProjectMedia({ userId: user.id, projectId: ticket.projectId, assetType: ticket.assetType, originalFilename: ticket.originalFilename, storageKey: ticket.storageKey, mimeType: ticket.mimeType, byteSize: ticket.byteSize, contentHash: ticket.contentHash, sequenceNumber: ticket.sequenceNumber, audioDurationMs: ticket.audioDurationMs });
       return res.status(201).json({ success: true, storageKey: ticket.storageKey });
     } catch (error) { return res.status(400).json({ error: error instanceof Error ? error.message : "Direct upload could not be completed." }); }

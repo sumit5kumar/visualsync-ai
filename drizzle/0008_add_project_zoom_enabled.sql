@@ -1,1 +1,1 @@
-ALTER TABLE `projects` ADD `zoomEnabled` boolean DEFAULT true NOT NULL;
+-- Redundant: `zoomEnabled` is already added by 0007_complex_silver_fox.sql.

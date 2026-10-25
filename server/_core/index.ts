@@ -2,14 +2,32 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import path from "node:path";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { registerOAuthRoutes } from "./oauth";
+import { registerLocalAuthRoutes } from "./localAuth";
 import { registerStorageProxy } from "./storageProxy";
 import { registerProjectMediaRoutes } from "../projectMediaRoutes";
 import { registerTimelineGenerationScheduleRoutes } from "../timelineGenerationScheduleRoutes";
+import { startLocalScheduler } from "../localScheduler";
+import { setLocalServerPort } from "./localBaseUrl";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+
+// Shared hosts (IIS/iisnode) have no shell access, so schema migrations run
+// idempotently at boot from the bundled drizzle/ folder.
+async function runDatabaseMigrations() {
+  if (!process.env.DATABASE_URL || process.env.SKIP_AUTO_MIGRATE === "1") return;
+  try {
+    const { drizzle } = await import("drizzle-orm/mysql2");
+    const { migrate } = await import("drizzle-orm/mysql2/migrator");
+    const db = drizzle(process.env.DATABASE_URL);
+    await migrate(db, { migrationsFolder: path.resolve(process.cwd(), "drizzle") });
+    console.log("[DB] Schema migrations are up to date.");
+  } catch (error) {
+    console.error("[DB] Schema migration failed:", error);
+  }
+}
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -31,6 +49,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  await runDatabaseMigrations();
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
@@ -39,7 +58,7 @@ async function startServer() {
   registerProjectMediaRoutes(app);
   registerTimelineGenerationScheduleRoutes(app);
   registerStorageProxy(app);
-  registerOAuthRoutes(app);
+  registerLocalAuthRoutes(app);
   // tRPC API
   app.use(
     "/api/trpc",
@@ -55,16 +74,27 @@ async function startServer() {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  const rawPort = process.env.PORT;
+  const onListening = (port: number | null) => {
+    if (port !== null) setLocalServerPort(port);
+    startLocalScheduler();
+    console.log("VisualSync server started.");
+  };
 
-  if (port !== preferredPort) {
-    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
+  // iisnode passes a named pipe path as PORT; httpPlatformHandler (SmarterASP)
+  // passes a numeric port. Listen on exactly what the host provides.
+  if (rawPort) {
+    const port = parseInt(rawPort);
+    if (Number.isFinite(port)) {
+      server.listen(port, () => onListening(port));
+    } else {
+      server.listen(rawPort, () => onListening(null));
+    }
+    return;
   }
 
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
-  });
+  const port = await findAvailablePort(3000);
+  server.listen(port, () => onListening(port));
 }
 
 startServer().catch(console.error);

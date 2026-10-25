@@ -1,4 +1,4 @@
-import { and, eq, isNull, lte, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, or } from "drizzle-orm";
 import { groqApiKeys, timelineGenerationJobs, projects } from "../drizzle/schema";
 import { getDb } from "./db";
 import { decryptSecret } from "./crypto";
@@ -219,4 +219,23 @@ export async function runTimelineGenerationJobBySchedule(taskUid: string) {
   const [job] = await db.select().from(timelineGenerationJobs).where(eq(timelineGenerationJobs.scheduleCronTaskUid, taskUid)).limit(1);
   if (!job) return { outcome: "orphan" as const };
   return runTimelineGenerationJob(job.id);
+}
+
+/** Claim and advance every due job; the lease guard makes this safe to call from overlapping schedulers. */
+export async function runAllDueTimelineGenerationJobs() {
+  const db = await requireDb();
+  const now = new Date();
+  const due = await db.select({ id: timelineGenerationJobs.id }).from(timelineGenerationJobs).where(and(
+    inArray(timelineGenerationJobs.status, ["queued", "waiting_for_retry"]),
+    or(isNull(timelineGenerationJobs.retryAt), lte(timelineGenerationJobs.retryAt, now)),
+  ));
+  const results = [];
+  for (const job of due) {
+    try {
+      results.push({ jobId: job.id, ...(await runTimelineGenerationJob(job.id)) });
+    } catch (error) {
+      results.push({ jobId: job.id, outcome: "error" as const, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { dispatched: results.length, results };
 }

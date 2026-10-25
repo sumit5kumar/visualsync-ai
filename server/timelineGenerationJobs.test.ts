@@ -79,21 +79,25 @@ describe("durable Timeline Generation retry policy", () => {
     expect(resolveTimelineQueueGate([completed, queued], queued.id, now + TIMELINE_QUEUE_RELEASE_DELAY_MS)).toMatchObject({ outcome: "ready" });
   });
 
-  it("performs immediate protected dispatch after schedule persistence while retaining the cron recovery path", () => {
+  it("performs immediate protected dispatch and keeps the local scheduler recovery path", () => {
     const routerSource = readFileSync(resolve(process.cwd(), "server/routers.ts"), "utf8");
     const jobSource = readFileSync(resolve(process.cwd(), "server/timelineGenerationJobs.ts"), "utf8");
-    expect(routerSource).toContain("await setTimelineGenerationSchedule(ctx.user.id, input.projectId, schedule.taskUid);");
+    expect(routerSource).toContain("const job = await queueTimelineGenerationJob(ctx.user.id, input.projectId);");
     expect(routerSource).toContain("const dispatch = await runTimelineGenerationJob(job.id);");
     expect(jobSource).toContain("eq(timelineGenerationJobs.leaseToken, leaseToken)");
     expect(jobSource).toContain("firstDispatchAtMs");
     expect(jobSource).toContain("transientFailureCount: 0");
     expect(jobSource).toContain("await db.update(timelineGenerationJobs).set({ workState }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)))");
+    expect(jobSource).toContain("runAllDueTimelineGenerationJobs");
   });
 
-  it("allows the authenticated preview workflow to start the already-published hosted job instead of blocking on NODE_ENV", () => {
+  it("starts timeline generation without platform heartbeat registration on the independent deployment", () => {
     const routerSource = readFileSync(resolve(process.cwd(), "server/routers.ts"), "utf8");
     expect(routerSource).not.toContain('process.env.NODE_ENV !== "production"');
-    expect(routerSource).toContain('path: "/api/scheduled/timeline-generation"');
-    expect(routerSource).toContain('if (!sessionToken) throw new Error("Sign in again before starting hosted Timeline Generation.")');
+    expect(routerSource).toContain("const job = await queueTimelineGenerationJob(ctx.user.id, input.projectId);");
+    expect(routerSource).not.toContain("createHeartbeatJob");
+    const scheduleSource = readFileSync(resolve(process.cwd(), "server/timelineGenerationScheduleRoutes.ts"), "utf8");
+    expect(scheduleSource).toContain("x-scheduler-secret");
+    expect(scheduleSource).toContain("runAllDueTimelineGenerationJobs");
   });
 });

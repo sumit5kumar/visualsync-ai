@@ -1,15 +1,11 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { parse as parseCookie } from "cookie";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { activateGeminiKey, activateGroqKey, adjustTimelineBoundary, approveTimeline, createProjectRecord, deleteAllProjectRecords, deleteProjectRecord, getApprovedRenderHandoff, getRenderedProjectVideo, getStoredGeminiKey, getStoredGroqKey, getTimelineReview, getUserMediaStorageUsage, listProjectTimeline, listRenderedProjectVideos, listTimelineCandidates, listUserProjects, listVisibleGeminiKeys, listVisibleGroqKeys, moveTimelineVisual, prepareProjectMediaImport, recordGeminiKeyTest, recordGroqKeyTest, recordGroqProjectVerification, removeGeminiKey, removeGroqKey, restoreTimelineSnapshot, saveValidatedGeminiKey, saveValidatedGroqKey, substituteTimelineImage, updateProjectOutputFormat, updateProjectSetup, updateProjectZoomSettings } from "./db";
-import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
-import { getTimelineGenerationJob, queueTimelineGenerationJob, runTimelineGenerationJob, setTimelineGenerationSchedule, TIMELINE_JOB_CRON } from "./timelineGenerationJobs";
-import { signTimelineScheduleTask } from "./timelineScheduleAuth";
-import { isAmbiguousHeartbeatUpdateTimeout } from "./timelineScheduleRecovery";
+import { queueTimelineGenerationJob, runTimelineGenerationJob } from "./timelineGenerationJobs";
 import { decryptSecret, describeApiKey, describeGeminiKey, encryptSecret, fingerprintSecret } from "./crypto";
 import { GEMINI_MODEL, GeminiClient } from "./geminiClient";
 import { GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL, GroqClient } from "./groqClient";
@@ -36,32 +32,9 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({ me: publicProcedure.query(opts => opts.ctx.user), logout: publicProcedure.mutation(({ ctx }) => { const cookieOptions = getSessionCookieOptions(ctx.req); ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 }); return { success: true } as const; }) }),
   project: router({ list: protectedProcedure.query(({ ctx }) => listUserProjects(ctx.user.id)), storageUsage: protectedProcedure.query(({ ctx }) => getUserMediaStorageUsage(ctx.user.id)), create: protectedProcedure.input(projectInput).mutation(async ({ ctx, input }) => ({ success: true as const, ...(await createProjectRecord(ctx.user.id, input)) })), updateSetup: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), narrationOriginalName: z.string().trim().max(255).optional(), imageSourcePath: z.string().trim().max(2048).optional(), outputPath: z.string().trim().max(2048).optional(), readableHoldMode: z.enum(["MIN_2_SECONDS", "NO_MINIMUM"]).optional(), timelineSyncMode: z.enum(["ORDERED_PACING", "SEMANTIC_WEIGHTED"]).optional() })).mutation(({ ctx, input }) => updateProjectSetup(ctx.user.id, input.projectId, input)), updateZoom: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), enabled: z.boolean(), amountPercent: z.union([z.literal(3), z.literal(5), z.literal(8), z.literal(12)]), direction: z.enum(["IN", "OUT", "AUTO"]), randomMix: z.boolean().optional(), crossfadeDurationMs: z.union([z.literal(0), z.literal(300), z.literal(500), z.literal(800), z.literal(1000), z.literal(1200)]), transitionType: z.enum(["NONE", "CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN", "RANDOM"]).optional(), enabledTransitions: z.array(z.enum(["CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN"])).min(1).optional(), enabledZoomDirections: z.array(z.enum(["IN", "OUT", "PAN_LEFT", "PAN_RIGHT", "DIAGONAL", "KEN_BURNS"])).min(1).optional() })).mutation(({ ctx, input }) => updateProjectZoomSettings(ctx.user.id, input.projectId, input)), updateOutput: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), width: z.union([z.literal(1920), z.literal(1280), z.literal(854), z.literal(1080), z.literal(720), z.literal(480)]), height: z.union([z.literal(1080), z.literal(720), z.literal(480), z.literal(1920), z.literal(1280), z.literal(854)]), aspectRatio: z.enum(["16:9", "9:16"]) })).mutation(({ ctx, input }) => updateProjectOutputFormat(ctx.user.id, input.projectId, input)), remove: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => deleteProjectRecord(ctx.user.id, input.projectId)), removeAll: protectedProcedure.mutation(({ ctx }) => deleteAllProjectRecords(ctx.user.id)), prepareMediaImport: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => prepareProjectMediaImport(ctx.user.id, input.projectId)), processGlobalTimeline: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
-    const previous = await getTimelineGenerationJob(ctx.user.id, input.projectId);
     const job = await queueTimelineGenerationJob(ctx.user.id, input.projectId);
-    const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
-    if (!sessionToken) throw new Error("Sign in again before starting hosted Timeline Generation.");
-    if (previous?.scheduleCronTaskUid) {
-      let scheduleRefreshDeferred = false;
-      try {
-        await updateHeartbeatJob(previous.scheduleCronTaskUid, { cron: TIMELINE_JOB_CRON, path: "/api/scheduled/timeline-generation", method: "POST", payload: { taskUid: previous.scheduleCronTaskUid, signature: signTimelineScheduleTask(previous.scheduleCronTaskUid) }, enable: true, description: `Persistent Timeline Generation for project ${input.projectId}` }, sessionToken);
-      } catch (error) {
-        if (!isAmbiguousHeartbeatUpdateTimeout(error)) throw error;
-        scheduleRefreshDeferred = true;
-      }
-      const dispatch = await runTimelineGenerationJob(job.id);
-      return { jobId: job.id, status: "queued" as const, scheduled: true, scheduleRefreshDeferred, dispatch };
-    }
-    const schedule = await createHeartbeatJob({ name: `timeline-generation-${input.projectId}`, cron: TIMELINE_JOB_CRON, path: "/api/scheduled/timeline-generation", method: "POST", payload: {}, description: `Persistent Timeline Generation for project ${input.projectId}` }, sessionToken);
-    let scheduleRefreshDeferred = false;
-    try {
-      await updateHeartbeatJob(schedule.taskUid, { payload: { taskUid: schedule.taskUid, signature: signTimelineScheduleTask(schedule.taskUid) } }, sessionToken);
-    } catch (error) {
-      if (!isAmbiguousHeartbeatUpdateTimeout(error)) throw error;
-      scheduleRefreshDeferred = true;
-    }
-    await setTimelineGenerationSchedule(ctx.user.id, input.projectId, schedule.taskUid);
     const dispatch = await runTimelineGenerationJob(job.id);
-    return { jobId: job.id, status: "queued" as const, scheduled: true, scheduleRefreshDeferred, nextExecutionAt: schedule.nextExecutionAt ?? null, dispatch };
+    return { jobId: job.id, status: "queued" as const, scheduled: true, dispatch };
   }), readablePacingPolicy: protectedProcedure.query(() => ({ useEverySourceImageInOrder: true, provider: "groq", preferredMinimumDurationMs: 2200, adaptiveMinimum: true, equalDurationFallbackAllowed: false, supportedHoldModes: ["MIN_2_SECONDS", "NO_MINIMUM"] as const, defaultHoldMode: "MIN_2_SECONDS" as const, supportedSyncModes: ["ORDERED_PACING", "SEMANTIC_WEIGHTED"] as const, defaultSyncMode: "ORDERED_PACING" as const })) }),
   gemini: router({
     model: publicProcedure.query(() => GEMINI_MODEL),

@@ -26,10 +26,12 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   if (!db) return;
   const values: InsertUser = { openId: user.openId, lastSignedIn: new Date() };
   const updateSet: Record<string, unknown> = { lastSignedIn: new Date() };
-  for (const field of ["name", "email", "loginMethod"] as const) {
+  for (const field of ["name", "email", "loginMethod", "passwordHash"] as const) {
     if (user[field] !== undefined) { values[field] = user[field] ?? null; updateSet[field] = user[field] ?? null; }
   }
-  values.role = user.role ?? (user.openId === ENV.ownerOpenId ? "admin" : "user");
+  const ownerEmail = ENV.ownerEmail.trim().toLowerCase();
+  const isOwner = Boolean(ownerEmail) && (String(user.openId).toLowerCase() === ownerEmail || String(user.email ?? "").toLowerCase() === ownerEmail);
+  values.role = user.role ?? (isOwner ? "admin" : "user");
   updateSet.role = values.role;
   await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
 }

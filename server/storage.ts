@@ -1,20 +1,19 @@
-// Preconfigured storage helpers for Manus WebDev templates
-// Uploads via Forge Server presigned URL to S3 (PUT direct).
-// Downloads return /manus-storage/{key} paths served via 307 redirect.
+// Local disk storage. Media lives under MEDIA_DIR on the server filesystem
+// and is served back through /manus-storage/{key} (keeping the URL shape the
+// app already expects) and /api/storage/put/{key} for ticket-authorized PUTs.
 
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { ENV } from "./_core/env";
+import { localBaseUrl } from "./_core/localBaseUrl";
 
-function getForgeConfig() {
-  const forgeUrl = ENV.forgeApiUrl;
-  const forgeKey = ENV.forgeApiKey;
-
-  if (!forgeUrl || !forgeKey) {
-    throw new Error(
-      "Storage config missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY",
-    );
+function mediaDir(): string {
+  const dir = ENV.mediaDir;
+  if (!dir) {
+    throw new Error("Storage is not configured: set MEDIA_DIR.");
   }
-
-  return { forgeUrl: forgeUrl.replace(/\/+$/, ""), forgeKey };
+  return dir;
 }
 
 function normalizeKey(relKey: string): string {
@@ -28,25 +27,33 @@ function appendHashSuffix(relKey: string): string {
   return `${relKey.slice(0, lastDot)}_${hash}${relKey.slice(lastDot)}`;
 }
 
-export async function storagePresignPut(relKey: string): Promise<{ key: string; uploadUrl: string }> {
-  const { forgeUrl, forgeKey } = getForgeConfig();
-  const key = appendHashSuffix(normalizeKey(relKey));
-
-  // 1. Get presigned PUT URL from Forge
-  const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
-  presignUrl.searchParams.set("path", key);
-
-  const presignResp = await fetch(presignUrl, {
-    headers: { Authorization: `Bearer ${forgeKey}` },
-  });
-
-  if (!presignResp.ok) {
-    const msg = await presignResp.text().catch(() => presignResp.statusText);
-    throw new Error(`Storage presign failed (${presignResp.status}): ${msg}`);
+export function storageKeyPath(relKey: string): string {
+  const key = normalizeKey(relKey);
+  const root = path.resolve(mediaDir());
+  const resolved = path.resolve(root, key);
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    throw new Error("Invalid storage key.");
   }
+  return resolved;
+}
 
-  const { url: uploadUrl } = (await presignResp.json()) as { url: string };
-  if (!uploadUrl) throw new Error("Forge returned empty presign URL");
+export async function ensureStorageDir(filePath: string): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+}
+
+const uploadTicket = (key: string): string =>
+  crypto.createHmac("sha256", process.env.JWT_SECRET || "local-storage-ticket").update(`storage-put:${key}`).digest("base64url");
+
+export function verifyUploadTicket(key: string, ticket: unknown): boolean {
+  if (typeof ticket !== "string") return false;
+  const expected = Buffer.from(uploadTicket(key));
+  const supplied = Buffer.from(ticket);
+  return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+}
+
+export async function storagePresignPut(relKey: string): Promise<{ key: string; uploadUrl: string }> {
+  const key = appendHashSuffix(normalizeKey(relKey));
+  const uploadUrl = `/api/storage/put/${key}?t=${uploadTicket(key)}`;
   return { key, uploadUrl };
 }
 
@@ -55,24 +62,10 @@ export async function storagePut(
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream",
 ): Promise<{ key: string; url: string }> {
-  const { key, uploadUrl } = await storagePresignPut(relKey);
-
-  // 2. PUT file directly to S3
-  const blob =
-    typeof data === "string"
-      ? new Blob([data], { type: contentType })
-      : new Blob([data as any], { type: contentType });
-
-  const uploadResp = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": contentType },
-    body: blob,
-  });
-
-  if (!uploadResp.ok) {
-    throw new Error(`Storage upload to S3 failed (${uploadResp.status})`);
-  }
-
+  const key = appendHashSuffix(normalizeKey(relKey));
+  const filePath = storageKeyPath(key);
+  await ensureStorageDir(filePath);
+  await fs.writeFile(filePath, data);
   return { key, url: `/manus-storage/${key}` };
 }
 
@@ -81,23 +74,7 @@ export async function storageGet(relKey: string): Promise<{ key: string; url: st
   return { key, url: `/manus-storage/${key}` };
 }
 
-export async function storageGetSignedUrl(relKey: string, signal?: AbortSignal): Promise<string> {
-  const { forgeUrl, forgeKey } = getForgeConfig();
-  const key = normalizeKey(relKey);
-
-  const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
-  getUrl.searchParams.set("path", key);
-
-  const resp = await fetch(getUrl, {
-    headers: { Authorization: `Bearer ${forgeKey}` },
-    signal,
-  });
-
-  if (!resp.ok) {
-    const msg = await resp.text().catch(() => resp.statusText);
-    throw new Error(`Storage signed URL failed (${resp.status}): ${msg}`);
-  }
-
-  const { url } = (await resp.json()) as { url: string };
-  return url;
+export async function storageGetSignedUrl(relKey: string, _signal?: AbortSignal): Promise<string> {
+  const key = normalizeKey(relKey).split("/").map(encodeURIComponent).join("/");
+  return `${localBaseUrl()}/manus-storage/${key}`;
 }
