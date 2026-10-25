@@ -50,11 +50,6 @@ function pcmBlockAlign(wavFmtBase64: string) {
   return fmt.length >= 14 ? fmt.readUInt16LE(12) : 1;
 }
 
-/**
- * Replaces a repeatedly failing PCM source range with two overlap-aware child
- * ranges. Completed neighboring chunks remain untouched; the children retain
- * their exact source mapping and therefore can be merged normally later.
- */
 export function splitRepeatedlyFailingPcmWavRange(chunk: PersistedNarrationChunk, overlapMs: number): PersistedNarrationChunk[] | null {
   const sourceRange = chunk.sourceRange;
   if (!sourceRange?.wavFmtBase64) return null;
@@ -89,7 +84,21 @@ export function splitRepeatedlyFailingPcmWavRange(chunk: PersistedNarrationChunk
   return children;
 }
 
-const normalizeText = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+const normalizeText = (value: string) => value.trim().toLowerCase().replace(new RegExp("[^\\p{L}\\p{N}\\s]+", "gu"), "").replace(/\s+/g, " ");
+
+function textsOverlapOrMatch(leftRaw: string, rightRaw: string) {
+  const left = normalizeText(leftRaw);
+  const right = normalizeText(rightRaw);
+  if (!left || !right) return false;
+  if (left === right || left.includes(right) || right.includes(left)) return true;
+  const leftWords = left.split(" ").filter(Boolean);
+  const rightWords = right.split(" ").filter(Boolean);
+  if (leftWords.length >= 2 && rightWords.length >= 2) {
+    const shared = rightWords.filter(word => leftWords.includes(word)).length;
+    if (shared / Math.min(leftWords.length, rightWords.length) >= 0.6) return true;
+  }
+  return false;
+}
 
 export function readNarrationTranscriptionState(value: unknown): NarrationTranscriptionState | null {
   if (!value || typeof value !== "object") return null;
@@ -120,7 +129,10 @@ export function narrationTranscriptionSummary(value: unknown) {
 export function mergeChunkTranscripts(chunks: PersistedNarrationChunk[]) {
   const merged: TimestampedNarrationSegment[] = [];
   const ordered = chunks.slice().sort((left, right) => left.startMs - right.startMs);
-  for (const chunk of ordered) {
+  for (let chunkIndex = 0; chunkIndex < ordered.length; chunkIndex += 1) {
+    const chunk = ordered[chunkIndex];
+    const hasOverlapWindow = chunkIndex > 0 && chunk.contentStartMs > chunk.startMs;
+    const contentBoundarySec = chunk.contentStartMs / 1000;
     for (const segment of chunk.transcript?.segments ?? []) {
       const absolute = { ...segment };
       const previous = merged.at(-1);
@@ -131,14 +143,22 @@ export function mergeChunkTranscripts(chunks: PersistedNarrationChunk[]) {
       const overlaps = absolute.start * 1000 <= previous.end * 1000 + 250;
       const previousText = normalizeText(previous.text);
       const currentText = normalizeText(absolute.text);
-      if (overlaps && (previousText === currentText || previousText.includes(currentText))) {
+      if (overlaps && (previousText === currentText || previousText.includes(currentText) || textsOverlapOrMatch(previous.text, absolute.text))) {
+        if (currentText.length > previousText.length && currentText.includes(previousText)) {
+          previous.text = absolute.text;
+        }
         previous.end = Math.max(previous.end, absolute.end);
         continue;
       }
-      if (overlaps && currentText.includes(previousText)) {
-        previous.text = absolute.text;
-        previous.end = Math.max(previous.end, absolute.end);
-        continue;
+      if (hasOverlapWindow) {
+        const midpointSec = (absolute.start + absolute.end) / 2;
+        if (absolute.end <= contentBoundarySec + 0.15 || (midpointSec < contentBoundarySec - 0.1 && previous.end >= contentBoundarySec - 0.5)) {
+          continue;
+        }
+        if (absolute.start < previous.end) {
+          absolute.start = previous.end;
+          if (absolute.end - absolute.start < 0.05) continue;
+        }
       }
       merged.push(absolute);
     }
@@ -149,3 +169,4 @@ export function mergeChunkTranscripts(chunks: PersistedNarrationChunk[]) {
 export function summarizeNarrationText(chunks: PersistedNarrationChunk[]) {
   return chunks.map(chunk => chunk.transcript?.text.trim() ?? "").filter(Boolean).join(" ");
 }
+

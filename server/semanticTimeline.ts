@@ -57,8 +57,15 @@ export function buildSemanticWeightedTimeline(input: SemanticTimelineInput): Sem
   let cursor = 0;
   nonEmptySegments.forEach((segment, bucketIndex) => {
     const bucketAssignments = assignmentBySegment.get(segment.index)!.slice().sort((left, right) => right.weight - left.weight || left.sequence - right.sequence);
-    const nextBoundary = bucketIndex + 1 < nonEmptySegments.length ? nonEmptySegments[bucketIndex + 1].startMs : input.audioDurationMs;
-    const bucketEnd = Math.min(input.audioDurationMs, Math.max(cursor + bucketAssignments.length, Math.min(input.audioDurationMs, nextBoundary)));
+    const remainingBuckets = nonEmptySegments.slice(bucketIndex + 1);
+    const minRemainingImages = remainingBuckets.reduce((sum, nextSeg) => sum + (assignmentBySegment.get(nextSeg.index)?.length ?? 0), 0);
+    const nextSegmentStart = bucketIndex + 1 < nonEmptySegments.length ? nonEmptySegments[bucketIndex + 1].startMs : input.audioDurationMs;
+    const naturalEnd = bucketIndex + 1 < nonEmptySegments.length ? Math.round((segment.endMs + nextSegmentStart) / 2) : input.audioDurationMs;
+    const targetEnd = Math.max(nextSegmentStart, naturalEnd);
+    const maxAllowedEnd = input.audioDurationMs - minRemainingImages;
+    const bucketEnd = bucketIndex + 1 === nonEmptySegments.length
+      ? input.audioDurationMs
+      : Math.min(maxAllowedEnd, Math.max(cursor + bucketAssignments.length, targetEnd));
     const bucketDuration = bucketEnd - cursor;
     const preferredMinimum = input.holdMode === "MIN_2_SECONDS" ? 2_200 : 0;
     const minimum = bucketDuration >= bucketAssignments.length * Math.max(1, preferredMinimum) ? preferredMinimum : 0;
@@ -71,6 +78,7 @@ export function buildSemanticWeightedTimeline(input: SemanticTimelineInput): Sem
       cursor = endMs;
     });
   });
-  if (cursor !== input.audioDurationMs) throw new Error(`Semantic weighted Timeline ended at ${cursor} ms instead of ${input.audioDurationMs} ms.`);
+  if (cursor !== input.audioDurationMs) throw new Error(`Semantic weighted Timeline ended at ${cursor} ms instead of${input.audioDurationMs} ms.`);
   return clips;
 }
+

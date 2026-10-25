@@ -34,7 +34,7 @@ describe("GroqClient", () => {
     expect(generationUrl).toBe("https://api.groq.com/openai/v1/chat/completions");
     const generationBody = JSON.parse(String(generationRequest.body));
     expect(generationBody).toMatchObject({ model: GROQ_VISION_MODEL });
-    expect(generationBody.messages[0].content[1].image_url.url).toContain("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQ");
+    expect(generationBody.messages[0].content[1].image_url.url).toContain("iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2j");
   });
 
   it("does not promote a project key when the real Whisper probe is denied and does not spend a generation-model request", async () => {
