@@ -69,10 +69,37 @@ function localError(message: string, status: GroqKeyStatus, category: GroqFailur
   return new GroqRequestError(message, status, { durationMs, category });
 }
 
+function extractFirstJsonObject(content: string): string | null {
+  const start = content.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < content.length; index += 1) {
+    const char = content[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return content.slice(start, index + 1);
+    }
+  }
+  return null;
+}
+
 function parseGeneratedJsonObject(content: string, malformedMessage: string, durationMs = 0) {
-  const objectText = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").match(/\{[\s\S]*\}/)?.[0];
-  if (!objectText) throw localError(malformedMessage, "prompt_error", "client_request", durationMs);
-  try { return JSON.parse(objectText) as unknown; } catch { throw localError(malformedMessage, "prompt_error", "client_request", durationMs); }
+  const fenced = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  const candidates = [extractFirstJsonObject(fenced), fenced.match(/\{[\s\S]*\}/)?.[0]].filter((candidate): candidate is string => Boolean(candidate));
+  for (const candidate of candidates) {
+    try { return JSON.parse(candidate) as unknown; } catch { /* try the next candidate */ }
+  }
+  throw localError(malformedMessage, "prompt_error", "client_request", durationMs);
 }
 
 function minimalProbeWav() {
@@ -152,7 +179,7 @@ export class GroqClient {
   }
 
   async analyzeImage(input: { imageUrl: string; prompt: string; timeoutMs?: number }) {
-    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 600, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: [{ type: "text", text: `${input.prompt}\nReply with exactly one compact JSON object and no markdown.` }, { type: "image_url", image_url: { url: input.imageUrl, detail: "low" } }] }] }) }, input.timeoutMs ?? 60_000);
+    const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/chat/completions`, { method: "POST", headers: this.headers("application/json"), body: JSON.stringify({ model: GROQ_VISION_MODEL, temperature: 0, max_completion_tokens: 1_500, reasoning_effort: "none", reasoning_format: "hidden", messages: [{ role: "user", content: [{ type: "text", text: `${input.prompt}\nReply with exactly one compact JSON object and no markdown.` }, { type: "image_url", image_url: { url: input.imageUrl, detail: "low" } }] }] }) }, input.timeoutMs ?? 60_000);
     if (!response.ok) { const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null; throw classifyGroqError(response, payload?.error?.message ?? "", durationMs); }
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const content = payload.choices?.[0]?.message?.content?.trim();

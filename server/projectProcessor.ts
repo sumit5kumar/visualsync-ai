@@ -575,7 +575,7 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
       await db.update(mediaAssets).set({ analysisState: "analyzed", analysisJson: analysis, embeddingSourceText: formatRichVisualScene(analysis) }).where(eq(mediaAssets.id, pendingImage.id));
     } else {
       const imageUrl = await boundedVisionImageUrl(pendingImage.storageKey);
-      const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.analyzeImage({ imageUrl, prompt: "Analyze this image for a narration-driven video. Return JSON with sceneDescription, subjects, setting, mood, and relevance. Describe visible actions, characters, emotions, objects, text, and environment in detail.", timeoutMs: 20_000 }), key }), { maxAttempts: 1 });
+      const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.analyzeImage({ imageUrl, prompt: "Analyze this image for a narration-driven video. Return JSON with sceneDescription, subjects, setting, mood, and relevance. Describe visible actions, characters, emotions, objects, text, and environment in detail.", timeoutMs: 60_000 }), key }), { maxAttempts: 1 });
       const record = typeof run.value === "object" && run.value ? run.value as Record<string, unknown> : {};
       const sceneDescription = typeof record.sceneDescription === "string" ? record.sceneDescription.trim() : "";
       if (!sceneDescription) throw new Error(`Groq returned no usable scene description for ${pendingImage.originalFilename}.`);
