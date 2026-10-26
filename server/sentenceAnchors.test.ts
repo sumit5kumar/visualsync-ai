@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDirectAnchorPacingPrompt, computeAnchorBoundaries, fallbackProportionalAnchors, parseAndSanitizeAnchors, sanitizeFinalAnchorSequence, splitTranscriptIntoSentenceLines } from "./sentenceAnchors";
+import { buildDirectAnchorPacingPrompt, buildPointAnchoredPacingItems, collectMissingPointNumbers, computeAnchorBoundaries, fallbackProportionalAnchors, parseAndSanitizeAnchors, parseImagePointNumber, sanitizeFinalAnchorSequence, splitTranscriptIntoSentenceLines } from "./sentenceAnchors";
 
 const line = (start: number, end: number, text: string) => ({ start, end, text });
 
@@ -195,7 +195,7 @@ describe("deterministic fallback anchors", () => {
 describe("direct anchor pacing prompt", () => {
   it("asks for per-image line anchors with hold guidance and absolute line numbers", () => {
     const lines = [line(0, 3, "पहली बात।"), line(3, 6, "दूसरी बात।")];
-    const prompt = buildDirectAnchorPacingPrompt({ batchIndex: 0, batchCount: 1, batch: [{ sequence: 1, scene: "chart | Subjects:person" }], lines, cursorLine: 0, audioDurationMs: 10_000, imageCount: 2, holdMode: "MIN_2_SECONDS", corrective: false });
+    const prompt = buildDirectAnchorPacingPrompt({ batchIndex: 0, batchCount: 1, batch: [{ sequence: 1, point: null, scene: "chart | Subjects:person" }], lines, cursorLine: 0, audioDurationMs: 10_000, imageCount: 2, holdMode: "MIN_2_SECONDS", corrective: false });
     expect(prompt).toContain('"anchors"');
     expect(prompt).toContain("0|0.0-3.0|पहली बात।");
     expect(prompt).toContain("2.2 seconds");
@@ -204,8 +204,74 @@ describe("direct anchor pacing prompt", () => {
 
   it("explains the cramming rejection on a corrective retry and relaxes hold guidance for no-minimum mode", () => {
     const lines = [line(0, 3, "पहली बात।"), line(3, 6, "दूसरी बात।")];
-    const corrective = buildDirectAnchorPacingPrompt({ batchIndex: 0, batchCount: 1, batch: [{ sequence: 1, scene: "chart" }], lines, cursorLine: 0, audioDurationMs: 10_000, imageCount: 1, holdMode: "NO_MINIMUM", corrective: true });
+    const corrective = buildDirectAnchorPacingPrompt({ batchIndex: 0, batchCount: 1, batch: [{ sequence: 1, point: null, scene: "chart" }], lines, cursorLine: 0, audioDurationMs: 10_000, imageCount: 1, holdMode: "NO_MINIMUM", corrective: true });
     expect(corrective).toContain("crammed");
     expect(corrective).toContain("No minimum hold is required");
+  });
+
+  it("names every image point and the missing points when filenames carry point numbers", () => {
+    const lines = [line(0, 3, "पहली बात।"), line(3, 6, "दूसरी बात।"), line(6, 9, "तीसरी बात।")];
+    const prompt = buildDirectAnchorPacingPrompt({ batchIndex: 0, batchCount: 1, batch: [{ sequence: 1, point: 1, scene: "chart" }, { sequence: 2, point: 3, scene: "photo" }], lines, cursorLine: 0, audioDurationMs: 10_000, imageCount: 2, holdMode: "MIN_2_SECONDS", corrective: false, missingPoints: [2] });
+    expect(prompt).toContain("point 1 = the first spoken point");
+    expect(prompt).toContain("NO image for point(s) 2");
+    expect(prompt).toContain("sequence|point|scene");
+    expect(prompt).toContain('"point":1');
+    expect(prompt).toContain('"point":3');
+  });
+
+  it("omits point guidance when the batch has no point numbers", () => {
+    const lines = [line(0, 3, "पहली बात।")];
+    const prompt = buildDirectAnchorPacingPrompt({ batchIndex: 0, batchCount: 1, batch: [{ sequence: 1, point: null, scene: "chart" }], lines, cursorLine: 0, audioDurationMs: 10_000, imageCount: 1, holdMode: "MIN_2_SECONDS", corrective: false });
+    expect(prompt).not.toContain("narration point");
+    expect(prompt).not.toContain("sequence|point|scene");
+  });
+});
+
+describe("image point numbers", () => {
+  it("parses the leading integer of a numbered filename", () => {
+    expect(parseImagePointNumber("11_202608151201.jpeg")).toBe(11);
+    expect(parseImagePointNumber("01_202608151201.jpeg")).toBe(1);
+    expect(parseImagePointNumber("9.jpg")).toBe(9);
+    expect(parseImagePointNumber(" 20 - copy.png")).toBe(20);
+  });
+
+  it("rejects unnumbered, date-first, and oversized names", () => {
+    expect(parseImagePointNumber("IMG_001.jpg")).toBeNull();
+    expect(parseImagePointNumber("202608151201_x.jpg")).toBeNull();
+    expect(parseImagePointNumber("finance-chart.png")).toBeNull();
+    expect(parseImagePointNumber(null)).toBeNull();
+  });
+
+  it("builds point-enriched items only when all points are distinct and ascending", () => {
+    const items = (names: string[]) => names.map((name, index) => ({ sequence: index + 1, originalFilename: name, scene: `scene ${index}` }));
+    expect(buildPointAnchoredPacingItems(items(["01_a.jpg", "02_a.jpg", "03_a.jpg"]))?.map(item => item.point)).toEqual([1, 2, 3]);
+    expect(buildPointAnchoredPacingItems(items(["01_a.jpg", "11_a.jpg", "20_a.jpg"]))?.map(item => item.point)).toEqual([1, 11, 20]);
+    expect(buildPointAnchoredPacingItems(items(["01_a.jpg", "photo.jpg", "03_a.jpg"]))).toBeNull();
+    expect(buildPointAnchoredPacingItems(items(["02_a.jpg", "01_a.jpg"]))).toBeNull();
+    expect(buildPointAnchoredPacingItems(items(["01_a.jpg", "01_b.jpg"]))).toBeNull();
+    expect(buildPointAnchoredPacingItems([])).toBeNull();
+  });
+
+  it("lists the narration points that have no image", () => {
+    const items = (points: number[]) => points.map((point, index) => ({ sequence: index + 1, point, scene: `scene ${index}` }));
+    expect(collectMissingPointNumbers(items([1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 16, 17, 18, 19, 20]))).toEqual([10, 15]);
+    expect(collectMissingPointNumbers(items([1, 2]))).toEqual([]);
+  });
+});
+
+describe("point-aware final anchor guards", () => {
+  const minuteLines = Array.from({ length: 61 }, (_, index) => line(index, index + 1, `line ${index}`));
+
+  it("keeps a legitimate long skip when a narration point has no image", () => {
+    const anchors = [0, 1, 15, ...Array.from({ length: 17 }, (_, index) => 16 + index)];
+    const guarded = sanitizeFinalAnchorSequence(60_000, minuteLines, anchors, { pointAware: true });
+    expect(guarded[2]).toBe(15);
+  });
+
+  it("still caps a catastrophic jump in point-aware mode at the relaxed cap", () => {
+    const anchors = [0, 1, 30, ...Array.from({ length: 17 }, (_, index) => 31 + index)];
+    const guarded = sanitizeFinalAnchorSequence(60_000, minuteLines, anchors, { pointAware: true });
+    expect(guarded[2]).toBe(19);
+    expect(guarded[3]).toBe(31);
   });
 });

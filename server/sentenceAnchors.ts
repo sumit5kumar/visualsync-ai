@@ -4,6 +4,49 @@ import { MAX_ALLOWED_INTERNAL_WORD_GAP_MS } from "./narrationTranscription";
 export type NarrationLine = { start: number; end: number; text: string };
 export type NarrationSegmentInput = { start: number; end: number; text: string; words?: Array<{ word: string; start: number; end: number }> };
 
+/** A pacing catalog item may carry the narration point number encoded in the image filename. */
+export type PacingBatchItem = { sequence: number | null; point: number | null; scene: string };
+
+/**
+ * Extracts the narration point number from an image filename like
+ * "11_202608151201.jpeg" -> 11. Only a leading integer followed by a
+ * non-digit separator counts, so date-first names like "20260815_x.jpg"
+ * are rejected by the 999 ceiling and fall back to content anchoring.
+ */
+export function parseImagePointNumber(filename: string | null | undefined): number | null {
+  if (!filename) return null;
+  const match = /^\s*(\d{1,4})\D/.exec(filename);
+  if (!match) return null;
+  const point = Number(match[1]);
+  return Number.isInteger(point) && point >= 1 && point <= 999 ? point : null;
+}
+
+/**
+ * Enriches the visual catalog with point numbers only when EVERY image
+ * filename carries a valid point and the points are strictly ascending in
+ * sequence order. Any irregularity (unnumbered, duplicated, or reordered
+ * files) returns null so the caller falls back to content-based anchoring.
+ */
+export function buildPointAnchoredPacingItems(items: Array<{ sequence: number | null; originalFilename: string | null | undefined; scene: string }>): PacingBatchItem[] | null {
+  if (!items.length) return null;
+  const parsed = items.map(item => ({ sequence: item.sequence, point: parseImagePointNumber(item.originalFilename), scene: item.scene }));
+  const points = parsed.map(item => item.point);
+  if (points.some(point => point === null)) return null;
+  const values = points as number[];
+  for (let index = 1; index < values.length; index += 1) if (values[index] <= values[index - 1]) return null;
+  return parsed as PacingBatchItem[];
+}
+
+/** Points the narration covers but that have no image, e.g. [10, 15] for files 1-9, 11-14, 16-20. */
+export function collectMissingPointNumbers(items: PacingBatchItem[]): number[] {
+  const points = items.map(item => item.point).filter((point): point is number => point !== null && Number.isInteger(point) && point > 0);
+  if (points.length < 2) return [];
+  const present = new Set(points);
+  const missing: number[] = [];
+  for (let point = Math.min(...points) + 1; point < Math.max(...points); point += 1) if (!present.has(point)) missing.push(point);
+  return missing;
+}
+
 const SENTENCE_SPLIT_MIN_DURATION_MS = 4_500;
 const MAX_ANCHOR_PROMPT_NARRATION_CHARACTERS = 12_000;
 const MAX_SINGLE_IMAGE_TAIL_STRETCH_MS = 10_000;
@@ -224,15 +267,19 @@ export function fallbackProportionalAnchors(audioDurationMs: number, lines: Narr
  * stretch, a mid-sequence guard that caps how far a single AI anchor mistake
  * can pull the next boundary forward, and a tail guard that spreads trailing
  * images over the remaining narration when the model crammed them onto one
- * early line.
+ * early line. When points are enabled a legitimately long skip means a
+ * narration point has no image, so the guards scale six times wider instead
+ * of fighting the user's own point numbering.
  */
-export function sanitizeFinalAnchorSequence(audioDurationMs: number, lines: NarrationLine[], anchors: number[]): number[] {
+export function sanitizeFinalAnchorSequence(audioDurationMs: number, lines: NarrationLine[], anchors: number[], options?: { pointAware?: boolean }): number[] {
   if (!anchors.length || !lines.length) return anchors;
+  const pointAware = options?.pointAware === true;
   const sanitized = anchors.map(anchor => Math.max(0, Math.min(lines.length - 1, Math.round(anchor))));
   for (let index = 1; index < sanitized.length; index += 1) sanitized[index] = Math.max(sanitized[index], sanitized[index - 1]);
+  const fairMs = audioDurationMs / sanitized.length;
+  const guardCapMs = pointAware ? Math.max(fairMs * 6, 15_000) : fairMs * 2 + 5_000;
   if (sanitized.length >= 2) {
-    const fairMs = audioDurationMs / sanitized.length;
-    const capMs = fairMs * 2 + 5_000;
+    const capMs = guardCapMs;
     const firstBoundaryMs = Math.round(lines[sanitized[1]].start * 1000);
     if (firstBoundaryMs > capMs) {
       let best = sanitized[0];
@@ -248,8 +295,7 @@ export function sanitizeFinalAnchorSequence(audioDurationMs: number, lines: Narr
     }
   }
   if (sanitized.length >= 3) {
-    const fairMs = audioDurationMs / sanitized.length;
-    const skipCapMs = Math.max(MAX_MID_SEQUENCE_SKIP_MS, fairMs * 1.5);
+    const skipCapMs = pointAware ? Math.max(fairMs * 6, 15_000) : Math.max(MAX_MID_SEQUENCE_SKIP_MS, fairMs * 1.5);
     for (let index = 1; index < sanitized.length - 1; index += 1) {
       if (sanitized[index] <= sanitized[index - 1] + 1) continue;
       const previousStartMs = Math.round(lines[sanitized[index - 1]].start * 1000);
@@ -316,13 +362,14 @@ export function parseAndSanitizeAnchors(value: unknown, batchLength: number, lin
 export function buildDirectAnchorPacingPrompt(input: {
   batchIndex: number;
   batchCount: number;
-  batch: Array<{ sequence: number | null; scene: string }>;
+  batch: PacingBatchItem[];
   lines: NarrationLine[];
   cursorLine: number;
   audioDurationMs: number;
   imageCount: number;
   holdMode: ReadableHoldMode;
   corrective: boolean;
+  missingPoints?: number[];
 }) {
   const windowStart = Math.max(0, input.cursorLine - 2);
   const coverageSeconds = Math.max(input.batch.length * 2.0, input.batch.length * 4.5 + 8);
@@ -349,5 +396,11 @@ export function buildDirectAnchorPacingPrompt(input: {
   const holdGuidance = input.holdMode === "MIN_2_SECONDS"
     ? `Prefer anchors that keep each image on screen for at least ~${(MIN_READABLE_IMAGE_DURATION_MS / 1000).toFixed(1)} seconds. When the narration is denser than that, keep the exact sentence boundary and never skip backward.`
     : "No minimum hold is required; anchor each image precisely at the line where its content starts.";
-  return `Contiguous ordered image batch ${input.batchIndex + 1}/${input.batchCount} for a narration-driven video. Full audio is ${(input.audioDurationMs / 1000).toFixed(1)} seconds with ${input.imageCount} total ordered images and ${input.lines.length} timestamped narration lines. Previous images ended near line ${input.cursorLine}; anchors in this batch must be non-decreasing and every anchor must be greater than or equal to ${input.cursorLine}. For each image in the listed order, return the line index where the visible content of that image should START being shown. An image may cover several lines: anchor it at the FIRST line it covers. Consecutive images may share one line when the narration is dense; they will split that line's time. Spread anchors across the full remaining narration; the final images should reach the final lines. ${holdGuidance}${input.corrective ? " The previous answer was rejected because it crammed the whole batch onto too few lines; anchor each image to its own spoken sentence(s) using the timestamps." : ""} Reply only {"anchors":[...]} with exactly ${input.batch.length} integers and optionally "durations":[...] with ${input.batch.length} positive spoken-seconds hints. Use only the supplied line indices. Timestamped narration lines (index|start-end seconds|text): ${parts.join(" ")}. Image batch in order (sequence|scene): ${JSON.stringify(input.batch)}`;
+  const hasPoints = input.batch.every(item => Number.isInteger(item.point) && (item.point as number) > 0);
+  const missingPoints = (input.missingPoints ?? []).filter(point => Number.isInteger(point) && point > 0);
+  const pointGuidance = hasPoints
+    ? ` Every image carries the narration point number it illustrates (point 1 = the first spoken point of the narration; points increase in spoken order). Anchor the image with point p at the FIRST line where point p begins. One point may span two consecutive lines when the transcriber split a single sentence mid-way: keep those lines together under that point and anchor at the first of them.${missingPoints.length ? ` The whole video has NO image for point(s) ${missingPoints.join(", ")}: the previous image stays on screen through those points, so never anchor anything at the lines of those points.` : ""} Never anchor an image at a line that still belongs to an earlier point than the image's own point.`
+    : "";
+  const batchJson = hasPoints ? input.batch : input.batch.map(({ sequence, scene }) => ({ sequence, scene }));
+  return `Contiguous ordered image batch ${input.batchIndex + 1}/${input.batchCount} for a narration-driven video. Full audio is ${(input.audioDurationMs / 1000).toFixed(1)} seconds with ${input.imageCount} total ordered images and ${input.lines.length} timestamped narration lines. Previous images ended near line ${input.cursorLine}; anchors in this batch must be non-decreasing and every anchor must be greater than or equal to ${input.cursorLine}. For each image in the listed order, return the line index where the visible content of that image should START being shown. An image may cover several lines: anchor it at the FIRST line it covers. Consecutive images may share one line when the narration is dense; they will split that line's time. Spread anchors across the full remaining narration; the final images should reach the final lines. ${holdGuidance}${pointGuidance}${input.corrective ? " The previous answer was rejected because it crammed the whole batch onto too few lines; anchor each image to its own spoken sentence(s) using the timestamps." : ""} Reply only {"anchors":[...]} with exactly ${input.batch.length} integers and optionally "durations":[...] with ${input.batch.length} positive spoken-seconds hints. Use only the supplied line indices. Timestamped narration lines (index|start-end seconds|text): ${parts.join(" ")}. Image batch in order (${hasPoints ? "sequence|point|scene" : "sequence|scene"}): ${JSON.stringify(batchJson)}`;
 }
