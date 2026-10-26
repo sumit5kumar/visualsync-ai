@@ -58,6 +58,21 @@ describe("transcript sentence-line splitting", () => {
     expect(lines[lines.length - 1].end).toBeCloseTo(19.9, 6);
   });
 
+  it("bridges a Whisper word hole with a placeholder line so anchor timing still advances through dropped speech", () => {
+    const words = [
+      { word: "पहली", start: 0.5, end: 1.0 },
+      { word: "बात", start: 1.2, end: 1.7 },
+      { word: "फिर", start: 25.0, end: 25.5 },
+      { word: "बात।", start: 25.7, end: 26.2 },
+    ];
+    const lines = splitTranscriptIntoSentenceLines([{ start: 0.46, end: 44.44, text: "पहली बात। फिर बात।", words }]);
+    expect(lines).toEqual([
+      { start: 0.5, end: 1.7, text: "पहली बात" },
+      { start: 1.7, end: 25.0, text: "…" },
+      { start: 25.0, end: 26.2, text: "फिर बात।" },
+    ]);
+  });
+
   it("keeps word-exact lines when a trailing word straddles the merged segment boundary", () => {
     const words = [
       { word: "पहली", start: 14.5, end: 14.9 },
@@ -67,7 +82,7 @@ describe("transcript sentence-line splitting", () => {
       { word: "अगला", start: 44.46, end: 46.18 },
     ];
     const lines = splitTranscriptIntoSentenceLines([{ start: 14.46, end: 44.44, text: "पहली बात। दूसरी बात। अगला", words }]);
-    expect(lines.map(item => item.start)).toEqual([14.5, 16.0, 44.46]);
+    expect(lines.map(item => item.start)).toEqual([14.5, 16.0, 17.0, 44.46]);
     expect(lines[0].end).toBe(15.5);
   });
 

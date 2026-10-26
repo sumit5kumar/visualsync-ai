@@ -189,6 +189,11 @@ export class GroqClient {
     } else throw localError("Provide a secure audio URL or a complete audio attachment for Groq transcription.", "prompt_error", "client_request");
     body.append("model", GROQ_TRANSCRIPTION_MODEL);
     body.append("response_format", "verbose_json");
+    // Greedy decoding keeps word timestamps deterministic across retries.
+    // Without it, Whisper can drop whole stretches of speech in one run
+    // (observed: a 21s word hole over continuous audio) and recover them
+    // in the next, which shifts every downstream anchor boundary.
+    body.append("temperature", "0");
     body.append("timestamp_granularities[]", "segment");
     body.append("timestamp_granularities[]", "word");
     if (input.language) body.append("language", input.language);

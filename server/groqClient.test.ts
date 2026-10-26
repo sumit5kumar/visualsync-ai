@@ -212,6 +212,17 @@ describe("GroqClient", () => {
     expect(body.getAll("timestamp_granularities[]")).toEqual(["segment", "word"]);
   });
 
+  it("uses temperature 0 for greedy decoding so word timestamps stay deterministic across retries", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ text: "Narration", segments: [] }), { status: 200 }));
+    global.fetch = fetchMock;
+
+    await new GroqClient("gsk_test").transcribeAudio({ bytes: new Uint8Array([1, 2, 3]), filename: "narration.wav", mimeType: "audio/wav" });
+
+    const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = request.body as FormData;
+    expect(body.get("temperature")).toBe("0");
+  });
+
   it("distributes Groq's top-level words array into per-segment words for downstream pacing", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       text: "hello world",

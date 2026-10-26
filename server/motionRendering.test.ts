@@ -205,7 +205,7 @@ describe("middle-origin motion rendering", () => {
     expect(processor).toContain("loadNarrationChunkBytes(chunk)");
     expect(processor).toContain("fetchNarrationStorageRange(chunk.storageKey, chunk.sourceRange ? `bytes=${chunk.sourceRange.startByte}-${chunk.sourceRange.endByteExclusive - 1}` : undefined)");
     expect(processor).toContain("mp3ToMonoWav(bytes)");
-    expect(processor).toContain("transcribeAudio({ bytes: wavBytes, filename: `narration-part-${index + 1}.wav`");
+    expect(processor).toContain("transcribeAudio({ bytes: wavBytes, filename: `narration-part-${partIndex + 1}.wav`");
     expect(providers).toContain("groqActivate.mutate");
     expect(providers).toContain("geminiActivate.mutate");
     expect(timeline).toContain("approve.mutate(input)");

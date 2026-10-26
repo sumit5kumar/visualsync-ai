@@ -95,23 +95,24 @@ describe("WAV transcription preparation", () => {
     expect(chunks[0]?.bytes).toEqual(source);
   });
 
-  it("ignores an inflated WAV byte-rate header when planning duration-bounded chunks", () => {
+  it("ignores an inflated WAV byte-rate header and keeps a mid-length narration as one direct request", () => {
     const source = pcmWav(3_200_000, 64_000);
     const chunks = splitPcmWavForTranscription(source);
-    expect(chunks).toHaveLength(2);
-    expect(chunks[0]?.contentEndMs).toBeLessThanOrEqual(SAFE_GROQ_DIRECT_WAV_DURATION_MS);
-    expect(chunks.at(-1)?.contentEndMs).toBe(100_000);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]?.contentEndMs).toBe(100_000);
     expect(new DataView(chunks[0]!.bytes.buffer).getUint32(28, true)).toBe(32_000);
   });
 
-  it("splits a long but file-size-safe PCM WAV into callback-safe duration chunks", () => {
-    const source = pcmWav(3_200_000);
+  it("splits a file-size-safe PCM WAV longer than the duration cap into bounded chunks", () => {
+    const source = pcmWav(19_200_000);
     const chunks = splitPcmWavForTranscription(source);
 
-    expect(SAFE_GROQ_DIRECT_WAV_DURATION_MS).toBe(60_000);
-    expect(chunks).toHaveLength(2);
+    expect(SAFE_GROQ_DIRECT_WAV_DURATION_MS).toBe(300_000);
+    expect(chunks).toHaveLength(3);
     expect(chunks[0]?.contentEndMs).toBeLessThanOrEqual(SAFE_GROQ_DIRECT_WAV_DURATION_MS);
     expect(chunks[1]?.contentStartMs).toBe(chunks[0]?.contentEndMs);
+    expect(chunks[2]?.contentStartMs).toBe(chunks[1]?.contentEndMs);
+    expect(chunks.at(-1)?.contentEndMs).toBe(600_000);
     expect(chunks.every(chunk => chunk.bytes.byteLength <= SAFE_GROQ_DIRECT_WAV_BYTES)).toBe(true);
   });
 
@@ -124,9 +125,10 @@ describe("WAV transcription preparation", () => {
     view.setUint32(4, 36 + dataLength, true);
     const plan = planPcmWavTranscriptionRanges(header, 44 + dataLength);
 
-    expect(plan.ranges).toHaveLength(322);
+    expect(plan.ranges).toHaveLength(61);
     expect(plan.ranges[0]?.contentStartMs).toBe(0);
     expect(plan.ranges.at(-1)?.contentEndMs).toBe(18_000_000);
+    expect(plan.ranges.every(range => range.contentEndMs - range.contentStartMs <= SAFE_GROQ_DIRECT_WAV_DURATION_MS)).toBe(true);
     expect(plan.ranges.every(range => range.endByteExclusive - range.startByte + 44 <= SAFE_GROQ_DIRECT_WAV_BYTES)).toBe(true);
   });
 

@@ -1,4 +1,5 @@
 import { MIN_READABLE_IMAGE_DURATION_MS, type ReadableHoldMode } from "./readablePacing";
+import { MAX_ALLOWED_INTERNAL_WORD_GAP_MS } from "./narrationTranscription";
 
 export type NarrationLine = { start: number; end: number; text: string };
 export type NarrationSegmentInput = { start: number; end: number; text: string; words?: Array<{ word: string; start: number; end: number }> };
@@ -59,6 +60,22 @@ function timedWordsToLine(words: TimedWord[]): NarrationLine {
   return { start: words[0].start, end: words[words.length - 1].end, text: words.map(item => item.word).join(" ").trim() };
 }
 
+/** Splits a word stream at artifact-sized holes so lines never straddle dropped speech. */
+function splitWordsAtGaps(words: TimedWord[], maxGapMs: number): TimedWord[][] {
+  const ordered = [...words].sort((left, right) => left.start - right.start);
+  const groups: TimedWord[][] = [];
+  let current: TimedWord[] = [];
+  for (const word of ordered) {
+    if (current.length && (word.start - current[current.length - 1].end) * 1000 > maxGapMs) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(word);
+  }
+  if (current.length) groups.push(current);
+  return groups;
+}
+
 /**
  * Mirrors the proportional text splitter, but every piece inherits the real
  * Whisper word timestamps of its first and last word, so lines stay exact
@@ -99,6 +116,24 @@ export function splitTranscriptIntoSentenceLines(segments: NarrationSegmentInput
     // because one trailing word overshoots the segment end.
     const segmentWords = completeWords ? words!.filter(word => word.start >= segment.start - 0.5 && word.start <= segment.end + 1.5) : null;
     if (segmentWords && segmentWords.length >= 2) {
+      // A nondeterministic Whisper pass can drop a whole stretch of continuous
+      // speech inside one segment (word hole). Keep word-exact lines for the
+      // spoken stretches and bridge the hole with a placeholder line so anchor
+      // timings keep advancing instead of jumping across the dropped range.
+      const gapGroups = splitWordsAtGaps(segmentWords, MAX_ALLOWED_INTERNAL_WORD_GAP_MS);
+      if (gapGroups.length > 1) {
+        for (let groupIndex = 0; groupIndex < gapGroups.length; groupIndex += 1) {
+          const group = gapGroups[groupIndex];
+          const groupLines = group.length >= 2 ? splitWordGroupIntoLines(group) : [timedWordsToLine(group)];
+          for (const line of groupLines) lines.push(line);
+          if (groupIndex < gapGroups.length - 1) {
+            const gapStart = group[group.length - 1].end;
+            const gapEnd = gapGroups[groupIndex + 1][0].start;
+            lines.push({ start: gapStart, end: gapEnd, text: "…" });
+          }
+        }
+        continue;
+      }
       for (const line of splitWordGroupIntoLines(segmentWords)) lines.push(line);
       continue;
     }

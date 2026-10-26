@@ -1,7 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { MIN_ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS, mergeChunkTranscripts, narrationTranscriptionSummary, readNarrationTranscriptionState, shiftSegmentTimestamps, splitRepeatedlyFailingPcmWavRange, type PersistedNarrationChunk } from "./narrationTranscription";
+import { MAX_ALLOWED_INTERNAL_WORD_GAP_MS, MIN_ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS, mergeChunkTranscripts, narrationTranscriptionSummary, readNarrationTranscriptionState, shiftSegmentTimestamps, splitRepeatedlyFailingPcmWavRange, transcriptionWordGapQuality, type PersistedNarrationChunk } from "./narrationTranscription";
 
 const baseChunk = (overrides: Partial<PersistedNarrationChunk>): PersistedNarrationChunk => ({ storageKey: "chunk.mp3", startMs: 0, endMs: 10_000, contentStartMs: 0, contentEndMs: 10_000, byteSize: 100, status: "completed", attempts: 1, transcript: { text: "hello world", segments: [] }, ...overrides });
+
+describe("transcription word-gap quality", () => {
+  it("measures the largest hole between consecutive spoken words", () => {
+    const segments = [{ start: 0, end: 30, text: "a", words: [{ word: "a", start: 1, end: 2 }, { word: "b", start: 23.5, end: 24 }, { word: "c", start: 24.2, end: 24.8 }] }];
+    const quality = transcriptionWordGapQuality(segments);
+    expect(quality.largestGapMs).toBeCloseTo(21_500, 0);
+    expect(quality.wordCount).toBe(3);
+  });
+
+  it("reports zero gaps and no words for empty or wordless transcripts", () => {
+    expect(transcriptionWordGapQuality([])).toEqual({ largestGapMs: 0, wordCount: 0 });
+    expect(transcriptionWordGapQuality([{ start: 0, end: 5, text: "x" }])).toEqual({ largestGapMs: 0, wordCount: 0 });
+  });
+
+  it("sorts unsorted segments before measuring so a later segment cannot hide an earlier hole", () => {
+    const segments = [
+      { start: 40, end: 45, text: "later", words: [{ word: "z", start: 40.5, end: 41 }] },
+      { start: 0, end: 20, text: "earlier", words: [{ word: "a", start: 0.5, end: 1 }, { word: "b", start: 11, end: 11.5 }] },
+    ];
+    expect(transcriptionWordGapQuality(segments).largestGapMs).toBeCloseTo(29_000, 0);
+    expect(MAX_ALLOWED_INTERNAL_WORD_GAP_MS).toBe(10_000);
+  });
+});
 
 describe("chunk segment timestamp shifting", () => {
   it("offsets segment and word timestamps onto the narration timeline", () => {

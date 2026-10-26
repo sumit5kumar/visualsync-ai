@@ -13,7 +13,13 @@ export type AudioTranscriptionChunk = {
 // completed successfully on the Free tier; larger measured attachments stalled.
 export const SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES = 128 * 1024;
 export const SAFE_GROQ_DIRECT_WAV_BYTES = 24 * 1024 * 1024;
-export const SAFE_GROQ_DIRECT_WAV_DURATION_MS = 60_000;
+// Groq's Whisper handles files far longer than 60 seconds fine; the 60 s cap
+// forced needless two-chunk splits (and a cross-chunk word-merge seam) on
+// ordinary 1-minute narrations. The 24 MiB byte cap is the real hard limit,
+// so a 5-minute duration ceiling only trims the largest chunks: at 24 kHz
+// mono 16-bit it binds before bytes do (~14 MiB), keeping one transcription
+// call comfortably inside the hosted job lease.
+export const SAFE_GROQ_DIRECT_WAV_DURATION_MS = 300_000;
 
 export type PcmWavTranscriptionRange = {
   startByte: number;

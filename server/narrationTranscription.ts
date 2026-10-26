@@ -190,3 +190,25 @@ export function shiftSegmentTimestamps<T extends { start: number; end: number; w
   }));
 }
 
+// Whisper decoding is nondeterministic without greedy decoding: one pass can
+// drop a whole stretch of CONTINUOUS speech (observed: a 21-second word hole
+// over audio with no silence at all), while the next pass of the same bytes
+// returns a complete word stream. A gap this large between consecutive spoken
+// words is an artifact, not a real pause, and is used to trigger one retry
+// and, failing that, proportional timing fallbacks so anchors still advance
+// through the dropped range.
+export const MAX_ALLOWED_INTERNAL_WORD_GAP_MS = 10_000;
+
+export function transcriptionWordGapQuality(segments: Array<{ start: number; end: number; words?: Array<{ word: string; start: number; end: number }> }>) {
+  const words = segments
+    .flatMap(segment => (Array.isArray(segment.words) ? segment.words : []))
+    .filter(word => Number.isFinite(word.start) && Number.isFinite(word.end) && word.end >= word.start)
+    .sort((left, right) => left.start - right.start);
+  let largestGapMs = 0;
+  for (let index = 1; index < words.length; index += 1) {
+    const gapMs = (words[index].start - words[index - 1].end) * 1000;
+    if (Number.isFinite(gapMs) && gapMs > largestGapMs) largestGapMs = gapMs;
+  }
+  return { largestGapMs, wordCount: words.length };
+}
+
