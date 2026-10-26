@@ -16,6 +16,8 @@ import { serveStatic, setupVite } from "./vite";
 
 // Shared hosts (IIS/iisnode) have no shell access, so schema migrations run
 // idempotently at boot from the bundled drizzle/ folder.
+const SERVER_BUILD_MARKER = "2026-10-26-word-anchors-v2";
+
 async function runDatabaseMigrations() {
   if (!process.env.DATABASE_URL || process.env.SKIP_AUTO_MIGRATE === "1") return;
   try {
@@ -59,6 +61,9 @@ async function startServer() {
   registerTimelineGenerationScheduleRoutes(app);
   registerStorageProxy(app);
   registerLocalAuthRoutes(app);
+  app.get("/api/health", (_request, response) => {
+    response.json({ ok: true, version: SERVER_BUILD_MARKER });
+  });
   // tRPC API
   app.use(
     "/api/trpc",
