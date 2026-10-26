@@ -24,6 +24,46 @@ describe("transcript sentence-line splitting", () => {
     expect(lines.length).toBeGreaterThanOrEqual(4);
     expect(lines[lines.length - 1].end).toBeCloseTo(30, 6);
   });
+
+  it("uses exact word timestamps inside a merged segment instead of proportional estimates", () => {
+    const words = [
+      { word: "पहली", start: 14.5, end: 14.9 },
+      { word: "बात।", start: 15.1, end: 15.5 },
+      { word: "दूसरी", start: 16.0, end: 16.4 },
+      { word: "बात", start: 16.6, end: 17.0 },
+      { word: "थोड़ी", start: 17.2, end: 17.6 },
+      { word: "लंबी", start: 17.8, end: 18.2 },
+      { word: "है।", start: 18.5, end: 18.9 },
+      { word: "तीसरी", start: 25.0, end: 25.4 },
+      { word: "बात।", start: 25.6, end: 26.0 },
+      { word: "चौथी", start: 26.4, end: 26.9 },
+      { word: "बात", start: 27.1, end: 27.5 },
+      { word: "बहुत", start: 27.7, end: 28.1 },
+      { word: "ज़्यादा", start: 28.3, end: 28.7 },
+      { word: "लंबी", start: 28.9, end: 29.3 },
+      { word: "चलती", start: 29.5, end: 29.9 },
+      { word: "है।", start: 30.1, end: 30.5 },
+    ];
+    const lines = splitTranscriptIntoSentenceLines([{ start: 14.46, end: 44.44, text: "पहली बात। दूसरी बात थोड़ी लंबी है। तीसरी बात। चौथी बात बहुत ज़्यादा लंबी चलती है।", words }]);
+    expect(lines.map(item => item.start)).toEqual([14.5, 16.0, 25.0, 26.4]);
+    expect(lines.map(item => item.end)).toEqual([15.5, 18.9, 26.0, 30.5]);
+    expect(lines[0].text).toBe("पहली बात।");
+  });
+
+  it("word-count chunks a long punctuation-free word stream at exact word times", () => {
+    const words = Array.from({ length: 40 }, (_, index) => ({ word: `w${index}`, start: index * 0.5, end: index * 0.5 + 0.4 }));
+    const lines = splitTranscriptIntoSentenceLines([{ start: 0, end: 20, text: words.map(item => item.word).join(" "), words }]);
+    expect(lines.length).toBeGreaterThanOrEqual(4);
+    expect(lines[0].start).toBe(0);
+    expect(lines[lines.length - 1].end).toBeCloseTo(19.9, 6);
+  });
+
+  it("falls back to proportional timestamps when word timings are incomplete", () => {
+    const words = [{ word: "पहली", start: 14.5, end: 14.9 }, { word: "बात।", start: 15.1, end: Number.NaN }];
+    const lines = splitTranscriptIntoSentenceLines([{ start: 14.46, end: 44.44, text: "पहली बात। दूसरी बात।", words }]);
+    expect(lines[0].start).toBeCloseTo(14.46, 6);
+    expect(lines[lines.length - 1].end).toBeCloseTo(44.44, 6);
+  });
 });
 
 describe("direct sentence-anchor boundaries", () => {
@@ -89,8 +129,22 @@ describe("final anchor sequence guards", () => {
     expect(clamped[2]).toBeGreaterThanOrEqual(clamped[1]);
   });
 
+  it("pulls a mid-sequence anchor down to the skip cap when the AI skipped lines", () => {
+    const anchors = [0, 1, 10, ...Array.from({ length: 17 }, (_, index) => 11 + index)];
+    const guarded = sanitizeFinalAnchorSequence(60_000, minuteLines, anchors);
+    expect(guarded[2]).toBe(7);
+    for (let index = 3; index < guarded.length; index += 1) expect(guarded[index]).toBe(11 + index - 3);
+  });
+
+  it("never pulls the final image anchor even when the previous span is huge", () => {
+    const guarded = sanitizeFinalAnchorSequence(60_000, minuteLines, [0, 1, 30, 31]);
+    expect(guarded[3]).toBe(31);
+    expect(guarded[2]).toBeLessThan(30);
+  });
+
   it("keeps valid anchors untouched", () => {
     expect(sanitizeFinalAnchorSequence(60_000, minuteLines, [0, 10, 20])).toEqual([0, 10, 20]);
+    expect(sanitizeFinalAnchorSequence(60_000, minuteLines, [0, 1, 2])).toEqual([0, 1, 2]);
   });
 });
 

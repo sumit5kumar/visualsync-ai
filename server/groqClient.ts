@@ -7,7 +7,7 @@ export type GroqKeyTestResult = { status: GroqKeyStatus; message: string };
 export type GroqProjectProbeResult = { status: GroqKeyStatus; message: string; transcription: { ok: boolean; status: GroqKeyStatus; message: string }; generation: { ok: boolean; status: GroqKeyStatus; message: string } };
 export type GroqFailureCategory = "invalid_key" | "permission_denied" | "file_too_large" | "rate_limited" | "audio_quota_exhausted" | "timeout" | "network_failure" | "server_error" | "client_request" | "unknown";
 export type GroqRequestMetadata = { httpStatus?: number; errorCode?: string; retryAfterMs?: number; remainingRequests?: string; remainingAudio?: string; resetAudio?: string; durationMs: number; category: GroqFailureCategory };
-export type GroqTranscript = { text: string; language?: string; segments?: Array<{ id?: number; start: number; end: number; text: string; avg_logprob?: number; no_speech_prob?: number }>; requestMetadata: GroqRequestMetadata };
+export type GroqTranscript = { text: string; language?: string; segments?: Array<{ id?: number; start: number; end: number; text: string; avg_logprob?: number; no_speech_prob?: number; words?: Array<{ word: string; start: number; end: number }> }>; requestMetadata: GroqRequestMetadata };
 
 export class GroqRequestError extends Error {
   constructor(message: string, readonly status: GroqKeyStatus, readonly metadata: GroqRequestMetadata = { durationMs: 0, category: "unknown" }) { super(safeGroqMessage(message)); }
@@ -167,6 +167,7 @@ export class GroqClient {
     body.append("model", GROQ_TRANSCRIPTION_MODEL);
     body.append("response_format", "verbose_json");
     body.append("timestamp_granularities[]", "segment");
+    body.append("timestamp_granularities[]", "word");
     if (input.language) body.append("language", input.language);
     if (input.prompt) body.append("prompt", input.prompt);
     const { response, durationMs } = await this.request(`${GROQ_API_BASE_URL}/audio/transcriptions`, { method: "POST", headers: this.headers(), body }, input.timeoutMs ?? 90_000);

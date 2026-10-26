@@ -19,6 +19,17 @@ describe("resumable narration transcription", () => {
     expect(merged.every((segment, index) => index === 0 || segment.start >= merged[index - 1].start)).toBe(true);
   });
 
+  it("keeps word-level timestamps when merging duplicate and clamped overlap segments", () => {
+    const merged = mergeChunkTranscripts([
+      baseChunk({ transcript: { text: "first shared", segments: [{ start: 0, end: 4, text: "First boundary", words: [{ word: "First", start: 0.1, end: 0.6 }, { word: "boundary", start: 0.8, end: 1.4 }] }, { start: 4, end: 8, text: "Shared sentence" }] } }),
+      baseChunk({ startMs: 4_000, contentStartMs: 8_000, transcript: { text: "shared next", segments: [{ start: 4, end: 8.1, text: "shared sentence", words: [{ word: "Shared", start: 4.1, end: 4.6 }, { word: "sentence", start: 4.8, end: 5.6 }] }, { start: 8, end: 12, text: "Next sentence", words: [{ word: "Next", start: 8.1, end: 8.6 }, { word: "sentence", start: 8.8, end: 9.4 }] }] } }),
+    ]);
+    expect(merged.map(segment => segment.text)).toEqual(["First boundary", "Shared sentence", "Next sentence"]);
+    expect(merged[0].words).toEqual([{ word: "First", start: 0.1, end: 0.6 }, { word: "boundary", start: 0.8, end: 1.4 }]);
+    expect(merged[1].words).toEqual([{ word: "Shared", start: 4.1, end: 4.6 }, { word: "sentence", start: 4.8, end: 5.6 }]);
+    expect(merged[2].words).toEqual([{ word: "Next", start: 8.1, end: 8.6 }, { word: "sentence", start: 8.8, end: 9.4 }]);
+  });
+
   it("reports resumable completed and waiting chunk counts without exposing provider secrets", () => {
     const summary = narrationTranscriptionSummary({ transcriptionState: { version: 2, chunkOverlapMs: 4_000, chunks: [baseChunk({ status: "completed" }), baseChunk({ status: "waiting", attempts: 2 })], lastError: { category: "rate_limited", message: "Waiting for Groq retry guidance.", retryAfterMs: 18_000, occurredAtMs: 1 } } });
     expect(summary).toMatchObject({ totalChunks: 2, completedChunks: 1, activeChunkIndex: 2, state: "waiting" });

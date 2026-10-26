@@ -5,6 +5,7 @@ export type TimestampedNarrationSegment = {
   text: string;
   avg_logprob?: number;
   no_speech_prob?: number;
+  words?: Array<{ word: string; start: number; end: number }>;
 };
 
 export type NarrationChunkStatus = "pending" | "processing" | "completed" | "waiting" | "failed";
@@ -146,6 +147,9 @@ export function mergeChunkTranscripts(chunks: PersistedNarrationChunk[]) {
       if (overlaps && (previousText === currentText || previousText.includes(currentText) || textsOverlapOrMatch(previous.text, absolute.text))) {
         if (currentText.length > previousText.length && currentText.includes(previousText)) {
           previous.text = absolute.text;
+          if (absolute.words) previous.words = absolute.words;
+        } else if (!previous.words && absolute.words) {
+          previous.words = absolute.words;
         }
         previous.end = Math.max(previous.end, absolute.end);
         continue;
@@ -156,6 +160,7 @@ export function mergeChunkTranscripts(chunks: PersistedNarrationChunk[]) {
           continue;
         }
         if (absolute.start < previous.end) {
+          if (absolute.words) absolute.words = absolute.words.filter(word => word.start >= previous.end - 0.05);
           absolute.start = previous.end;
           if (absolute.end - absolute.start < 0.05) continue;
         }

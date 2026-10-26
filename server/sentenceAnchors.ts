@@ -1,13 +1,17 @@
 import { MIN_READABLE_IMAGE_DURATION_MS, type ReadableHoldMode } from "./readablePacing";
 
 export type NarrationLine = { start: number; end: number; text: string };
+export type NarrationSegmentInput = { start: number; end: number; text: string; words?: Array<{ word: string; start: number; end: number }> };
 
 const SENTENCE_SPLIT_MIN_DURATION_MS = 4_500;
 const MAX_ANCHOR_PROMPT_NARRATION_CHARACTERS = 12_000;
 const MAX_SINGLE_IMAGE_TAIL_STRETCH_MS = 10_000;
+const MAX_MID_SEQUENCE_SKIP_MS = 6_000;
 
 const SENTENCE_BREAK_PATTERN = /[^।.!?;]+[।.!?;]*/g;
 const COMMA_BREAK_PATTERN = /[^,]+(?:,|$)/g;
+const SENTENCE_WORD_END_PATTERN = /[।.!?;]+$/;
+const COMMA_WORD_END_PATTERN = /,$/;
 
 function pieceWordCount(text: string) {
   return Math.max(1, text.trim().split(/\s+/).length);
@@ -38,18 +42,62 @@ function splitLongTextPieces(text: string, durationMs: number): string[] {
   return parts;
 }
 
+type TimedWord = { word: string; start: number; end: number };
+
+function groupWordsByBoundary(words: TimedWord[], isBoundary: (word: string) => boolean) {
+  const groups: TimedWord[][] = [];
+  let current: TimedWord[] = [];
+  for (const item of words) {
+    current.push(item);
+    if (isBoundary(item.word)) { groups.push(current); current = []; }
+  }
+  if (current.length) groups.push(current);
+  return groups;
+}
+
+function timedWordsToLine(words: TimedWord[]): NarrationLine {
+  return { start: words[0].start, end: words[words.length - 1].end, text: words.map(item => item.word).join(" ").trim() };
+}
+
 /**
- * Turns coarse Whisper segments into a fine sentence-level anchor grid with
- * word-proportional timestamps, so every image boundary can lock onto a real
- * spoken sentence start instead of a 30-second merged transcript block.
+ * Mirrors the proportional text splitter, but every piece inherits the real
+ * Whisper word timestamps of its first and last word, so lines stay exact
+ * even inside 30-second merged transcript segments.
  */
-export function splitTranscriptIntoSentenceLines(segments: Array<{ start: number; end: number; text: string }>): NarrationLine[] {
+function splitWordGroupIntoLines(words: TimedWord[]): NarrationLine[] {
+  const sentenceGroups = groupWordsByBoundary(words, word => SENTENCE_WORD_END_PATTERN.test(word));
+  if (sentenceGroups.length > 1) return sentenceGroups.flatMap(group => splitWordGroupIntoLines(group));
+  const durationMs = (words[words.length - 1].end - words[0].start) * 1000;
+  if (durationMs <= SENTENCE_SPLIT_MIN_DURATION_MS) return [timedWordsToLine(words)];
+  const commaGroups = groupWordsByBoundary(words, word => COMMA_WORD_END_PATTERN.test(word));
+  if (commaGroups.length > 1) return commaGroups.flatMap(group => splitWordGroupIntoLines(group));
+  const targetPieces = Math.max(2, Math.ceil(durationMs / SENTENCE_SPLIT_MIN_DURATION_MS));
+  const perPiece = Math.ceil(words.length / targetPieces);
+  const parts: NarrationLine[] = [];
+  for (let index = 0; index < words.length; index += perPiece) parts.push(timedWordsToLine(words.slice(index, index + perPiece)));
+  return parts;
+}
+
+/**
+ * Turns Whisper segments into a fine sentence-level anchor grid. When Groq
+ * supplied word-level timestamps the line boundaries are the exact spoken
+ * word times; legacy transcripts without word timings fall back to
+ * word-proportional estimates.
+ */
+export function splitTranscriptIntoSentenceLines(segments: NarrationSegmentInput[]): NarrationLine[] {
   const lines: NarrationLine[] = [];
   for (const segment of segments) {
     const text = segment.text.trim();
     if (!text) continue;
     const startMs = Math.round(segment.start * 1000);
     const endMs = Math.round(segment.end * 1000);
+    const words = segment.words;
+    const completeWords = Array.isArray(words) && words.length > 0 && words.every(word => Number.isFinite(word.start) && Number.isFinite(word.end) && word.end >= word.start);
+    const wordsInsideSegment = completeWords && words![0].start >= segment.start - 1 && words![words!.length - 1].end <= segment.end + 1;
+    if (wordsInsideSegment) {
+      for (const line of splitWordGroupIntoLines(words!)) lines.push(line);
+      continue;
+    }
     const durationMs = Math.max(1, endMs - startMs);
     const pieces = splitLongTextPieces(text, durationMs);
     const weights = pieces.map(pieceWordCount);
@@ -134,8 +182,10 @@ export function fallbackProportionalAnchors(audioDurationMs: number, lines: Narr
 /**
  * Post-sanitizes a complete anchor sequence: range clamps, monotonic
  * enforcement, a front guard so image one never swallows a huge opening
- * stretch, and a tail guard that spreads trailing images over the remaining
- * narration when the model crammed them onto one early line.
+ * stretch, a mid-sequence guard that caps how far a single AI anchor mistake
+ * can pull the next boundary forward, and a tail guard that spreads trailing
+ * images over the remaining narration when the model crammed them onto one
+ * early line.
  */
 export function sanitizeFinalAnchorSequence(audioDurationMs: number, lines: NarrationLine[], anchors: number[]): number[] {
   if (!anchors.length || !lines.length) return anchors;
@@ -156,6 +206,26 @@ export function sanitizeFinalAnchorSequence(audioDurationMs: number, lines: Narr
       }
       sanitized[1] = best;
       for (let index = 2; index < sanitized.length; index += 1) sanitized[index] = Math.max(sanitized[index], sanitized[index - 1]);
+    }
+  }
+  if (sanitized.length >= 3) {
+    const fairMs = audioDurationMs / sanitized.length;
+    const skipCapMs = Math.max(MAX_MID_SEQUENCE_SKIP_MS, fairMs * 1.5);
+    for (let index = 1; index < sanitized.length - 1; index += 1) {
+      if (sanitized[index] <= sanitized[index - 1] + 1) continue;
+      const previousStartMs = Math.round(lines[sanitized[index - 1]].start * 1000);
+      const currentStartMs = Math.round(lines[sanitized[index]].start * 1000);
+      if (currentStartMs - previousStartMs <= skipCapMs) continue;
+      const targetMs = previousStartMs + skipCapMs;
+      let best = sanitized[index - 1];
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (let lineIndex = sanitized[index - 1] + 1; lineIndex <= sanitized[index]; lineIndex += 1) {
+        const startMs = Math.round(lines[lineIndex].start * 1000);
+        if (startMs > targetMs) break;
+        const distance = targetMs - startMs;
+        if (distance < bestDistance) { bestDistance = distance; best = lineIndex; }
+      }
+      sanitized[index] = best;
     }
   }
   const lastAnchor = sanitized[sanitized.length - 1];

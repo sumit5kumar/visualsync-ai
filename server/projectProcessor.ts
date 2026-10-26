@@ -538,7 +538,7 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
   const refreshedAssets = await db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.userId, userId)));
   const refreshedNarration = refreshedAssets.find(asset => asset.assetType === "narration");
   const refreshedImages = refreshedAssets.filter(asset => asset.assetType === "image").sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0));
-  const narrationJson = refreshedNarration?.analysisJson as { segments?: Array<{ start: number; end: number; text: string }> } | null;
+  const narrationJson = refreshedNarration?.analysisJson as { segments?: Array<{ start: number; end: number; text: string; words?: Array<{ word: string; start: number; end: number }> }> } | null;
   const transcriptSegments = (narrationJson?.segments ?? []).filter(segment => segment.text.trim());
   if (transcriptSegments.length === 0) throw new Error("Persisted narration transcript is unavailable for timeline construction.");
   const visualCatalog = refreshedImages.map(image => ({ sequence: image.sequenceNumber, scene: formatRichVisualScene(image.analysisJson as Record<string, unknown> | null) }));
