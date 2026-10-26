@@ -175,3 +175,18 @@ export function summarizeNarrationText(chunks: PersistedNarrationChunk[]) {
   return chunks.map(chunk => chunk.transcript?.text.trim() ?? "").filter(Boolean).join(" ");
 }
 
+/**
+ * A chunk transcript's segments and word timestamps are relative to the
+ * chunk's own audio slice. Shift both onto the narration timeline so chunk
+ * merges compare like-for-like absolute times.
+ */
+export function shiftSegmentTimestamps<T extends { start: number; end: number; words?: Array<{ word: string; start: number; end: number }> }>(segments: T[], offsetSeconds: number): T[] {
+  if (!segments.length || offsetSeconds === 0) return segments;
+  return segments.map(segment => ({
+    ...segment,
+    start: segment.start + offsetSeconds,
+    end: segment.end + offsetSeconds,
+    ...(Array.isArray(segment.words) && segment.words.length > 0 ? { words: segment.words.map(word => ({ ...word, start: word.start + offsetSeconds, end: word.end + offsetSeconds })) } : {}),
+  }));
+}
+

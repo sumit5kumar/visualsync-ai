@@ -93,9 +93,13 @@ export function splitTranscriptIntoSentenceLines(segments: NarrationSegmentInput
     const endMs = Math.round(segment.end * 1000);
     const words = segment.words;
     const completeWords = Array.isArray(words) && words.length > 0 && words.every(word => Number.isFinite(word.start) && Number.isFinite(word.end) && word.end >= word.start);
-    const wordsInsideSegment = completeWords && words![0].start >= segment.start - 1 && words![words!.length - 1].end <= segment.end + 1;
-    if (wordsInsideSegment) {
-      for (const line of splitWordGroupIntoLines(words!)) lines.push(line);
+    // Whisper words belong to a segment by their START time. Merged segments
+    // and boundary-straddling words can end slightly outside the measured
+    // range, so validate per word start rather than rejecting the whole set
+    // because one trailing word overshoots the segment end.
+    const segmentWords = completeWords ? words!.filter(word => word.start >= segment.start - 0.5 && word.start <= segment.end + 1.5) : null;
+    if (segmentWords && segmentWords.length >= 2) {
+      for (const line of splitWordGroupIntoLines(segmentWords)) lines.push(line);
       continue;
     }
     const durationMs = Math.max(1, endMs - startMs);

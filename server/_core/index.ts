@@ -16,7 +16,7 @@ import { serveStatic, setupVite } from "./vite";
 
 // Shared hosts (IIS/iisnode) have no shell access, so schema migrations run
 // idempotently at boot from the bundled drizzle/ folder.
-const SERVER_BUILD_MARKER = "2026-10-26-word-anchors-v3";
+const SERVER_BUILD_MARKER = "2026-10-26-word-anchors-v4";
 
 async function runDatabaseMigrations() {
   if (!process.env.DATABASE_URL || process.env.SKIP_AUTO_MIGRATE === "1") return;

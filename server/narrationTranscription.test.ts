@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { MIN_ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS, mergeChunkTranscripts, narrationTranscriptionSummary, readNarrationTranscriptionState, splitRepeatedlyFailingPcmWavRange, type PersistedNarrationChunk } from "./narrationTranscription";
+import { MIN_ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS, mergeChunkTranscripts, narrationTranscriptionSummary, readNarrationTranscriptionState, shiftSegmentTimestamps, splitRepeatedlyFailingPcmWavRange, type PersistedNarrationChunk } from "./narrationTranscription";
 
 const baseChunk = (overrides: Partial<PersistedNarrationChunk>): PersistedNarrationChunk => ({ storageKey: "chunk.mp3", startMs: 0, endMs: 10_000, contentStartMs: 0, contentEndMs: 10_000, byteSize: 100, status: "completed", attempts: 1, transcript: { text: "hello world", segments: [] }, ...overrides });
+
+describe("chunk segment timestamp shifting", () => {
+  it("offsets segment and word timestamps onto the narration timeline", () => {
+    const shifted = shiftSegmentTimestamps([{ start: 0, end: 11.12, text: "tail", words: [{ word: "a", start: 0.2, end: 0.5 }, { word: "b", start: 10.8, end: 11.12 }] }], 56);
+    expect(shifted).toEqual([{ start: 56, end: 67.12, text: "tail", words: [{ word: "a", start: 56.2, end: 56.5 }, { word: "b", start: 66.8, end: 67.12 }] }]);
+  });
+
+  it("leaves segments without words and zero offsets untouched", () => {
+    expect(shiftSegmentTimestamps([{ start: 1, end: 2, text: "x" }], 0)).toEqual([{ start: 1, end: 2, text: "x" }]);
+    expect(shiftSegmentTimestamps([], 12)).toEqual([]);
+  });
+});
 
 describe("resumable narration transcription", () => {
   it("keeps the source-preparation marker so a duration-validated WAV plan is reused across hosted retries", () => {

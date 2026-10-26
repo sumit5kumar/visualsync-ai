@@ -58,6 +58,26 @@ describe("transcript sentence-line splitting", () => {
     expect(lines[lines.length - 1].end).toBeCloseTo(19.9, 6);
   });
 
+  it("keeps word-exact lines when a trailing word straddles the merged segment boundary", () => {
+    const words = [
+      { word: "पहली", start: 14.5, end: 14.9 },
+      { word: "बात।", start: 15.1, end: 15.5 },
+      { word: "दूसरी", start: 16.0, end: 16.4 },
+      { word: "बात।", start: 16.6, end: 17.0 },
+      { word: "अगला", start: 44.46, end: 46.18 },
+    ];
+    const lines = splitTranscriptIntoSentenceLines([{ start: 14.46, end: 44.44, text: "पहली बात। दूसरी बात। अगला", words }]);
+    expect(lines.map(item => item.start)).toEqual([14.5, 16.0, 44.46]);
+    expect(lines[0].end).toBe(15.5);
+  });
+
+  it("falls back to proportional timestamps when fewer than two usable words remain", () => {
+    const words = [{ word: "अगला", start: 44.46, end: 46.18 }];
+    const lines = splitTranscriptIntoSentenceLines([{ start: 14.46, end: 44.44, text: "पहली बात। दूसरी बात।", words }]);
+    expect(lines[0].start).toBeCloseTo(14.46, 6);
+    expect(lines[lines.length - 1].end).toBeCloseTo(44.44, 6);
+  });
+
   it("falls back to proportional timestamps when word timings are incomplete", () => {
     const words = [{ word: "पहली", start: 14.5, end: 14.9 }, { word: "बात।", start: 15.1, end: Number.NaN }];
     const lines = splitTranscriptIntoSentenceLines([{ start: 14.46, end: 44.44, text: "पहली बात। दूसरी बात।", words }]);
