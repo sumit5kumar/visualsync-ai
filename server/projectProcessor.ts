@@ -3,7 +3,8 @@ import { mediaAssets, projects, timelineApprovals, timelineSegments } from "../d
 import { GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL, GroqRequestError } from "./groqClient";
 import { getDb } from "./db";
 import { executeWithGroqRotation, GroqPoolExhaustedError } from "./groqPool";
-import { buildGlobalReadableImageDurations, resolveReadableMinimumDuration, type ReadableHoldMode } from "./readablePacing";
+import { ABSOLUTE_MIN_IMAGE_DURATION_MS, buildGlobalReadableImageDurations, MIN_READABLE_IMAGE_DURATION_MS, resolveReadableMinimumDuration, type ReadableHoldMode } from "./readablePacing";
+import { buildDirectAnchorPacingPrompt, computeAnchorBoundaries, fallbackProportionalAnchors, parseAndSanitizeAnchors, sanitizeFinalAnchorSequence, splitTranscriptIntoSentenceLines } from "./sentenceAnchors";
 import { storageGetSignedUrl } from "./storage";
 import { validateTimeline } from "./timelineValidation";
 import { buildSemanticWeightedTimeline, type SemanticAssignment, type SemanticImage, type SemanticTranscriptSegment } from "./semanticTimeline";
@@ -31,18 +32,6 @@ const MAX_ACTIVE_PACING_QUALITY_RETRIES = 1;
 const MAX_VISUAL_CATALOG_SCENE_CHARS = 300;
 
 export function buildBoundedPacingBatches<T>(items: T[], batchSize = MAX_PACING_IMAGES_PER_REQUEST) { const batches: T[][] = []; for (let index = 0; index < items.length; index += batchSize) batches.push(items.slice(index, index + batchSize)); return batches; }
-
-export function isGenericLinearPacingRamp(weights: number[]) {
-  if (weights.length < 4 || weights.some(weight => !Number.isFinite(weight) || weight <= 0)) return false;
-  const steps = weights.slice(1).map((weight, index) => weight - weights[index]);
-  const strictlyIncreasing = steps.every(step => step > 0);
-  const strictlyDecreasing = steps.every(step => step < 0);
-  if (!strictlyIncreasing && !strictlyDecreasing) return false;
-  const magnitudes = steps.map(step => Math.abs(step));
-  const averageStep = magnitudes.reduce((sum, step) => sum + step, 0) / magnitudes.length;
-  const stepSpread = Math.max(...magnitudes) - Math.min(...magnitudes);
-  return stepSpread <= Math.max(0.001, averageStep * 0.025);
-}
 
 function formatRichVisualScene(analysis: Record<string, unknown> | null | undefined): string {
   if (!analysis || typeof analysis !== "object") return "Visual scene";
@@ -83,52 +72,11 @@ function scoreSceneAgainstTranscript(sceneText: string, transcriptText: string):
   return matches / Math.sqrt(sceneWords.length);
 }
 
-function buildFullContextRollingNarrationDigest(
-  transcriptSegments: Array<{ start: number; end: number; text: string }>,
-  priorWeights: number[],
-  visualCatalog: Array<{ sequence: number | null; scene: string }>,
-  audioDurationMs: number,
-) {
-  const totalSeconds = Math.max(1, audioDurationMs / 1000);
-  const consumedSeconds = Math.min(
-    totalSeconds * 0.95,
-    priorWeights.reduce((sum, w) => sum + (Number.isFinite(w) && w > 0 ? w : 0), 0),
-  );
-  const formattedAll = transcriptSegments.map(segment => {
-    const startSec = Math.max(0, segment.start).toFixed(1);
-    const endSec = Math.max(segment.start, segment.end).toFixed(1);
-    const durSec = Math.max(0.1, segment.end - segment.start).toFixed(1);
-    return `[${startSec}s-${endSec}s (${durSec}s)]${segment.text.trim()}`;
-  });
-  const fullJoined = formattedAll.join(" ");
-  const cursorHeader = `Full audio: ${totalSeconds.toFixed(1)}s (${visualCatalog.length} total ordered images). Prior ${priorWeights.length} images consumed ~${consumedSeconds.toFixed(1)}s; continue matching this batch from ~${consumedSeconds.toFixed(1)}s onward in the timestamped transcript: `;
-  const budget = Math.max(1000, MAX_PACING_NARRATION_CHARACTERS - cursorHeader.length);
-  if (fullJoined.length <= budget) {
-    return `${cursorHeader}${fullJoined}`;
-  }
-  const activeSegments = transcriptSegments.filter(seg => seg.end >= Math.max(0, consumedSeconds - 5));
-  const chosen = activeSegments.length ? activeSegments : transcriptSegments;
-  const rollingJoined = chosen
-    .map(segment => {
-      const startSec = Math.max(0, segment.start).toFixed(1);
-      const endSec = Math.max(segment.start, segment.end).toFixed(1);
-      const durSec = Math.max(0.1, segment.end - segment.start).toFixed(1);
-      return `[${startSec}s-${endSec}s (${durSec}s)]${segment.text.trim()}`;
-    })
-    .join(" ")
-    .slice(0, budget);
-  return `${cursorHeader}${rollingJoined}`;
-}
-
-function activePacingPrompt(batchIndex: number, batchCount: number, batch: Array<{ sequence: number | null; scene: string }>, narrationDigest: string, corrective = false) {
-  return `Create content-specific variable pacing weights for contiguous ordered image batch ${batchIndex + 1}/${batchCount}. Reply only {"weights":[...]} with exactly ${batch.length} positive non-equal decimals representing the actual spoken duration in seconds of the narration segment(s) that each image covers. Assign every weight independently from the narration and the visible scene: important, dense, or concept-changing scenes may need longer holds; simple bridge or fast action scenes may need shorter holds so more images fit in fast narration sections. Do not force equal time per batch and do not use image number as a proxy for duration. Do not return an ascending or descending sequence, arithmetic progression, evenly spaced ramp, or a repeated pattern.${corrective ? " The previous answer was rejected because it was a generic sequential ramp; recalculate each image from its actual scene and narrative role." : ""} Narration digest: ${JSON.stringify(narrationDigest)}. Image batch: ${JSON.stringify(batch)}`;
-}
-
 /**
- * Calibrates cross-batch weights against real spoken segment durations and
- * semantic keyword alignment so a 6-minute or 30-minute project never suffers
- * from batch scale drift, and snaps every image boundary to a real Whisper
- * sentence boundary or natural speech pause midpoint.
+ * Legacy weight-based alignment kept only for hosted jobs that were mid-flight
+ * when Direct Sentence Anchor shipped. Snap feasibility now uses the absolute
+ * 750 ms image minimum instead of the 2.2 s readable floor, so short sentence
+ * boundaries can still be locked instead of being silently skipped.
  */
 function alignOrderedWeightsToSpeechBoundaries(
   audioDurationMs: number,
@@ -192,15 +140,15 @@ function alignOrderedWeightsToSpeechBoundaries(
       }
     }
   }
-  const speechBoundariesMs = Array.from(new Set(rawSpeechPoints.filter(ms => ms > minHoldMs && ms < audioDurationMs - minHoldMs))).sort((a, b) => a - b);
+  const speechBoundariesMs = Array.from(new Set(rawSpeechPoints.filter(ms => ms > ABSOLUTE_MIN_IMAGE_DURATION_MS && ms < audioDurationMs - ABSOLUTE_MIN_IMAGE_DURATION_MS))).sort((a, b) => a - b);
 
   // Step 4: Snap every internal boundary to the nearest natural speech boundary.
   if (speechBoundariesMs.length > 0) {
     for (let i = 1; i < boundaries.length - 1; i += 1) {
       const prevBoundary = boundaries[i - 1];
       const nextBoundary = boundaries[i + 1];
-      const minAllowed = prevBoundary + minHoldMs;
-      const maxAllowed = nextBoundary - minHoldMs;
+      const minAllowed = prevBoundary + ABSOLUTE_MIN_IMAGE_DURATION_MS;
+      const maxAllowed = nextBoundary - ABSOLUTE_MIN_IMAGE_DURATION_MS;
       if (minAllowed > maxAllowed) continue;
       const target = boundaries[i];
       const localClipMs = Math.max(minHoldMs, target - prevBoundary);
@@ -361,10 +309,6 @@ function buildSemanticRebuiltSegments(audioDurationMs: number, transcriptSegment
   return clips.map(clip => ({ imageAssetId: clip.imageAssetId, startMs: clip.startMs, endMs: clip.endMs, narrationText: transcriptForRange(transcriptSegments, clip.startMs, clip.endMs), confidence: 0, selectionReason: `Semantic weighted sync matched uploaded image ${clip.sourceSequence} to transcript segment${clip.transcriptSegmentIndex} and reordered it by narration relevance.`, decisionType: "KEEP" as const }));
 }
 
-function assertActivePacingWeights(weights: number[], expectedLength: number) {
-  if (weights.length !== expectedLength || weights.some(weight => !Number.isFinite(weight) || weight <= 0)) throw new Error("Groq returned an invalid active per-image pacing plan.");
-  if (isGenericLinearPacingRamp(weights)) throw new Error("Groq returned a generic linear pacing ramp instead of content-specific per-image pacing.");
-}
 export async function mapWithConcurrency<T, Result>(items: T[], concurrency: number, operation: (item: T, index: number) => Promise<Result>) {
   const results = new Array<Result>(items.length);
   let nextIndex = 0;
@@ -508,40 +452,46 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
       return { imageCount: rebuilt.length, minimumDurationMs: project.readableHoldMode === "MIN_2_SECONDS" ? 2_200 : 0, validation };
     }
     const batches = buildBoundedPacingBatches(visualCatalog);
-    const weights: number[] = [];
+    const lines = splitTranscriptIntoSentenceLines(transcriptSegments);
+    const anchors: number[] = [];
+    const anchorHints: Array<number | null> = [];
     let pacingProviderKey: { label: string; maskedKey: string } | null = null;
+    let cursorLine = 0;
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
-      const narrationDigest = buildFullContextRollingNarrationDigest(transcriptSegments, weights, visualCatalog, project.audioDurationMs);
       let pacingRun: { value: unknown; key: { label: string; maskedKey: string } } | null = null;
-      let batchWeights: number[] = [];
+      let batchAnchors: number[] = [];
+      let batchHints: Array<number | null> = [];
       for (let qualityAttempt = 0; qualityAttempt <= MAX_ACTIVE_PACING_QUALITY_RETRIES; qualityAttempt += 1) {
-        const prompt = activePacingPrompt(batchIndex, batches.length, batch, narrationDigest, qualityAttempt > 0);
+        const prompt = buildDirectAnchorPacingPrompt({ batchIndex, batchCount: batches.length, batch, lines, cursorLine, audioDurationMs: project.audioDurationMs, imageCount: visualCatalog.length, holdMode: project.readableHoldMode ?? "MIN_2_SECONDS", corrective: qualityAttempt > 0 });
         const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completePacingPlan({ prompt }), key }));
-        const candidateWeights = Array.isArray((run.value as { weights?: unknown }).weights) ? (run.value as { weights: unknown[] }).weights.map(weight => Number(weight)) : [];
-        try {
-          assertActivePacingWeights(candidateWeights, batch.length);
-          pacingRun = run;
-          batchWeights = candidateWeights;
-          break;
-        } catch (error) {
-          if (qualityAttempt === MAX_ACTIVE_PACING_QUALITY_RETRIES) throw error;
+        const parsed = parseAndSanitizeAnchors(run.value, batch.length, lines.length, cursorLine);
+        if (!parsed) {
+          if (qualityAttempt === MAX_ACTIVE_PACING_QUALITY_RETRIES) throw new Error("Groq did not return a usable direct sentence-anchor plan.");
+          continue;
         }
+        pacingRun = run;
+        batchAnchors = parsed.anchors;
+        batchHints = parsed.hints;
+        if (!parsed.lazy || qualityAttempt === MAX_ACTIVE_PACING_QUALITY_RETRIES) break;
+        pacingRun = null;
       }
-      if (!pacingRun) throw new Error("Groq did not return an active per-image pacing plan.");
-      weights.push(...batchWeights);
+      if (!pacingRun) throw new Error("Groq did not return a usable direct sentence-anchor plan.");
+      anchors.push(...batchAnchors);
+      anchorHints.push(...batchHints);
+      cursorLine = batchAnchors[batchAnchors.length - 1];
       pacingProviderKey = pacingRun.key;
     }
-    if (weights.length !== images.length || weights.some(weight => !Number.isFinite(weight) || weight <= 0) || new Set(weights.map(weight => weight.toFixed(3))).size === 1) throw new Error("Groq returned an invalid variable pacing plan.");
-    const alignedWeights = alignOrderedWeightsToSpeechBoundaries(project.audioDurationMs, transcriptSegments, visualCatalog, batches, weights, project.readableHoldMode ?? "MIN_2_SECONDS");
-    const pacing = buildGlobalReadableImageDurations(project.audioDurationMs, alignedWeights, project.readableHoldMode ?? "MIN_2_SECONDS");
+    const finalAnchors = sanitizeFinalAnchorSequence(project.audioDurationMs, lines, anchors);
+    const anchorDurations = computeAnchorBoundaries(project.audioDurationMs, lines, finalAnchors, anchorHints);
+    const minimumDurationMs = project.readableHoldMode === "MIN_2_SECONDS" ? MIN_READABLE_IMAGE_DURATION_MS : 0;
     let cursor = 0;
     const rebuilt = images.map((image, index) => {
-      const startMs = cursor; const endMs = startMs + pacing.durations[index]; cursor = endMs;
-      return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: 0, selectionReason: `Groq retained user-supplied image ${image.sequenceNumber} in chronological script order and assigned a variable full-narration pacing weight of ${weights[index]}. The ${project.readableHoldMode === "NO_MINIMUM" ? "no-minimum-hold mode applied no artificial duration floor" : `global readable-hold rule set a minimum of ${pacing.minimumDurationMs} ms`}.`, decisionType: "KEEP" as const };
+      const startMs = cursor; const endMs = startMs + anchorDurations[index]; cursor = endMs;
+      return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: 0, selectionReason: `Groq locked image ${image.sequenceNumber} to transcript line ${finalAnchors[index]} with Direct Sentence Anchor: its start matches the exact spoken sentence timestamp, so sync drift can never accumulate across the ${images.length}-image narration.`, decisionType: "KEEP" as const };
     });
     const validation = validateTimeline(project.audioDurationMs, rebuilt);
-    if (!validation.valid || cursor !== project.audioDurationMs) throw new Error(`Generated timeline failed validation: ${validation.issues.join(" ")}`); await db.update(projects).set({ processingStage: "finalizing", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId)); await db.transaction(async transaction => { await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId)); await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: pacingProviderKey?.label ?? null, pacingProviderKeyMasked: pacingProviderKey?.maskedKey ?? null, allImagesRequired: true, minReadableDurationMs: pacing.minimumDurationMs, holdMode: project.readableHoldMode ?? "MIN_2_SECONDS", pacingMethod: "bounded-global-full-narration-sequence" } }))); await transaction.insert(timelineApprovals).values({ projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } }); await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null }).where(eq(projects.id, projectId)); }); return { imageCount: rebuilt.length, minimumDurationMs: pacing.minimumDurationMs, validation }; } catch (error) { await db.update(projects).set({ status: "failed", workerState: "error", processingStage: "failed", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId)); throw error; } }  export type TimelineGenerationWorkState = { preflightComplete?: boolean; firstDispatchAtMs?: number; pacingWeights?: number[]; nextPacingBatch?: number; pacingProviderKeyLabel?: string | null; pacingProviderKeyMasked?: string | null; pacingQualityRetries?: number; semanticAssignments?: SemanticAssignment[]; nextSemanticBatch?: number; semanticProviderKeyLabel?: string | null; semanticProviderKeyMasked?: string | null; };  export type TimelineGenerationSliceResult = { stage: "transcribing" | "analyzing_images" | "building_timeline" | "completed"; workState: TimelineGenerationWorkState; };  export function normalizeTimelineGenerationWorkState(value: unknown): TimelineGenerationWorkState { if (!value || typeof value !== "object") return {}; const record = value as Record<string, unknown>; return { preflightComplete: record.preflightComplete === true, firstDispatchAtMs: Number.isFinite(record.firstDispatchAtMs) ? Number(record.firstDispatchAtMs) : undefined, pacingWeights: Array.isArray(record.pacingWeights) ? record.pacingWeights.map(Number).filter(Number.isFinite) : [], nextPacingBatch: Number.isInteger(record.nextPacingBatch) && Number(record.nextPacingBatch) >= 0 ? Number(record.nextPacingBatch) : 0, pacingProviderKeyLabel: typeof record.pacingProviderKeyLabel === "string" ? record.pacingProviderKeyLabel : null, pacingProviderKeyMasked: typeof record.pacingProviderKeyMasked === "string" ? record.pacingProviderKeyMasked : null, pacingQualityRetries: Number.isInteger(record.pacingQualityRetries) && Number(record.pacingQualityRetries) >= 0 ? Number(record.pacingQualityRetries) : 0, semanticAssignments: Array.isArray(record.semanticAssignments) ? record.semanticAssignments.map(item => { const value = item && typeof item === "object" ? item as Record<string, unknown> : {}; return { sequence: Number(value.sequence), segmentIndex: Number(value.segmentIndex), weight: Number(value.weight) }; }).filter(item => Number.isFinite(item.sequence) && Number.isFinite(item.segmentIndex) && Number.isFinite(item.weight)) : [], nextSemanticBatch: Number.isInteger(record.nextSemanticBatch) && Number(record.nextSemanticBatch) >= 0 ? Number(record.nextSemanticBatch) : 0, semanticProviderKeyLabel: typeof record.semanticProviderKeyLabel === "string" ? record.semanticProviderKeyLabel : null, semanticProviderKeyMasked: typeof record.semanticProviderKeyMasked === "string" ? record.semanticProviderKeyMasked : null, }; }  export async function processProjectTimelineSlice(userId: number, projectId: number, savedWorkState?: unknown): Promise<TimelineGenerationSliceResult> { const db = await getDb(); if (!db) throw new Error("Database storage is not available."); const [project] = await db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1); if (!project?.audioDurationMs) throw new Error("Select and upload the narration before processing this project."); const assets = await db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.userId, userId))); const narration = assets.find(asset => asset.assetType === "narration"); const images = assets.filter(asset => asset.assetType === "image").sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0)); if (!narration || !images.length) throw new Error("Select and upload one narration and at least one image before processing."); const workState = normalizeTimelineGenerationWorkState(savedWorkState);  if (narration.analysisState !== "analyzed") { const narrationState = await prepareNarrationChunks(projectId, narration, db); const nextChunkIndex = narrationState.chunks.findIndex(chunk => chunk.status !== "completed" || !chunk.transcript); if (nextChunkIndex >= 0) { const chunk = narrationState.chunks[nextChunkIndex]; chunk.status = "processing"; chunk.attempts += 1; chunk.lastAttemptAtMs = Date.now(); narrationState.lastError = undefined; await persistNarrationTranscriptionState(narration, narrationState, db); try { const bytes = await loadNarrationChunkBytes(chunk); const wavBytes = isMp3Narration(narration) ? await mp3ToMonoWav(bytes) : bytes; const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes: wavBytes, filename: `narration-part-${nextChunkIndex + 1}.wav`, mimeType: "audio/wav", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers.", timeoutMs: 20_000 }), key }), { maxAttempts: 1 });
+    if (!validation.valid || cursor !== project.audioDurationMs) throw new Error(`Generated timeline failed validation: ${validation.issues.join(" ")}`); await db.update(projects).set({ processingStage: "finalizing", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId)); await db.transaction(async transaction => { await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId)); await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: pacingProviderKey?.label ?? null, pacingProviderKeyMasked: pacingProviderKey?.maskedKey ?? null, allImagesRequired: true, minReadableDurationMs: minimumDurationMs, holdMode: project.readableHoldMode ?? "MIN_2_SECONDS", pacingMethod: "direct-sentence-anchored" } }))); await transaction.insert(timelineApprovals).values({ projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } }); await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null }).where(eq(projects.id, projectId)); }); return { imageCount: rebuilt.length, minimumDurationMs, validation }; } catch (error) { await db.update(projects).set({ status: "failed", workerState: "error", processingStage: "failed", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId)); throw error; } }  export type TimelineGenerationWorkState = { preflightComplete?: boolean; firstDispatchAtMs?: number; pacingWeights?: number[]; pacingAnchors?: number[]; pacingAnchorHints?: Array<number | null>; nextPacingBatch?: number; pacingProviderKeyLabel?: string | null; pacingProviderKeyMasked?: string | null; pacingQualityRetries?: number; semanticAssignments?: SemanticAssignment[]; nextSemanticBatch?: number; semanticProviderKeyLabel?: string | null; semanticProviderKeyMasked?: string | null; };  export type TimelineGenerationSliceResult = { stage: "transcribing" | "analyzing_images" | "building_timeline" | "completed"; workState: TimelineGenerationWorkState; };  export function normalizeTimelineGenerationWorkState(value: unknown): TimelineGenerationWorkState { if (!value || typeof value !== "object") return {}; const record = value as Record<string, unknown>; return { preflightComplete: record.preflightComplete === true, firstDispatchAtMs: Number.isFinite(record.firstDispatchAtMs) ? Number(record.firstDispatchAtMs) : undefined, pacingWeights: Array.isArray(record.pacingWeights) ? record.pacingWeights.map(Number).filter(Number.isFinite) : [], pacingAnchors: Array.isArray(record.pacingAnchors) ? record.pacingAnchors.map(Number).filter(Number.isFinite) : [], pacingAnchorHints: Array.isArray(record.pacingAnchorHints) ? record.pacingAnchorHints.map(item => (Number.isFinite(item) && Number(item) > 0 ? Number(item) : null)) : [], nextPacingBatch: Number.isInteger(record.nextPacingBatch) && Number(record.nextPacingBatch) >= 0 ? Number(record.nextPacingBatch) : 0, pacingProviderKeyLabel: typeof record.pacingProviderKeyLabel === "string" ? record.pacingProviderKeyLabel : null, pacingProviderKeyMasked: typeof record.pacingProviderKeyMasked === "string" ? record.pacingProviderKeyMasked : null, pacingQualityRetries: Number.isInteger(record.pacingQualityRetries) && Number(record.pacingQualityRetries) >= 0 ? Number(record.pacingQualityRetries) : 0, semanticAssignments: Array.isArray(record.semanticAssignments) ? record.semanticAssignments.map(item => { const value = item && typeof item === "object" ? item as Record<string, unknown> : {}; return { sequence: Number(value.sequence), segmentIndex: Number(value.segmentIndex), weight: Number(value.weight) }; }).filter(item => Number.isFinite(item.sequence) && Number.isFinite(item.segmentIndex) && Number.isFinite(item.weight)) : [], nextSemanticBatch: Number.isInteger(record.nextSemanticBatch) && Number(record.nextSemanticBatch) >= 0 ? Number(record.nextSemanticBatch) : 0, semanticProviderKeyLabel: typeof record.semanticProviderKeyLabel === "string" ? record.semanticProviderKeyLabel : null, semanticProviderKeyMasked: typeof record.semanticProviderKeyMasked === "string" ? record.semanticProviderKeyMasked : null, }; }  export async function processProjectTimelineSlice(userId: number, projectId: number, savedWorkState?: unknown): Promise<TimelineGenerationSliceResult> { const db = await getDb(); if (!db) throw new Error("Database storage is not available."); const [project] = await db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.userId, userId))).limit(1); if (!project?.audioDurationMs) throw new Error("Select and upload the narration before processing this project."); const assets = await db.select().from(mediaAssets).where(and(eq(mediaAssets.projectId, projectId), eq(mediaAssets.userId, userId))); const narration = assets.find(asset => asset.assetType === "narration"); const images = assets.filter(asset => asset.assetType === "image").sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0)); if (!narration || !images.length) throw new Error("Select and upload one narration and at least one image before processing."); const workState = normalizeTimelineGenerationWorkState(savedWorkState);  if (narration.analysisState !== "analyzed") { const narrationState = await prepareNarrationChunks(projectId, narration, db); const nextChunkIndex = narrationState.chunks.findIndex(chunk => chunk.status !== "completed" || !chunk.transcript); if (nextChunkIndex >= 0) { const chunk = narrationState.chunks[nextChunkIndex]; chunk.status = "processing"; chunk.attempts += 1; chunk.lastAttemptAtMs = Date.now(); narrationState.lastError = undefined; await persistNarrationTranscriptionState(narration, narrationState, db); try { const bytes = await loadNarrationChunkBytes(chunk); const wavBytes = isMp3Narration(narration) ? await mp3ToMonoWav(bytes) : bytes; const run = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.transcribeAudio({ bytes: wavBytes, filename: `narration-part-${nextChunkIndex + 1}.wav`, mimeType: "audio/wav", language: "hi", prompt: "Transcribe the narration faithfully, preserving Hindi, Hinglish, financial terms, names, and numbers.", timeoutMs: 20_000 }), key }), { maxAttempts: 1 });
         chunk.status = "completed";
         chunk.transcript = { text: run.value.text, language: run.value.language, segments: (run.value.segments ?? []).map(segment => ({ ...segment, start: segment.start + chunk.startMs / 1000, end: segment.end + chunk.startMs / 1000 })) };
         chunk.provider = { maskedKey: run.key.maskedKey, model: GROQ_TRANSCRIPTION_MODEL, durationMs: run.value.requestMetadata.durationMs, httpStatus: run.value.requestMetadata.httpStatus, category: run.value.requestMetadata.category };
@@ -616,38 +566,56 @@ export async function processProjectWithGlobalReadablePacing(userId: number, pro
     });
     return { stage: "completed", workState };
   }
+  const lines = splitTranscriptIntoSentenceLines(transcriptSegments);
   const batches = buildBoundedPacingBatches(visualCatalog);
   const nextPacingBatch = workState.nextPacingBatch ?? 0;
   if (nextPacingBatch < batches.length) {
     await db.update(projects).set({ processingStage: "building_timeline", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
     const batch = batches[nextPacingBatch];
-    const priorWeights = workState.pacingWeights ?? [];
-    const narrationDigest = buildFullContextRollingNarrationDigest(transcriptSegments, priorWeights, visualCatalog, project.audioDurationMs);
-    const prompt = activePacingPrompt(nextPacingBatch, batches.length, batch, narrationDigest, (workState.pacingQualityRetries ?? 0) > 0);
+    const priorAnchors = workState.pacingAnchors ?? [];
+    const cursorLine = priorAnchors.length ? priorAnchors[priorAnchors.length - 1] : 0;
+    const prompt = buildDirectAnchorPacingPrompt({ batchIndex: nextPacingBatch, batchCount: batches.length, batch, lines, cursorLine, audioDurationMs: project.audioDurationMs, imageCount: visualCatalog.length, holdMode: project.readableHoldMode ?? "MIN_2_SECONDS", corrective: (workState.pacingQualityRetries ?? 0) > 0 });
     const pacingRun = await executeWithGroqRotation(userId, async (client, key) => ({ value: await client.completePacingPlan({ prompt, timeoutMs: 20_000 }), key }), { maxAttempts: 1 });
-    const batchWeights = Array.isArray((pacingRun.value as { weights?: unknown }).weights) ? (pacingRun.value as { weights: unknown[] }).weights.map(Number) : [];
-    try {
-      assertActivePacingWeights(batchWeights, batch.length);
-    } catch (error) {
+    const parsed = parseAndSanitizeAnchors(pacingRun.value, batch.length, lines.length, cursorLine);
+    if (!parsed || parsed.lazy) {
       const pacingQualityRetries = (workState.pacingQualityRetries ?? 0) + 1;
-      if (pacingQualityRetries > MAX_ACTIVE_PACING_QUALITY_RETRIES) throw error;
+      if (pacingQualityRetries > MAX_ACTIVE_PACING_QUALITY_RETRIES) throw new Error("Groq did not return a usable direct sentence-anchor plan.");
       return { stage: "building_timeline", workState: { ...workState, pacingQualityRetries } };
     }
-    return { stage: "building_timeline", workState: { ...workState, pacingQualityRetries: 0, pacingWeights: [...priorWeights, ...batchWeights], nextPacingBatch: nextPacingBatch + 1, pacingProviderKeyLabel: pacingRun.key.label, pacingProviderKeyMasked: pacingRun.key.maskedKey } };
+    return { stage: "building_timeline", workState: { ...workState, pacingQualityRetries: 0, pacingAnchors: [...priorAnchors, ...parsed.anchors], pacingAnchorHints: [...(workState.pacingAnchorHints ?? []), ...parsed.hints], nextPacingBatch: nextPacingBatch + 1, pacingProviderKeyLabel: pacingRun.key.label, pacingProviderKeyMasked: pacingRun.key.maskedKey } };
   }
 
-  const weights = workState.pacingWeights ?? [];
-  if (weights.length !== refreshedImages.length || new Set(weights.map(weight => weight.toFixed(3))).size === 1) throw new Error("Persisted Groq pacing state is incomplete or invalid.");
-  const alignedWeights = alignOrderedWeightsToSpeechBoundaries(project.audioDurationMs, transcriptSegments, visualCatalog, batches, weights, project.readableHoldMode ?? "MIN_2_SECONDS");
-  const pacing = buildGlobalReadableImageDurations(project.audioDurationMs, alignedWeights, project.readableHoldMode ?? "MIN_2_SECONDS");
-  let cursor = 0;
-  const rebuilt = refreshedImages.map((image, index) => { const startMs = cursor; const endMs = startMs + pacing.durations[index]; cursor = endMs; return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: 0, selectionReason: `Groq retained user-supplied image ${image.sequenceNumber} in chronological script order and assigned a variable full-narration pacing weight of ${weights[index]}. The ${project.readableHoldMode === "NO_MINIMUM" ? "no-minimum-hold mode applied no artificial duration floor" : `global readable-hold rule set a minimum of ${pacing.minimumDurationMs} ms`}.`, decisionType: "KEEP" as const }; });
+  const savedAnchors = workState.pacingAnchors ?? [];
+  const savedHints = workState.pacingAnchorHints ?? [];
+  const legacyWeights = workState.pacingWeights ?? [];
+  let minimumDurationMs = project.readableHoldMode === "MIN_2_SECONDS" ? MIN_READABLE_IMAGE_DURATION_MS : 0;
+  let pacingMethod = "direct-sentence-anchored";
+  let rebuilt: Array<{ imageAssetId: number; startMs: number; endMs: number; narrationText: string; confidence: number; selectionReason: string; decisionType: "KEEP" }>;
+  if (savedAnchors.length === refreshedImages.length) {
+    const finalAnchors = sanitizeFinalAnchorSequence(project.audioDurationMs, lines, savedAnchors);
+    const anchorDurations = computeAnchorBoundaries(project.audioDurationMs, lines, finalAnchors, savedHints);
+    let cursor = 0;
+    rebuilt = refreshedImages.map((image, index) => { const startMs = cursor; const endMs = startMs + anchorDurations[index]; cursor = endMs; return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: 0, selectionReason: `Groq locked image ${image.sequenceNumber} to transcript line ${finalAnchors[index]} with Direct Sentence Anchor: its start matches the exact spoken sentence timestamp, so sync drift can never accumulate across the ${refreshedImages.length}-image narration.`, decisionType: "KEEP" as const }; });
+  } else if (legacyWeights.length === refreshedImages.length) {
+    const alignedWeights = alignOrderedWeightsToSpeechBoundaries(project.audioDurationMs, transcriptSegments, visualCatalog, batches, legacyWeights, project.readableHoldMode ?? "MIN_2_SECONDS");
+    const pacing = buildGlobalReadableImageDurations(project.audioDurationMs, alignedWeights, project.readableHoldMode ?? "MIN_2_SECONDS");
+    minimumDurationMs = pacing.minimumDurationMs;
+    pacingMethod = "bounded-global-full-narration-sequence";
+    let cursor = 0;
+    rebuilt = refreshedImages.map((image, index) => { const startMs = cursor; const endMs = startMs + pacing.durations[index]; cursor = endMs; return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: 0, selectionReason: `Groq retained user-supplied image ${image.sequenceNumber} in chronological script order and assigned a variable full-narration pacing weight of ${legacyWeights[index]}. The ${project.readableHoldMode === "NO_MINIMUM" ? "no-minimum-hold mode applied no artificial duration floor" : `global readable-hold rule set a minimum of ${pacing.minimumDurationMs} ms`}.`, decisionType: "KEEP" as const }; });
+  } else {
+    const fallbackAnchors = fallbackProportionalAnchors(project.audioDurationMs, lines, refreshedImages.length);
+    const fallbackDurations = computeAnchorBoundaries(project.audioDurationMs, lines, fallbackAnchors);
+    pacingMethod = "sentence-boundary-fallback";
+    let cursor = 0;
+    rebuilt = refreshedImages.map((image, index) => { const startMs = cursor; const endMs = startMs + fallbackDurations[index]; cursor = endMs; return { imageAssetId: image.id, startMs, endMs, narrationText: transcriptForRange(transcriptSegments, startMs, endMs), confidence: 0, selectionReason: `VisualSync anchored image ${image.sequenceNumber} to the nearest spoken sentence boundary because the saved AI anchor plan was incomplete.`, decisionType: "KEEP" as const }; });
+  }
   const validation = validateTimeline(project.audioDurationMs, rebuilt);
-  if (!validation.valid || cursor !== project.audioDurationMs) throw new Error(`Generated timeline failed validation: ${validation.issues.join(" ")}`);
+  if (!validation.valid) throw new Error(`Generated timeline failed validation: ${validation.issues.join(" ")}`);
   await db.update(projects).set({ processingStage: "finalizing", processingStageStartedAt: new Date() }).where(eq(projects.id, projectId));
   await db.transaction(async transaction => {
     await transaction.delete(timelineSegments).where(eq(timelineSegments.projectId, projectId));
-    await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: workState.pacingProviderKeyLabel ?? null, pacingProviderKeyMasked: workState.pacingProviderKeyMasked ?? null, allImagesRequired: true, minReadableDurationMs: pacing.minimumDurationMs, holdMode: project.readableHoldMode ?? "MIN_2_SECONDS", pacingMethod: "bounded-global-full-narration-sequence" } })));
+    await transaction.insert(timelineSegments).values(rebuilt.map(segment => ({ ...segment, projectId, confidence: String(segment.confidence), candidateImagesJson: { provider: "groq", model: GROQ_VISION_MODEL, pacingProviderKeyLabel: workState.pacingProviderKeyLabel ?? null, pacingProviderKeyMasked: workState.pacingProviderKeyMasked ?? null, allImagesRequired: true, minReadableDurationMs: minimumDurationMs, holdMode: project.readableHoldMode ?? "MIN_2_SECONDS", pacingMethod } })));
     await transaction.insert(timelineApprovals).values({ projectId, userId, status: "revoked", approvedAt: null }).onDuplicateKeyUpdate({ set: { userId, status: "revoked", approvedAt: null } });
     await transaction.update(projects).set({ status: "timeline_ready", workerState: "ready", processingStage: "idle", processingStartedAt: null, processingStageStartedAt: null }).where(eq(projects.id, projectId));
   });

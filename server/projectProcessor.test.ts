@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildPublicManagedStorageUrl, isGenericLinearPacingRamp, isWavNarration, mapWithConcurrency, normalizeTimelineGenerationWorkState, recoverLegacyInflatedMp3Preparation } from "./projectProcessor";
+import { buildPublicManagedStorageUrl, isWavNarration, mapWithConcurrency, normalizeTimelineGenerationWorkState, recoverLegacyInflatedMp3Preparation } from "./projectProcessor";
 
 describe("public managed narration URLs", () => {
   it("keeps the managed storage path public and safely encodes every storage-key segment", () => {
@@ -29,24 +29,22 @@ describe("public managed narration URLs", () => {
   });
 
   it("retains first-dispatch telemetry when persisted work state is normalized for a later hosted slice", () => {
-    expect(normalizeTimelineGenerationWorkState({ firstDispatchAtMs: 1_787_173_659_541, preflightComplete: true, pacingWeights: [1.2], nextPacingBatch: 1 })).toMatchObject({
+    expect(normalizeTimelineGenerationWorkState({ firstDispatchAtMs: 1_787_173_659_541, preflightComplete: true, pacingWeights: [1.2], pacingAnchors: [3, 7], nextPacingBatch: 1 })).toMatchObject({
       firstDispatchAtMs: 1_787_173_659_541,
       preflightComplete: true,
       pacingWeights: [1.2],
+      pacingAnchors: [3, 7],
       nextPacingBatch: 1,
     });
   });
 
-  it("rejects the generic arithmetic pacing ramp that shifted reference-folder visuals early while accepting content-shaped variation", () => {
-    expect(isGenericLinearPacingRamp([1.2, 1.5, 1.8, 2.1, 2.4, 2.7, 3, 3.3])).toBe(true);
-    expect(isGenericLinearPacingRamp([1.35, 0.85, 2.25, 1.1, 1.9, 0.75, 1.55, 1.2])).toBe(false);
-  });
-
-  it("uses active scene-and-narration pacing instructions and persists one corrective retry for a rejected generic ramp", () => {
+  it("uses direct sentence-anchor pacing instructions and persists one corrective retry for a crammed plan", () => {
     const source = readFileSync(resolve(process.cwd(), "server/projectProcessor.ts"), "utf8");
-    expect(source).toContain("Do not return an ascending or descending sequence, arithmetic progression, evenly spaced ramp, or a repeated pattern.");
+    expect(source).toContain("buildDirectAnchorPacingPrompt");
+    expect(source).toContain("parseAndSanitizeAnchors");
+    expect(source).toContain("sanitizeFinalAnchorSequence");
     expect(source).toContain("pacingQualityRetries");
-    expect(source).toContain("isGenericLinearPacingRamp");
+    expect(source).toContain("direct sentence-anchor plan");
   });
 
   it("keeps hosted slice provider work inside the short callback boundary while retaining round-robin recovery for later callbacks", () => {
