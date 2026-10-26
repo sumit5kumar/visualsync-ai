@@ -8,6 +8,29 @@ export type GroqProjectProbeResult = { status: GroqKeyStatus; message: string; t
 export type GroqFailureCategory = "invalid_key" | "permission_denied" | "file_too_large" | "rate_limited" | "audio_quota_exhausted" | "timeout" | "network_failure" | "server_error" | "client_request" | "unknown";
 export type GroqRequestMetadata = { httpStatus?: number; errorCode?: string; retryAfterMs?: number; remainingRequests?: string; remainingAudio?: string; resetAudio?: string; durationMs: number; category: GroqFailureCategory };
 export type GroqTranscript = { text: string; language?: string; segments?: Array<{ id?: number; start: number; end: number; text: string; avg_logprob?: number; no_speech_prob?: number; words?: Array<{ word: string; start: number; end: number }> }>; requestMetadata: GroqRequestMetadata };
+export type GroqTranscriptSegment = NonNullable<GroqTranscript["segments"]>[number];
+export type GroqWordTimestamp = { word: string; start: number; end: number };
+
+// Groq returns word-level timestamps as a TOP-LEVEL `words` array in
+// verbose_json mode, not inside each segment. Downstream pacing code reads
+// per-segment words, so assign every top-level word to the segment that
+// contains its start time before returning the transcript.
+export function distributeWordTimestamps(segments: GroqTranscriptSegment[] = [], words: GroqWordTimestamp[] = []): GroqTranscriptSegment[] {
+  const usable = words.filter(word => Number.isFinite(word.start) && Number.isFinite(word.end) && word.end >= word.start);
+  if (usable.length === 0 || segments.length === 0) return segments;
+  const ordered = [...segments].sort((left, right) => left.start - right.start);
+  const buckets = ordered.map(() => [] as GroqWordTimestamp[]);
+  for (const word of usable) {
+    let index = ordered.findIndex(segment => word.start >= segment.start - 0.05 && word.start < segment.end + 0.05);
+    if (index < 0) index = word.start < ordered[0].start ? 0 : ordered.length - 1;
+    buckets[index].push(word);
+  }
+  return segments.map(segment => {
+    if (Array.isArray(segment.words) && segment.words.length > 0) return segment;
+    const segmentWords = buckets[ordered.indexOf(segment)] ?? [];
+    return segmentWords.length > 0 ? { ...segment, words: segmentWords } : segment;
+  });
+}
 
 export class GroqRequestError extends Error {
   constructor(message: string, readonly status: GroqKeyStatus, readonly metadata: GroqRequestMetadata = { durationMs: 0, category: "unknown" }) { super(safeGroqMessage(message)); }
@@ -175,8 +198,8 @@ export class GroqClient {
       const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
       throw classifyGroqError(response, payload?.error?.message ?? "", durationMs);
     }
-    const payload = await response.json() as Omit<GroqTranscript, "requestMetadata">;
-    return { ...payload, requestMetadata: responseMetadata(response, durationMs, "unknown") };
+    const payload = await response.json() as Omit<GroqTranscript, "requestMetadata"> & { words?: GroqWordTimestamp[] };
+    return { text: payload.text, language: payload.language, segments: distributeWordTimestamps(payload.segments ?? [], payload.words ?? []), requestMetadata: responseMetadata(response, durationMs, "unknown") };
   }
 
   async analyzeImage(input: { imageUrl: string; prompt: string; timeoutMs?: number }) {

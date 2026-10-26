@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL, GroqClient } from "./groqClient";
+import { distributeWordTimestamps, GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL, GroqClient, type GroqTranscriptSegment } from "./groqClient";
 
 const originalFetch = global.fetch;
 afterEach(() => { global.fetch = originalFetch; vi.restoreAllMocks(); });
@@ -199,4 +199,64 @@ describe("GroqClient", () => {
     const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(request.signal).toBeInstanceOf(AbortSignal);
   });
+
+  it("requests segment and word timestamp granularities from Groq in verbose_json mode", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ text: "Narration", segments: [] }), { status: 200 }));
+    global.fetch = fetchMock;
+
+    await new GroqClient("gsk_test").transcribeAudio({ bytes: new Uint8Array([1, 2, 3]), filename: "narration.wav", mimeType: "audio/wav" });
+
+    const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = request.body as FormData;
+    expect(body.get("response_format")).toBe("verbose_json");
+    expect(body.getAll("timestamp_granularities[]")).toEqual(["segment", "word"]);
+  });
+
+  it("distributes Groq's top-level words array into per-segment words for downstream pacing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      text: "hello world",
+      words: [{ word: "hello", start: 0.2, end: 0.6 }, { word: "world", start: 1.1, end: 1.5 }],
+      segments: [{ id: 0, start: 0, end: 1, text: "hello", avg_logprob: -0.1 }, { id: 1, start: 1, end: 2, text: "world", avg_logprob: -0.1 }],
+    }), { status: 200 }));
+    global.fetch = fetchMock;
+
+    const result = await new GroqClient("gsk_test").transcribeAudio({ bytes: new Uint8Array([1, 2, 3]), filename: "narration.wav", mimeType: "audio/wav" });
+
+    expect(result.segments?.[0].words).toEqual([{ word: "hello", start: 0.2, end: 0.6 }]);
+    expect(result.segments?.[1].words).toEqual([{ word: "world", start: 1.1, end: 1.5 }]);
+  });
 });
+
+describe("distributeWordTimestamps", () => {
+  it("moves top-level words into the segments that contain each word start", () => {
+    const segments = [segment(0, 5), segment(5, 9)];
+    const words = [{ word: "first", start: 1.2, end: 1.6 }, { word: "second", start: 6.1, end: 6.5 }];
+    const result = distributeWordTimestamps(segments, words);
+    expect(result[0].words).toEqual([words[0]]);
+    expect(result[1].words).toEqual([words[1]]);
+  });
+
+  it("keeps per-segment words Groq already provided and fills only the empty segments", () => {
+    const existing = [{ word: "kept", start: 0.2, end: 0.5 }];
+    const segments = [segment(0, 5, existing), segment(5, 9)];
+    const result = distributeWordTimestamps(segments, [{ word: "moved", start: 6, end: 6.4 }]);
+    expect(result[0].words).toEqual(existing);
+    expect(result[1].words).toEqual([{ word: "moved", start: 6, end: 6.4 }]);
+  });
+
+  it("clamps words outside the measured segment bounds to the nearest segment", () => {
+    const segments = [segment(2, 6), segment(6, 10)];
+    const result = distributeWordTimestamps(segments, [{ word: "before", start: 0.1, end: 0.3 }, { word: "after", start: 12, end: 12.4 }]);
+    expect(result[0].words).toEqual([{ word: "before", start: 0.1, end: 0.3 }]);
+    expect(result[1].words).toEqual([{ word: "after", start: 12, end: 12.4 }]);
+  });
+
+  it("returns the segments unchanged when Groq provides no usable words", () => {
+    const segments = [segment(0, 5), segment(5, 9)];
+    expect(distributeWordTimestamps(segments, [])).toEqual(segments);
+    expect(distributeWordTimestamps(segments, [{ word: "bad", start: 3, end: 2 }])).toEqual(segments);
+    expect(distributeWordTimestamps([], [{ word: "orphan", start: 0, end: 1 }])).toEqual([]);
+  });
+});
+
+const segment = (start: number, end: number, words?: GroqTranscriptSegment["words"]): GroqTranscriptSegment => ({ id: 1, start, end, text: "segment", words });
