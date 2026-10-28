@@ -200,6 +200,7 @@ describe("direct anchor pacing prompt", () => {
     expect(prompt).toContain("0|0.0-3.0|पहली बात।");
     expect(prompt).toContain("2.2 seconds");
     expect(prompt).toContain("non-decreasing");
+    expect(prompt).toContain("ENTIRE reply must be a single JSON object");
   });
 
   it("explains the cramming rejection on a corrective retry and relaxes hold guidance for no-minimum mode", () => {

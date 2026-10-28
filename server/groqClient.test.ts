@@ -106,6 +106,21 @@ describe("GroqClient", () => {
     expect(JSON.parse(String(request.body))).not.toHaveProperty("response_format");
   });
 
+  it("extracts the anchors object from a verbose model reply that explains before the JSON", async () => {
+    const content = 'Point 1: Starts at Line 0 ("पहली बात"). Point 2: Starts at Line 1. Mapping done. {"anchors":[0,1,2],"durations":[2.5,3,4]}';
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 }));
+    global.fetch = fetchMock;
+
+    await expect(new GroqClient("gsk_test").completePacingPlan({ prompt: "Return a JSON pacing plan." })).resolves.toEqual({ anchors: [0, 1, 2], durations: [2.5, 3, 4] });
+  });
+
+  it("still rejects a pacing reply with no usable JSON object", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "Here are the anchors: zero, one, two." } }] }), { status: 200 }));
+    global.fetch = fetchMock;
+
+    await expect(new GroqClient("gsk_test").completePacingPlan({ prompt: "Return a JSON pacing plan." })).rejects.toMatchObject({ status: "prompt_error", metadata: { category: "client_request" } });
+  });
+
   it("reports prompt-size rejections without classifying the key as quota limited", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: "Request too large for model" } }), { status: 429 }));
     global.fetch = fetchMock;
