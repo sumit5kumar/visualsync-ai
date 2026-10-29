@@ -1,3 +1,58 @@
+# VisualSync AI ⚡🎬
+**An Open-Source Automated Audio-to-Visual Timeline Synchronization & Multimodal Pacing Engine**
+
+VisualSync AI is a developer-first media synchronization engine and web platform that automatically maps large collections of unordered or sequential visual assets onto long-form audio timelines with millisecond precision. 
+
+Built to solve the **Context Window Overflow**, **Lost-in-the-Middle**, and **Rate-Limit Bottlenecks** common in long-form (40–60+ minute) automated video production pipelines, VisualSync AI combines word-anchored timestamp math with global-context multimodal LLM orchestration.
+
+---
+
+## 🧠 Core Architecture & Engineering Highlights
+
+* **Word-Anchored Millisecond Precision (`sentenceAnchors`)**: Derives exact millisecond segment boundaries directly from acoustic word timestamps rather than relying on hallucination-prone LLM time strings.
+* **Multi-Provider Transcription Pipeline**:
+  * **Deepgram Nova-2**: Single-shot long-form audio transcription (up to 60+ minutes) with zero word-skipping and utterance-level segmentation.
+  * **Groq Whisper (30s Smart Chunking)**: Rate-limit resilient 30-second sliding acoustic chunks with quality-gate merge logic.
+  * **Local GPU Adapter (`faster-whisper`)**: Extensible interface for offline `int8` CUDA execution with Voice Activity Detection (`vad_filter=True`).
+* **Content-Hash Cached Batch Vision Analysis**: Processes visual assets in optimized multimodal batches (Gemini 1.5 Flash / Vision LLMs) extracting structured semantic metadata (`scene`, `ocr_text`, `colors_lighting`, `mood_emotion`, `subjects_objects`) backed by SHA content-hash caching to eliminate redundant API calls.
+* **Global-Context Dual Sync Engine**:
+  * **Weighted Semantic Sync (Out-of-Order)**: Evaluates full-story pacing ratios using dynamic header telemetry, visual transcript boundary separators (`||`), and automated used/unused pool splitting.
+  * **Ordered Sequential Sync**: Chronological sliding-window synchronization for numbered asset pipelines.
+* **Resilient Key-Pool Rotation Manager**: Built-in round-robin API key pool with automated `429` rate-limit cooldowns, exponential backoff, and provider-level failover.
+
+---
+
+## 🛠️ Tech Stack
+
+* **Backend & Orchestration**: Node.js, TypeScript, Express
+* **AI & Multimodal Providers**: Google Gemini 1.5 Flash, Deepgram Nova-2, Groq Cloud (Whisper / Vision), Local Faster-Whisper support
+* **Media & Rendering Engine**: Timeline validation schema, automated segment mapping, FFmpeg export pipeline
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+* Node.js (v18+)
+* API keys configured in `.env` (supports single or multi-key rotation pools for Gemini, Deepgram, and Groq)
+
+### Installation
+```bash
+# Clone the repository
+git clone [https://github.com/sumit5kumar/visualsync-ai.git](https://github.com/sumit5kumar/visualsync-ai.git)
+cd visualsync-ai
+
+# Install dependencies
+npm install
+
+# Start the development server
+npm run dev
+
+
+
+
+
+
 # VisualSync AI
 
 VisualSync AI is a **narration-driven visual timeline control plane**. It is designed around one core rule: the narration determines when visuals change. The application does not divide audio equally among images, schedule a universal still-image duration, or manufacture a timeline when no real analysis exists.
