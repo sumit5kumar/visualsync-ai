@@ -36,7 +36,9 @@ function normalizeEmail(value: unknown): string {
 
 async function setSessionCookie(req: Request, res: Response, openId: string, name: string) {
   const sessionToken = await sdk.createSessionToken(openId, { name, expiresInMs: ONE_YEAR_MS });
-  res.cookie(COOKIE_NAME, sessionToken, { ...getSessionCookieOptions(req), maxAge: ONE_YEAR_MS });
+  const cookieOptions = getSessionCookieOptions(req);
+  console.log("[Auth] Setting session cookie with options:", JSON.stringify(cookieOptions));
+  res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
 }
 
 export function registerLocalAuthRoutes(app: Express) {

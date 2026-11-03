@@ -4,8 +4,26 @@ import { MAX_ALLOWED_INTERNAL_WORD_GAP_MS } from "./narrationTranscription";
 export type NarrationLine = { start: number; end: number; text: string };
 export type NarrationSegmentInput = { start: number; end: number; text: string; words?: Array<{ word: string; start: number; end: number }> };
 
-/** A pacing catalog item may carry the narration point number encoded in the image filename. */
+/** Filename numbers preserve image order; they are not transcript sentence indices. */
 export type PacingBatchItem = { sequence: number | null; point: number | null; scene: string };
+
+/** Reserve space for meaning and subjects instead of truncating them behind visual style. */
+export function formatPacingVisualScene(analysis: Record<string, unknown> | null | undefined): string {
+  if (!analysis) return "Visual scene";
+  const compact = (value: unknown): string => {
+    if (Array.isArray(value)) return value.map(compact).filter(Boolean).join(", ");
+    if (value && typeof value === "object") {
+      const item = value as Record<string, unknown>;
+      return [item.label ?? item.name, item.action ?? item.actions ?? item.objects].map(compact).filter(Boolean).join(": ");
+    }
+    return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+  };
+  return [
+    ["Scene", compact(analysis.sceneDescription).slice(0, 260)],
+    ["Subjects", compact(analysis.subjects).slice(0, 120)],
+    ["Meaning", compact(analysis.relevance).slice(0, 280)],
+  ].filter(([, value]) => value).map(([label, value]) => `${label}:${value}`).join(" | ") || "Visual scene";
+}
 
 /**
  * Extracts the narration point number from an image filename like
@@ -88,6 +106,48 @@ function splitLongTextPieces(text: string, durationMs: number): string[] {
 
 type TimedWord = { word: string; start: number; end: number };
 
+const normalizedWord = (text: string) => text.normalize("NFKC").toLowerCase().replace(new RegExp("[^\\p{L}\\p{M}\\p{N}]", "gu"), "");
+
+/**
+ * Whisper segment times and word times are independently aligned. A word such
+ * as "credit" can start just before its segment and be bucketed with the prior
+ * sentence. Repair only a nearby, exact multi-word prefix match; never invent
+ * timings or globally shift an unmatched transcript. Also works on cached v8
+ * transcripts, so an analysis retry does not need another transcription call.
+ */
+export function repairSentenceWordBoundaries(segments: NarrationSegmentInput[]): NarrationSegmentInput[] {
+  const repaired = segments.map(segment => ({ ...segment, ...(segment.words ? { words: [...segment.words] } : {}) }));
+  for (let index = 1; index < repaired.length; index += 1) {
+    const previous = repaired[index - 1];
+    const current = repaired[index];
+    if (!previous.words?.length || !current.words?.length) continue;
+    const prefix = current.text.trim().split(/\s+/).map(normalizedWord).filter(Boolean).slice(0, 3);
+    if (prefix.length < 2) continue;
+    // Repeated phrases are real speech. Never steal an earlier occurrence
+    // when this bucket already starts with the correct sentence prefix.
+    if (prefix.every((token, offset) => normalizedWord(current.words![offset]?.word ?? "") === token)) continue;
+    const words = [...previous.words, ...current.words];
+    if (words.some(word => !Number.isFinite(word.start) || !Number.isFinite(word.end) || word.end < word.start)) continue;
+    let boundary = -1;
+    let distance = Number.POSITIVE_INFINITY;
+    for (let candidate = Math.max(1, previous.words.length - 6); candidate <= Math.min(words.length - prefix.length, previous.words.length + 6); candidate += 1) {
+      const delta = Math.abs(words[candidate].start - current.start);
+      if (delta > 1.5 || delta >= distance) continue;
+      if (!prefix.every((token, offset) => normalizedWord(words[candidate + offset].word) === token)) continue;
+      boundary = candidate;
+      distance = delta;
+    }
+    if (boundary >= 1 && boundary !== previous.words.length) {
+      previous.words = words.slice(0, boundary);
+      current.words = words.slice(boundary);
+      // The text-confirmed first word may precede the coarse segment start.
+      // Keep it inside the subsequent per-segment timing validation window.
+      current.start = Math.min(current.start, current.words[0].start);
+    }
+  }
+  return repaired;
+}
+
 function groupWordsByBoundary(words: TimedWord[], isBoundary: (word: string) => boolean) {
   const groups: TimedWord[][] = [];
   let current: TimedWord[] = [];
@@ -146,7 +206,7 @@ function splitWordGroupIntoLines(words: TimedWord[]): NarrationLine[] {
  */
 export function splitTranscriptIntoSentenceLines(segments: NarrationSegmentInput[]): NarrationLine[] {
   const lines: NarrationLine[] = [];
-  for (const segment of segments) {
+  for (const segment of repairSentenceWordBoundaries(segments)) {
     const text = segment.text.trim();
     if (!text) continue;
     const startMs = Math.round(segment.start * 1000);
@@ -242,13 +302,19 @@ export function computeAnchorBoundaries(audioDurationMs: number, lines: Narratio
   return durations;
 }
 
-/** Deterministic no-model fallback: equal pacing snapped to the nearest sentence starts. */
-export function fallbackProportionalAnchors(audioDurationMs: number, lines: NarrationLine[], imageCount: number): number[] {
+/** Fill only missing images with proportional sentence anchors; never rewrite an accepted prefix. */
+export function fallbackProportionalAnchors(audioDurationMs: number, lines: NarrationLine[], imageCount: number, acceptedAnchors: number[] = []): number[] {
   if (!lines.length || imageCount <= 0) return [];
-  const anchors: number[] = [];
-  let lastAnchor = 0;
-  for (let index = 0; index < imageCount; index += 1) {
-    const targetMs = Math.round((index * audioDurationMs) / imageCount);
+  const validPrefix = acceptedAnchors.length <= imageCount && acceptedAnchors.every((anchor, index) => Number.isInteger(anchor) && anchor >= 0 && anchor < lines.length && (index === 0 || anchor >= acceptedAnchors[index - 1]));
+  const anchors = validPrefix ? [...acceptedAnchors] : [];
+  const prefixLength = anchors.length;
+  const missing = imageCount - prefixLength;
+  let lastAnchor = anchors.at(-1) ?? 0;
+  const tailStartMs = prefixLength ? Math.round(lines[lastAnchor].start * 1000) : 0;
+  for (let index = 0; index < missing; index += 1) {
+    const targetMs = prefixLength
+      ? tailStartMs + Math.round(((index + 1) * (audioDurationMs - tailStartMs)) / (missing + 1))
+      : Math.round((index * audioDurationMs) / imageCount);
     let best = lastAnchor;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (let lineIndex = lastAnchor; lineIndex < lines.length; lineIndex += 1) {
@@ -340,10 +406,27 @@ export function sanitizeFinalAnchorSequence(audioDurationMs: number, lines: Narr
 
 export type ParsedAnchors = { anchors: number[]; hints: Array<number | null>; lazy: boolean };
 
-export function parseAndSanitizeAnchors(value: unknown, batchLength: number, lineCount: number, cursorLine: number): ParsedAnchors | null {
+export function parseAndSanitizeAnchors(value: unknown, batchLength: number, lineCount: number, cursorLine: number, sequences?: Array<number | null>): ParsedAnchors | null {
   if (lineCount <= 0 || batchLength <= 0) return null;
   const record = value && typeof value === "object" ? value as { anchors?: unknown; durations?: unknown } : {};
-  const rawAnchors = Array.isArray(record.anchors) ? record.anchors : [];
+  let rawAnchors: unknown[] = Array.isArray(record.anchors) ? record.anchors : [];
+  if (sequences) {
+    if (sequences.length !== batchLength || new Set(sequences).size !== batchLength || sequences.some(sequence => !Number.isInteger(sequence))) return null;
+    if (rawAnchors.length !== batchLength) return null;
+    const bySequence = new Map<number, number>();
+    for (const item of rawAnchors) {
+      if (!item || typeof item !== "object") return null;
+      if (Array.isArray(item) && item.length !== 2) return null;
+      const { sequence, line } = Array.isArray(item)
+        ? { sequence: item[0], line: item[1] }
+        : item as { sequence?: unknown; line?: unknown };
+      if (typeof sequence !== "number" || !sequences.includes(sequence) || bySequence.has(sequence)) return null;
+      if (typeof line !== "number" || !Number.isInteger(line) || line < 0 || line < cursorLine || line >= lineCount) return null;
+      bySequence.set(sequence, line);
+    }
+    rawAnchors = sequences.map(sequence => bySequence.get(sequence!));
+    if (rawAnchors.some((anchor, index) => index > 0 && (anchor as number) < (rawAnchors[index - 1] as number))) return null;
+  }
   const anchors = rawAnchors.map(item => Number(item)).filter(Number.isFinite);
   if (anchors.length !== batchLength) return null;
   const sanitized: number[] = [];
@@ -370,9 +453,12 @@ export function buildDirectAnchorPacingPrompt(input: {
   holdMode: ReadableHoldMode;
   corrective: boolean;
   missingPoints?: number[];
+  previousImage?: PacingBatchItem;
 }) {
   const windowStart = Math.max(0, input.cursorLine - 2);
-  const coverageSeconds = Math.max(input.batch.length * 2.0, input.batch.length * 4.5 + 8);
+  const remainingSeconds = Math.max(0, input.audioDurationMs / 1000 - (input.lines[input.cursorLine]?.start ?? 0));
+  const remainingBatches = Math.max(1, input.batchCount - input.batchIndex);
+  const coverageSeconds = Math.max(input.batch.length * 4.5 + 8, remainingSeconds / remainingBatches * 1.5);
   let windowEnd = windowStart;
   let coveredSeconds = 0;
   for (let lineIndex = input.cursorLine; lineIndex < input.lines.length; lineIndex += 1) {
@@ -399,8 +485,9 @@ export function buildDirectAnchorPacingPrompt(input: {
   const hasPoints = input.batch.every(item => Number.isInteger(item.point) && (item.point as number) > 0);
   const missingPoints = (input.missingPoints ?? []).filter(point => Number.isInteger(point) && point > 0);
   const pointGuidance = hasPoints
-    ? ` Every image carries the narration point number it illustrates (point 1 = the first spoken point of the narration; points increase in spoken order). Anchor the image with point p at the FIRST line where point p begins. One point may span two consecutive lines when the transcriber split a single sentence mid-way: keep those lines together under that point and anchor at the first of them.${missingPoints.length ? ` The whole video has NO image for point(s) ${missingPoints.join(", ")}: the previous image stays on screen through those points, so never anchor anything at the lines of those points.` : ""} Never anchor an image at a line that still belongs to an earlier point than the image's own point.`
+    ? ` The point field is an image filename/order label, NOT a spoken sentence number or a transcript line index. Never count sentences to infer point numbers. Match the actual subject, action and meaning of each image to the narration, even when this disagrees with a numerical offset.${missingPoints.length ? ` Filename labels ${missingPoints.join(", ")} are absent; there may be narration without its own image. Hold the preceding image through unmatched narration until the next image's specific topic actually begins; do not reserve or skip lines by counting these missing labels.` : ""}`
     : "";
   const batchJson = hasPoints ? input.batch : input.batch.map(({ sequence, scene }) => ({ sequence, scene }));
-  return `Contiguous ordered image batch ${input.batchIndex + 1}/${input.batchCount} for a narration-driven video. Full audio is ${(input.audioDurationMs / 1000).toFixed(1)} seconds with ${input.imageCount} total ordered images and ${input.lines.length} timestamped narration lines. Previous images ended near line ${input.cursorLine}; anchors in this batch must be non-decreasing and every anchor must be greater than or equal to ${input.cursorLine}. For each image in the listed order, return the line index where the visible content of that image should START being shown. An image may cover several lines: anchor it at the FIRST line it covers. Consecutive images may share one line when the narration is dense; they will split that line's time. Spread anchors across the full remaining narration; the final images should reach the final lines. ${holdGuidance}${pointGuidance}${input.corrective ? " The previous answer was rejected because it crammed the whole batch onto too few lines; anchor each image to its own spoken sentence(s) using the timestamps." : ""} Your ENTIRE reply must be a single JSON object and nothing else: no explanation, no point-to-line mapping, no markdown, no text before or after the object. Reply with exactly {"anchors":[...]} containing ${input.batch.length} integers, and optionally "durations":[...] with ${input.batch.length} positive spoken-seconds hints. Use only the supplied line indices. Timestamped narration lines (index|start-end seconds|text): ${parts.join(" ")}. Image batch in order (${hasPoints ? "sequence|point|scene" : "sequence|scene"}): ${JSON.stringify(batchJson)}`;
+  const previousContext = input.previousImage ? ` Previous image (context only, do not return it): ${JSON.stringify(input.previousImage)}.` : "";
+  return `Contiguous ordered image batch ${input.batchIndex + 1}/${input.batchCount} for a narration-driven video. Full audio is ${(input.audioDurationMs / 1000).toFixed(1)} seconds with ${input.imageCount} total ordered images and ${input.lines.length} timestamped narration lines. The previous image STARTED near line ${input.cursorLine}; it may still cover continuing narration after that line. Anchors in this batch must be non-decreasing and every anchor must be greater than or equal to ${input.cursorLine}. For each image in the listed order, return the line index where its specific visible subject/action/meaning begins in the narration. Read the narration in its original language and match meaning across languages. One idea may span several sentences or transcript fragments: keep all continuation lines with the current image until the next image's specific topic begins. Before choosing a boundary, compare BOTH neighboring images: do not show the next image merely because a new sentence starts or a generic word such as money repeats. Do not spread images evenly or force one image per line. Consecutive images may share a line only when that line actually covers both images. ${input.batchIndex === input.batchCount - 1 ? "The final image should start at its matching closing idea and remain until the audio ends." : "More image batches follow; do not stretch this batch to the narration's ending."} ${holdGuidance}${pointGuidance}${previousContext}${input.corrective ? " The previous answer was rejected because it crammed the whole batch onto too few lines; anchor each image to its own spoken sentence(s) using the timestamps." : ""} Your ENTIRE reply must be a single JSON object in single-line compact JSON and nothing else: no whitespace or indentation, no explanation, no point-to-line mapping, no markdown, no text before or after the object. Reply with exactly {"anchors":[[IMAGE_SEQUENCE_ID,LINE_INDEX],...]} containing ${input.batch.length} pairs, one per supplied sequence ID. Each pair must be exactly [image ID,line index], two integers in that order, not a positional line-only array. Explicitly match each image ID to its own content-matching line, not the next consecutive line. Choose the FIRST line introducing that specific idea, not a later summary of the same idea. Use only the supplied sequence IDs and line indices. Timestamped narration lines (index|start-end seconds|text): ${parts.join(" ")}. Image batch in order (${hasPoints ? "sequence|point|scene" : "sequence|scene"}): ${JSON.stringify(batchJson)}`;
 }

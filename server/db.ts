@@ -2,10 +2,15 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { geminiApiKeys, groqApiKeys, mediaAssets, projects, timelineApprovals, timelineGenerationJobs, timelineSegments, type InsertUser, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { GEMINI_COOLDOWN_AFTER_REQUEST_MS } from "./geminiPool";
+
+/** A "busy" Gemini test (503 / high demand) keeps the key eligible but parks it briefly. */
+const GEMINI_BUSY_COOLDOWN_MS = GEMINI_COOLDOWN_AFTER_REQUEST_MS;
 import { canEditValidatedTimeline, planImageSubstitution, planTimelineBoundaryAdjustment, planTimelineVisualMove } from "./timelineEditing";
 import { validateTimeline } from "./timelineValidation";
 import { buildProjectProcessingProgress } from "./projectProgress";
 import { narrationTranscriptionSummary } from "./narrationTranscription";
+import type { TranscriptionProviderId, VisionSyncProviderId } from "./providerSelection";
 
 let database: ReturnType<typeof drizzle> | null = null;
 
@@ -120,17 +125,19 @@ export async function createProjectRecord(userId: number, input: { name: string;
   return { projectId: Number(result[0].insertId) };
 }
 
-export function projectSetupUpdateValues(input: { narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM"; timelineSyncMode?: "ORDERED_PACING" | "SEMANTIC_WEIGHTED" }) {
-  const values: { narrationOriginalName?: string | null; imageSourcePath?: string | null; outputPath?: string | null; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM"; timelineSyncMode?: "ORDERED_PACING" | "SEMANTIC_WEIGHTED" } = {};
+export function projectSetupUpdateValues(input: { narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM"; timelineSyncMode?: "ORDERED_PACING" | "SEMANTIC_WEIGHTED"; transcriptionProvider?: TranscriptionProviderId; visionSyncProvider?: VisionSyncProviderId }) {
+  const values: { narrationOriginalName?: string | null; imageSourcePath?: string | null; outputPath?: string | null; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM"; timelineSyncMode?: "ORDERED_PACING" | "SEMANTIC_WEIGHTED"; transcriptionProvider?: TranscriptionProviderId; visionSyncProvider?: VisionSyncProviderId } = {};
   if (input.narrationOriginalName !== undefined) values.narrationOriginalName = input.narrationOriginalName.trim() || null;
   if (input.imageSourcePath !== undefined) values.imageSourcePath = input.imageSourcePath.trim() || null;
   if (input.outputPath !== undefined) values.outputPath = input.outputPath.trim() || null;
   if (input.readableHoldMode !== undefined) values.readableHoldMode = input.readableHoldMode;
   if (input.timelineSyncMode !== undefined) values.timelineSyncMode = input.timelineSyncMode;
+  if (input.transcriptionProvider !== undefined) values.transcriptionProvider = input.transcriptionProvider;
+  if (input.visionSyncProvider !== undefined) values.visionSyncProvider = input.visionSyncProvider;
   return values;
 }
 
-export async function updateProjectSetup(userId: number, projectId: number, input: { narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM"; timelineSyncMode?: "ORDERED_PACING" | "SEMANTIC_WEIGHTED" }) {
+export async function updateProjectSetup(userId: number, projectId: number, input: { narrationOriginalName?: string; imageSourcePath?: string; outputPath?: string; readableHoldMode?: "MIN_2_SECONDS" | "NO_MINIMUM"; timelineSyncMode?: "ORDERED_PACING" | "SEMANTIC_WEIGHTED"; transcriptionProvider?: TranscriptionProviderId; visionSyncProvider?: VisionSyncProviderId }) {
   const db = await requireDb();
   const project = await getUserProject(userId, projectId);
   if (!project) throw new Error("Project not found.");
@@ -204,7 +211,7 @@ export async function getUserProject(userId: number, projectId: number) {
 
 export async function listVisibleGeminiKeys(userId: number) {
   const db = await requireDb();
-  return (await db.select().from(geminiApiKeys).where(eq(geminiApiKeys.userId, userId))).map(record => ({ id: record.id, label: record.label, maskedKey: `${record.keyPrefix}••••••••${record.keySuffix}`, isActive: record.isActive, testStatus: record.testStatus, lastTestedAt: record.lastTestedAt, createdAt: record.createdAt }));
+  return (await db.select().from(geminiApiKeys).where(eq(geminiApiKeys.userId, userId))).map(record => ({ id: record.id, label: record.label, maskedKey: `${record.keyPrefix}••••••••${record.keySuffix}`, isActive: record.isActive, testStatus: record.testStatus, lastTestedAt: record.lastTestedAt, lastUsedAt: record.lastUsedAt, lastFailureAt: record.lastFailureAt, cooldownUntil: record.cooldownUntil, consecutiveRateLimits: record.consecutiveRateLimits, createdAt: record.createdAt }));
 }
 
 export async function getStoredGeminiKey(userId: number, keyId: number) {
@@ -216,18 +223,35 @@ export async function saveValidatedGeminiKey(userId: number, input: { label: str
   const db = await requireDb();
   const duplicate = await db.select({ id: geminiApiKeys.id }).from(geminiApiKeys).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.keyFingerprint, input.keyFingerprint))).limit(1);
   if (duplicate.length > 0) throw new Error("This Gemini API key is already saved in your workspace.");
-  const activeKeys = await db.select({ id: geminiApiKeys.id }).from(geminiApiKeys).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.isActive, true)));
-  await db.insert(geminiApiKeys).values({ ...input, userId, isActive: activeKeys.length === 0, testStatus: "verified", lastTestedAt: new Date() });
+  // Every verified Gemini key joins the dynamic rotation pool (2, 3, 10, ... keys).
+  await db.insert(geminiApiKeys).values({ ...input, userId, isActive: true, testStatus: "verified", lastTestedAt: new Date() });
 }
 
 export async function recordGeminiKeyTest(userId: number, keyId: number, testStatus: "verified" | "invalid" | "quota_limited" | "unavailable") {
   const db = await requireDb();
-  await db.update(geminiApiKeys).set({ testStatus, lastTestedAt: new Date() }).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId)));
+  const now = new Date();
+  if (testStatus === "verified") {
+    // Verified key rejoins the rotation pool with a clean cooldown.
+    await db.update(geminiApiKeys).set({ testStatus, lastTestedAt: now, cooldownUntil: null, consecutiveRateLimits: 0 }).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId)));
+    return;
+  }
+  if (testStatus === "invalid") {
+    // A rejected key is pulled from rotation entirely.
+    await db.update(geminiApiKeys).set({ testStatus, isActive: false, lastTestedAt: now }).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId)));
+    return;
+  }
+  // quota_limited / unavailable (busy) keys are NOT permanently locked out: they
+  // are kept eligible (testStatus stays "verified") and just set aside on a
+  // cooldown so the pool can use the other keys meanwhile. Without this the key
+  // would sit at testStatus=unavailable with no cooldown and never be chosen.
+  const cooldownMs = testStatus === "quota_limited" ? 60_000 : GEMINI_BUSY_COOLDOWN_MS;
+  await db.update(geminiApiKeys).set({ testStatus: "verified", lastTestedAt: now, cooldownUntil: new Date(now.getTime() + cooldownMs) }).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId)));
 }
 
 export async function activateGeminiKey(userId: number, keyId: number) {
   const db = await requireDb();
-  await db.transaction(async transaction => { await transaction.update(geminiApiKeys).set({ isActive: false }).where(eq(geminiApiKeys.userId, userId)); await transaction.update(geminiApiKeys).set({ isActive: true }).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId))); });
+  // Non-exclusive: activating a key adds it back to the rotation pool without removing the others.
+  await db.update(geminiApiKeys).set({ isActive: true, cooldownUntil: null }).where(and(eq(geminiApiKeys.userId, userId), eq(geminiApiKeys.id, keyId)));
 }
 
 export async function removeGeminiKey(userId: number, keyId: number) {

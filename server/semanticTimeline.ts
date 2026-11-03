@@ -25,7 +25,11 @@ function finiteInteger(value: unknown) { return Number.isInteger(value) && Numbe
 function finitePositive(value: unknown) { return Number.isFinite(value) && Number(value) > 0; }
 
 export function validateSemanticAssignments(assignments: SemanticAssignment[], images: SemanticImage[], transcriptSegments: SemanticTranscriptSegment[]) {
-  if (assignments.length !== images.length) throw new Error("Semantic weighted sync must assign every uploaded image exactly once.");
+  // Images the model has no confident match for may be OMITTED (skipped), so the
+  // assignment list is allowed to be a SUBSET of the uploaded images. Skipped
+  // images simply do not appear in the timeline instead of being forced onto a
+  // wrong narration line. Only hard constraints (known image, no duplicate, valid
+  // segment index, positive weight) are enforced here.
   const imageSequences = new Set(images.map(image => image.sequence));
   const seen = new Set<number>();
   for (const assignment of assignments) {
@@ -35,7 +39,6 @@ export function validateSemanticAssignments(assignments: SemanticAssignment[], i
     if (!finitePositive(assignment.weight)) throw new Error("Semantic weighted sync returned an invalid image weight.");
     seen.add(assignment.sequence);
   }
-  if (seen.size !== imageSequences.size) throw new Error("Semantic weighted sync did not cover every uploaded image.");
 }
 
 function normalizedTranscriptSegments(segments: SemanticTranscriptSegment[], audioDurationMs: number) {
@@ -56,7 +59,11 @@ export function buildSemanticWeightedTimeline(input: SemanticTimelineInput): Sem
   const clips: SemanticTimelineClip[] = [];
   let cursor = 0;
   nonEmptySegments.forEach((segment, bucketIndex) => {
-    const bucketAssignments = assignmentBySegment.get(segment.index)!.slice().sort((left, right) => right.weight - left.weight || left.sequence - right.sequence);
+    // Preserve the caller's order. Each image is already anchored to its own
+    // narration line by MEANING (not by upload sequence), so the order within a
+    // shared line never depends on a filename rename. Images that land on the
+    // same line are the same topic, so their relative order is interchangeable.
+    const bucketAssignments = assignmentBySegment.get(segment.index)!;
     const remainingBuckets = nonEmptySegments.slice(bucketIndex + 1);
     const minRemainingImages = remainingBuckets.reduce((sum, nextSeg) => sum + (assignmentBySegment.get(nextSeg.index)?.length ?? 0), 0);
     const nextSegmentStart = bucketIndex + 1 < nonEmptySegments.length ? nonEmptySegments[bucketIndex + 1].startMs : input.audioDurationMs;
@@ -81,4 +88,3 @@ export function buildSemanticWeightedTimeline(input: SemanticTimelineInput): Sem
   if (cursor !== input.audioDurationMs) throw new Error(`Semantic weighted Timeline ended at ${cursor} ms instead of${input.audioDurationMs} ms.`);
   return clips;
 }
-

@@ -4,8 +4,12 @@ import { getDb } from "./db";
 import { decryptSecret } from "./crypto";
 import { GroqClient, GroqRequestError, type GroqRequestMetadata } from "./groqClient";
 import { GroqPoolExhaustedError } from "./groqPool";
+import { GeminiRequestError } from "./geminiClient";
+import { GeminiPoolExhaustedError } from "./geminiPool";
 import { processProjectTimelineSlice, type TimelineGenerationSliceResult } from "./projectProcessor";
 import { isProjectVerifiedForAutomaticRotation } from "./groqRotation";
+import { CURRENT_PROVIDER_PHASE, providerSelectionBlocker } from "./providerSelection";
+import { localWhisperConfig } from "./transcriptionProviders";
 
 // The handler remains idempotent and retains the two-minute provider retry
 // delay. A one-minute heartbeat is the platform minimum and gives overdue
@@ -30,6 +34,7 @@ function preflightCategory(status: "verified" | "invalid" | "permission_restrict
 
 function failureMetadata(error: unknown): GroqRequestMetadata | undefined {
   if (error instanceof GroqRequestError || error instanceof GroqPoolExhaustedError) return error.metadata;
+  if (error instanceof GeminiRequestError || error instanceof GeminiPoolExhaustedError) return error.metadata;
   return undefined;
 }
 
@@ -187,8 +192,17 @@ export async function runTimelineGenerationJob(jobId: number) {
     const startedAtMs = Date.now();
     let workState: Record<string, unknown> = { ...((claimedJob.workState as Record<string, unknown> | null) ?? {}), firstDispatchAtMs: Number((claimedJob.workState as Record<string, unknown> | null)?.firstDispatchAtMs) || startedAtMs };
     await db.update(timelineGenerationJobs).set({ workState }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
+    const [providerProject] = await db.select({ transcriptionProvider: projects.transcriptionProvider, visionSyncProvider: projects.visionSyncProvider }).from(projects).where(eq(projects.id, claimedJob.projectId)).limit(1);
+    const providerBlocker = providerProject ? providerSelectionBlocker(providerProject, CURRENT_PROVIDER_PHASE, { localWhisperUrl: localWhisperConfig()?.url }) : null;
+    if (providerBlocker) throw new GroqRequestError(providerBlocker, "prompt_error", { durationMs: 0, category: "client_request" });
     if (!workState?.preflightComplete) {
-      await preflightGroqTimelineJob(claimedJob.userId);
+      const transcriptionProvider = providerProject?.transcriptionProvider;
+      const visionProvider = providerProject?.visionSyncProvider;
+      const needsGroqPreflight = transcriptionProvider === "GROQ_WHISPER" || transcriptionProvider === undefined || !transcriptionProvider;
+      const visionNeedsGroq = visionProvider === "GROQ" || !visionProvider;
+      if (needsGroqPreflight && visionNeedsGroq) {
+        await preflightGroqTimelineJob(claimedJob.userId);
+      }
       workState = { ...(workState ?? {}), preflightComplete: true };
       await db.update(timelineGenerationJobs).set({ workState }).where(and(eq(timelineGenerationJobs.id, claimedJob.id), eq(timelineGenerationJobs.leaseToken, leaseToken)));
     }
@@ -230,7 +244,10 @@ export async function runAllDueTimelineGenerationJobs() {
   const db = await requireDb();
   const now = new Date();
   const due = await db.select({ id: timelineGenerationJobs.id }).from(timelineGenerationJobs).where(and(
-    inArray(timelineGenerationJobs.status, ["queued", "waiting_for_retry"]),
+    or(
+      inArray(timelineGenerationJobs.status, ["queued", "waiting_for_retry"]),
+      and(eq(timelineGenerationJobs.status, "processing"), lte(timelineGenerationJobs.leaseExpiresAt, now)),
+    ),
     or(isNull(timelineGenerationJobs.retryAt), lte(timelineGenerationJobs.retryAt, now)),
   ));
   const results = [];

@@ -32,8 +32,42 @@ describe("semantic weighted Timeline", () => {
     expect(clips.map(clip => clip.transcriptSegmentIndex)).toEqual([0, 1, 2]);
   });
 
-  it("rejects missing, duplicate, or unknown image assignments", () => {
-    expect(() => validateSemanticAssignments([{ sequence: 1, segmentIndex: 0, weight: 1 }], images, transcript)).toThrow(/every uploaded image/);
+  it("keeps uploaded sequence order inside a shared segment instead of scrambling by weight", () => {
+    const clips = buildSemanticWeightedTimeline({
+      audioDurationMs: 6_000,
+      transcriptSegments: transcript,
+      images: [
+        { id: 11, sequence: 1, scene: "first" },
+        { id: 12, sequence: 2, scene: "second" },
+        { id: 13, sequence: 3, scene: "third" },
+      ],
+      assignments: [
+        { sequence: 1, segmentIndex: 0, weight: 0.5 },
+        { sequence: 2, segmentIndex: 0, weight: 3.0 },
+        { sequence: 3, segmentIndex: 0, weight: 1.0 },
+      ],
+      holdMode: "NO_MINIMUM",
+    });
+    // weight 3.0 on sequence 2 must NOT push it ahead of sequence 1.
+    expect(clips.map(clip => clip.sourceSequence)).toEqual([1, 2, 3]);
+  });
+
+  it("allows the model to skip images it has no confident match for", () => {
+    // A subset of assignments is valid: unassigned images are simply omitted.
+    expect(() => validateSemanticAssignments([{ sequence: 1, segmentIndex: 0, weight: 1 }], images, transcript)).not.toThrow();
+    const clips = buildSemanticWeightedTimeline({
+      audioDurationMs: 6_000,
+      transcriptSegments: transcript,
+      images,
+      assignments: [{ sequence: 2, segmentIndex: 1, weight: 1 }],
+      holdMode: "NO_MINIMUM",
+    });
+    expect(clips.map(clip => clip.imageAssetId)).toEqual([12]);
+    expect(clips[0].startMs).toBe(0);
+    expect(clips.at(-1)?.endMs).toBe(6_000);
+  });
+
+  it("rejects duplicate or unknown image assignments", () => {
     expect(() => validateSemanticAssignments([
       { sequence: 1, segmentIndex: 0, weight: 1 },
       { sequence: 1, segmentIndex: 1, weight: 1 },

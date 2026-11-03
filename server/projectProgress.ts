@@ -20,6 +20,16 @@ function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
+function formatRetryWaitMs(ms: number) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  if (totalSeconds < 60) return `${totalSeconds} second${totalSeconds === 1 ? "" : "s"}`;
+  const totalMinutes = Math.ceil(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes} minute${totalMinutes === 1 ? "" : "s"}`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes > 0 ? `${hours} hour${hours === 1 ? "" : "s"} ${minutes} minute${minutes === 1 ? "" : "s"}` : `${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
 export function estimateInitialProjectProcessingMs(input: Pick<ProgressInput, "totalImageCount" | "audioDurationMs">) {
   const transcriptionMs = clamp(Math.round((input.audioDurationMs ?? 0) * 0.08) + 20_000, 20_000, 360_000);
   const imageAnalysisMs = Math.max(0, input.totalImageCount) * 3_600;
@@ -94,15 +104,16 @@ export function buildProjectProcessingProgress(input: ProgressInput) {
     message = "The hosted job is registered and starting now. It will continue independently of this browser.";
   } else if (input.backgroundJob?.status === "waiting_for_retry") {
     const retryAtMs = input.backgroundJob.retryAt?.getTime();
-    label = "Waiting for Groq — retry scheduled automatically";
-    message = `${input.backgroundJob.lastError?.message ?? "Groq temporarily refused the current work unit."}${retryAtMs ? ` The hosted job will retry automatically in about ${Math.max(0, Math.ceil((retryAtMs - now.getTime()) / 1000))} seconds.` : " The hosted job will retry automatically."}`;
+    label = "Waiting for the AI provider — retry scheduled automatically";
+    message = `${input.backgroundJob.lastError?.message ?? "The AI provider temporarily refused the current work unit."}${retryAtMs ? ` The hosted job will retry automatically in about ${formatRetryWaitMs(retryAtMs - now.getTime())}.` : " The hosted job will retry automatically."} If you have added a fresh key, use Resume server analysis to continue now.`;
   }
 
   const workerLeaseExpired = input.backgroundJob?.status === "processing"
     && Boolean(input.backgroundJob.leaseExpiresAt && input.backgroundJob.leaseExpiresAt.getTime() <= now.getTime());
   const queuedStartGraceExpired = input.backgroundJob?.status === "queued" && !isIntentionalQueueWait && stageElapsedMs >= QUEUED_TIMELINE_START_GRACE_MS;
-  const resumeRecommended = workerLeaseExpired || queuedStartGraceExpired;
-  if (resumeRecommended) {
+  const waitingForProviderRetry = input.backgroundJob?.status === "waiting_for_retry";
+  const resumeRecommended = workerLeaseExpired || queuedStartGraceExpired || waitingForProviderRetry;
+  if (workerLeaseExpired || queuedStartGraceExpired) {
     label = "Timeline worker needs a safe resume";
     message = workerLeaseExpired
       ? "The previous worker lease expired before it could continue. Resume server analysis uses your saved media and progress; it does not upload again."

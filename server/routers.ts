@@ -8,7 +8,9 @@ import { activateGeminiKey, activateGroqKey, adjustTimelineBoundary, approveTime
 import { queueTimelineGenerationJob, runTimelineGenerationJob } from "./timelineGenerationJobs";
 import { decryptSecret, describeApiKey, describeGeminiKey, encryptSecret, fingerprintSecret } from "./crypto";
 import { GEMINI_MODEL, GeminiClient } from "./geminiClient";
+import { TRANSCRIPTION_PROVIDER_IDS, VISION_SYNC_PROVIDER_IDS, providerCatalog } from "./providerSelection";
 import { GROQ_TRANSCRIPTION_MODEL, GROQ_VISION_MODEL, GroqClient } from "./groqClient";
+import { localWhisperConfig, testDeepgramKey, type DeepgramKeyTestResult } from "./transcriptionProviders";
 import { canActivateGeminiKey, canActivateProviderKey, canRemoveGeminiKey, canRemoveProviderKey } from "./keyPolicy";
 import { validateTimeline } from "./timelineValidation";
 import { getWorkerCapabilities, workerPayloadSchemas } from "./workerContracts";
@@ -31,11 +33,11 @@ export function requestPublicOrigin(req: { protocol?: string; get?: (name: strin
 export const appRouter = router({
   system: systemRouter,
   auth: router({ me: publicProcedure.query(opts => opts.ctx.user), logout: publicProcedure.mutation(({ ctx }) => { const cookieOptions = getSessionCookieOptions(ctx.req); ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 }); return { success: true } as const; }) }),
-  project: router({ list: protectedProcedure.query(({ ctx }) => listUserProjects(ctx.user.id)), storageUsage: protectedProcedure.query(({ ctx }) => getUserMediaStorageUsage(ctx.user.id)), create: protectedProcedure.input(projectInput).mutation(async ({ ctx, input }) => ({ success: true as const, ...(await createProjectRecord(ctx.user.id, input)) })), updateSetup: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), narrationOriginalName: z.string().trim().max(255).optional(), imageSourcePath: z.string().trim().max(2048).optional(), outputPath: z.string().trim().max(2048).optional(), readableHoldMode: z.enum(["MIN_2_SECONDS", "NO_MINIMUM"]).optional(), timelineSyncMode: z.enum(["ORDERED_PACING", "SEMANTIC_WEIGHTED"]).optional() })).mutation(({ ctx, input }) => updateProjectSetup(ctx.user.id, input.projectId, input)), updateZoom: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), enabled: z.boolean(), amountPercent: z.union([z.literal(3), z.literal(5), z.literal(8), z.literal(12)]), direction: z.enum(["IN", "OUT", "AUTO"]), randomMix: z.boolean().optional(), crossfadeDurationMs: z.union([z.literal(0), z.literal(300), z.literal(500), z.literal(800), z.literal(1000), z.literal(1200)]), transitionType: z.enum(["NONE", "CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN", "RANDOM"]).optional(), enabledTransitions: z.array(z.enum(["CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN"])).min(1).optional(), enabledZoomDirections: z.array(z.enum(["IN", "OUT", "PAN_LEFT", "PAN_RIGHT", "DIAGONAL", "KEN_BURNS"])).min(1).optional() })).mutation(({ ctx, input }) => updateProjectZoomSettings(ctx.user.id, input.projectId, input)), updateOutput: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), width: z.union([z.literal(1920), z.literal(1280), z.literal(854), z.literal(1080), z.literal(720), z.literal(480)]), height: z.union([z.literal(1080), z.literal(720), z.literal(480), z.literal(1920), z.literal(1280), z.literal(854)]), aspectRatio: z.enum(["16:9", "9:16"]) })).mutation(({ ctx, input }) => updateProjectOutputFormat(ctx.user.id, input.projectId, input)), remove: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => deleteProjectRecord(ctx.user.id, input.projectId)), removeAll: protectedProcedure.mutation(({ ctx }) => deleteAllProjectRecords(ctx.user.id)), prepareMediaImport: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => prepareProjectMediaImport(ctx.user.id, input.projectId)), processGlobalTimeline: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+  project: router({ list: protectedProcedure.query(({ ctx }) => listUserProjects(ctx.user.id)), storageUsage: protectedProcedure.query(({ ctx }) => getUserMediaStorageUsage(ctx.user.id)), create: protectedProcedure.input(projectInput).mutation(async ({ ctx, input }) => ({ success: true as const, ...(await createProjectRecord(ctx.user.id, input)) })), updateSetup: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), narrationOriginalName: z.string().trim().max(255).optional(), imageSourcePath: z.string().trim().max(2048).optional(), outputPath: z.string().trim().max(2048).optional(), readableHoldMode: z.enum(["MIN_2_SECONDS", "NO_MINIMUM"]).optional(), timelineSyncMode: z.enum(["ORDERED_PACING", "SEMANTIC_WEIGHTED"]).optional(), transcriptionProvider: z.enum(TRANSCRIPTION_PROVIDER_IDS).optional(), visionSyncProvider: z.enum(VISION_SYNC_PROVIDER_IDS).optional() })).mutation(({ ctx, input }) => updateProjectSetup(ctx.user.id, input.projectId, input)), updateZoom: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), enabled: z.boolean(), amountPercent: z.union([z.literal(3), z.literal(5), z.literal(8), z.literal(12)]), direction: z.enum(["IN", "OUT", "AUTO"]), randomMix: z.boolean().optional(), crossfadeDurationMs: z.union([z.literal(0), z.literal(300), z.literal(500), z.literal(800), z.literal(1000), z.literal(1200)]), transitionType: z.enum(["NONE", "CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN", "RANDOM"]).optional(), enabledTransitions: z.array(z.enum(["CROSSFADE", "FADE_BLACK", "WIPE_LEFT", "WIPE_RIGHT", "SLIDE_LEFT", "SLIDE_RIGHT", "CIRCLE_OPEN"])).min(1).optional(), enabledZoomDirections: z.array(z.enum(["IN", "OUT", "PAN_LEFT", "PAN_RIGHT", "DIAGONAL", "KEN_BURNS"])).min(1).optional() })).mutation(({ ctx, input }) => updateProjectZoomSettings(ctx.user.id, input.projectId, input)), updateOutput: protectedProcedure.input(z.object({ projectId: z.number().int().positive(), width: z.union([z.literal(1920), z.literal(1280), z.literal(854), z.literal(1080), z.literal(720), z.literal(480)]), height: z.union([z.literal(1080), z.literal(720), z.literal(480), z.literal(1920), z.literal(1280), z.literal(854)]), aspectRatio: z.enum(["16:9", "9:16"]) })).mutation(({ ctx, input }) => updateProjectOutputFormat(ctx.user.id, input.projectId, input)), remove: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => deleteProjectRecord(ctx.user.id, input.projectId)), removeAll: protectedProcedure.mutation(({ ctx }) => deleteAllProjectRecords(ctx.user.id)), prepareMediaImport: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(({ ctx, input }) => prepareProjectMediaImport(ctx.user.id, input.projectId)), processGlobalTimeline: protectedProcedure.input(z.object({ projectId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
     const job = await queueTimelineGenerationJob(ctx.user.id, input.projectId);
     const dispatch = await runTimelineGenerationJob(job.id);
     return { jobId: job.id, status: "queued" as const, scheduled: true, dispatch };
-  }), readablePacingPolicy: protectedProcedure.query(() => ({ useEverySourceImageInOrder: true, provider: "groq", preferredMinimumDurationMs: 2200, adaptiveMinimum: true, equalDurationFallbackAllowed: false, supportedHoldModes: ["MIN_2_SECONDS", "NO_MINIMUM"] as const, defaultHoldMode: "MIN_2_SECONDS" as const, supportedSyncModes: ["ORDERED_PACING", "SEMANTIC_WEIGHTED"] as const, defaultSyncMode: "ORDERED_PACING" as const })) }),
+  }), readablePacingPolicy: protectedProcedure.query(() => ({ useEverySourceImageInOrder: true, provider: "groq", preferredMinimumDurationMs: 2200, adaptiveMinimum: true, equalDurationFallbackAllowed: false, supportedHoldModes: ["MIN_2_SECONDS", "NO_MINIMUM"] as const, defaultHoldMode: "MIN_2_SECONDS" as const, supportedSyncModes: ["ORDERED_PACING", "SEMANTIC_WEIGHTED"] as const, defaultSyncMode: "ORDERED_PACING" as const })), providerCatalog: protectedProcedure.query(() => providerCatalog()) }),
   gemini: router({
     model: publicProcedure.query(() => GEMINI_MODEL),
     list: protectedProcedure.query(({ ctx }) => listVisibleGeminiKeys(ctx.user.id)),
@@ -43,6 +45,51 @@ export const appRouter = router({
     test: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const storedKey = await getStoredGeminiKey(ctx.user.id, input.keyId); if (!storedKey) throw new TRPCError({ code: "NOT_FOUND", message: "Gemini key not found." }); const apiKey = decryptSecret({ ciphertext: storedKey.encryptedCiphertext, iv: storedKey.encryptionIv, tag: storedKey.encryptionTag }); const testResult = await new GeminiClient(apiKey).testKey(); await recordGeminiKeyTest(ctx.user.id, input.keyId, testResult.status); return testResult; }),
     activate: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const key = await getStoredGeminiKey(ctx.user.id, input.keyId); if (!key) throw new TRPCError({ code: "NOT_FOUND", message: "Gemini key not found." }); if (!canActivateGeminiKey(key.testStatus)) throw new TRPCError({ code: "BAD_REQUEST", message: "Only a successfully verified Gemini key can become active." }); await activateGeminiKey(ctx.user.id, input.keyId); return { success: true } as const; }),
     remove: protectedProcedure.input(z.object({ keyId: z.number().int().positive() })).mutation(async ({ ctx, input }) => { const keys = await listVisibleGeminiKeys(ctx.user.id); const target = keys.find(key => key.id === input.keyId); if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Gemini key not found." }); const verifiedAlternatives = keys.filter(key => key.id !== input.keyId && key.testStatus === "verified"); if (!canRemoveGeminiKey(target.isActive, verifiedAlternatives.length)) throw new TRPCError({ code: "BAD_REQUEST", message: "Add and verify another key before removing the active key." }); await removeGeminiKey(ctx.user.id, input.keyId); return { success: true } as const; }),
+  }),
+  deepgram: router({
+    /**
+     * Deepgram has no server-side key storage (unlike Gemini/Groq) — the key
+     * lives in the server's DEEPGRAM_API_KEY env var. This endpoint lets the
+     * user test that configured key (or optionally a candidate key) to confirm
+     * Nova-2 connectivity before relying on the DEEPGRAM_NOVA2 provider.
+     */
+    test: protectedProcedure.input(z.object({ apiKey: z.string().trim().min(8).max(512).optional() })).mutation(async ({ ctx, input }) => {
+      void ctx;
+      const key = input.apiKey?.trim() || process.env.DEEPGRAM_API_KEY?.trim();
+      if (!key) return { saved: false as const, status: "unavailable" as const, message: "No DEEPGRAM_API_KEY is configured on the server. Add the key in App Settings (DEEPGRAM_API_KEY) to use Deepgram transcription." };
+      const result: DeepgramKeyTestResult = await testDeepgramKey(key);
+      return { saved: true as const, ...result };
+    }),
+  }),
+  localWhisper: router({
+    /**
+     * The local GPU (Faster-Whisper) server has no key — it is addressed by
+     * LOCAL_WHISPER_URL on the server. This probe POSTs a minimal audio file
+     * to the configured URL to confirm the server is reachable and speaking
+     * the expected JSON contract.
+     */
+    test: protectedProcedure.mutation(async ({ ctx }) => {
+      void ctx;
+      const config = localWhisperConfig();
+      if (!config) return { saved: false as const, status: "unavailable" as const, message: "LOCAL_WHISPER_URL is not configured on the server. Set it in App Settings (and LOCAL_WHISPER_TOKEN if required) to use the local GPU transcription provider." };
+      try {
+        // A 1 ms silent WAV keeps the probe cheap; the local server returns
+        // its JSON transcript shape (or an HTTP 400 with the same shape for
+        // empty audio), both of which prove the endpoint is alive.
+        const response = await fetch(`${config.url.replace(/\/+$/, "")}/transcribe`, {
+          method: "POST",
+          headers: config.token ? { Authorization: `Bearer ${config.token}` } : undefined,
+          body: "1ms-of-silence",
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (response.status === 404) return { saved: true as const, status: "unavailable" as const, message: `The local GPU server at ${config.url} does not expose a /transcribe endpoint. Point LOCAL_WHISPER_URL at a running Faster-Whisper server.` };
+        if (response.ok) return { saved: true as const, status: "verified" as const, message: `Local GPU server at ${config.url} responded successfully.` };
+        if (response.status === 400 || response.status === 422) return { saved: true as const, status: "verified" as const, message: `Local GPU server at ${config.url} is reachable (rejected the empty probe as expected).` };
+        return { saved: true as const, status: "unavailable" as const, message: `The local GPU server returned ${response.status}.` };
+      } catch {
+        return { saved: false as const, status: "unavailable" as const, message: `The local GPU server at ${config.url} could not be reached from this server.` };
+      }
+    }),
   }),
   groq: router({
     models: publicProcedure.query(() => ({ transcription: GROQ_TRANSCRIPTION_MODEL, vision: GROQ_VISION_MODEL })),

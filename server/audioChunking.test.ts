@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planPcmWavTranscriptionRanges, SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_DIRECT_WAV_DURATION_MS, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, scanMp3FrameRanges, splitMp3ForTranscription, splitPcmWavForTranscription } from "./audioChunking";
+import { planPcmWavTranscriptionRanges, SAFE_GROQ_DIRECT_WAV_BYTES, SAFE_GROQ_DIRECT_WAV_DURATION_MS, SAFE_GROQ_LONG_WAV_CHUNK_DURATION_MS, SAFE_GROQ_TRANSCRIPTION_CHUNK_BYTES, scanMp3FrameRanges, splitMp3ForTranscription, splitPcmWavForTranscription } from "./audioChunking";
 
 function mpeg1Layer3Frame() {
   const length = 417;
@@ -95,23 +95,24 @@ describe("WAV transcription preparation", () => {
     expect(chunks[0]?.bytes).toEqual(source);
   });
 
-  it("ignores an inflated WAV byte-rate header and keeps a mid-length narration as one direct request", () => {
-    const source = pcmWav(3_200_000, 64_000);
+  it("ignores an inflated WAV byte-rate header and keeps a short narration as one direct request", () => {
+    const source = pcmWav(1_920_000, 64_000);
     const chunks = splitPcmWavForTranscription(source);
     expect(chunks).toHaveLength(1);
-    expect(chunks[0]?.contentEndMs).toBe(100_000);
+    expect(chunks[0]?.contentEndMs).toBe(60_000);
     expect(new DataView(chunks[0]!.bytes.buffer).getUint32(28, true)).toBe(32_000);
   });
 
-  it("splits a file-size-safe PCM WAV longer than the duration cap into bounded chunks", () => {
+  it("splits narration longer than the direct cap into 30-second windows that Whisper transcribes reliably", () => {
     const source = pcmWav(19_200_000);
     const chunks = splitPcmWavForTranscription(source);
 
-    expect(SAFE_GROQ_DIRECT_WAV_DURATION_MS).toBe(300_000);
-    expect(chunks).toHaveLength(3);
-    expect(chunks[0]?.contentEndMs).toBeLessThanOrEqual(SAFE_GROQ_DIRECT_WAV_DURATION_MS);
-    expect(chunks[1]?.contentStartMs).toBe(chunks[0]?.contentEndMs);
-    expect(chunks[2]?.contentStartMs).toBe(chunks[1]?.contentEndMs);
+    expect(SAFE_GROQ_DIRECT_WAV_DURATION_MS).toBe(90_000);
+    expect(SAFE_GROQ_LONG_WAV_CHUNK_DURATION_MS).toBe(30_000);
+    // 30s windows include the 4s overlap, so later windows advance 26s of new content: 1 + ceil((600-30)/26) = 23.
+    expect(chunks).toHaveLength(23);
+    expect(chunks.every(chunk => chunk.contentEndMs - chunk.contentStartMs <= SAFE_GROQ_LONG_WAV_CHUNK_DURATION_MS)).toBe(true);
+    for (let index = 1; index < chunks.length; index += 1) expect(chunks[index]?.contentStartMs).toBe(chunks[index - 1]?.contentEndMs);
     expect(chunks.at(-1)?.contentEndMs).toBe(600_000);
     expect(chunks.every(chunk => chunk.bytes.byteLength <= SAFE_GROQ_DIRECT_WAV_BYTES)).toBe(true);
   });
@@ -125,10 +126,10 @@ describe("WAV transcription preparation", () => {
     view.setUint32(4, 36 + dataLength, true);
     const plan = planPcmWavTranscriptionRanges(header, 44 + dataLength);
 
-    expect(plan.ranges).toHaveLength(61);
+    expect(plan.ranges).toHaveLength(693);
     expect(plan.ranges[0]?.contentStartMs).toBe(0);
     expect(plan.ranges.at(-1)?.contentEndMs).toBe(18_000_000);
-    expect(plan.ranges.every(range => range.contentEndMs - range.contentStartMs <= SAFE_GROQ_DIRECT_WAV_DURATION_MS)).toBe(true);
+    expect(plan.ranges.every(range => range.contentEndMs - range.contentStartMs <= SAFE_GROQ_LONG_WAV_CHUNK_DURATION_MS)).toBe(true);
     expect(plan.ranges.every(range => range.endByteExclusive - range.startByte + 44 <= SAFE_GROQ_DIRECT_WAV_BYTES)).toBe(true);
   });
 

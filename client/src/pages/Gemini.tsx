@@ -7,10 +7,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
-import { AudioLines, Bot, CheckCircle2, CircleAlert, KeyRound, LoaderCircle, Plus, RefreshCw, ShieldCheck, Trash2, Zap } from "lucide-react";
+import { AudioLines, Bot, CheckCircle2, CircleAlert, Cpu, KeyRound, LoaderCircle, Plus, RefreshCw, ShieldCheck, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
-const statusCopy: Record<string, string> = { verified: "VERIFIED", invalid: "INVALID", permission_restricted: "PERMISSION RESTRICTED", quota_limited: "TEMPORARILY RATE-LIMITED", unavailable: "TEMPORARILY UNAVAILABLE", untested: "UNTESTED" };
+const statusCopy: Record<string, string> = { verified: "VERIFIED", invalid: "INVALID", permission_restricted: "PERMISSION RESTRICTED", quota_limited: "TEMPORARILY RATE-LIMITED", unavailable: "BUSY · RETRY IN 4s", untested: "UNTESTED" };
 const DEFAULT_PROJECT_AUDITED_GROQ_SUFFIX = "Ws5z";
 const NO_PENDING_KEY_IDS: ReadonlySet<number> = new Set();
 type ProjectVerification = "unverified" | "default_project_verified" | "externally_verified";
@@ -44,14 +44,101 @@ export default function Gemini() {
   const groqActivate = trpc.groq.activate.useMutation({ onSuccess: async () => { toast.success("Groq key remains stored and available for verification."); await refreshGroq(); }, onError: error => toast.error(error.message) });
   const geminiRemove = trpc.gemini.remove.useMutation({ onSuccess: async () => { toast.success("Gemini key removed."); await refreshGemini(); }, onError: error => toast.error(error.message) });
   const groqRemove = trpc.groq.remove.useMutation({ onSuccess: async () => { toast.success("Groq key removed."); await refreshGroq(); }, onError: error => toast.error(error.message) });
+  const deepgramTest = trpc.deepgram.test.useMutation({
+    onSuccess: result => { if (result.status === "verified") toast.success(result.message); else if (result.saved) toast.error(result.message); else toast.error(result.message); },
+    onError: error => toast.error(error.message),
+  });
+  const localWhisperTest = trpc.localWhisper.test.useMutation({
+    onSuccess: result => { if (result.status === "verified") toast.success(result.message); else toast.error(result.message); },
+    onError: error => toast.error(error.message),
+  });
 
   if (!isAuthenticated) return <div className="mx-auto max-w-5xl space-y-6"><Hero groqModels={groqModels.data} geminiModel={geminiModel.data} /><AuthPrompt noun="AI provider settings" /></div>;
   return <div className="vs-page-enter mx-auto max-w-5xl space-y-6">
     <Hero groqModels={groqModels.data} geminiModel={geminiModel.data} />
     <section className="vs-surface-subtle rounded-[1.5rem] p-5"><div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-cyan-200" /><div><h2 className="font-semibold text-white">Keys stay private and controlled</h2><p className="mt-1 text-sm leading-6 text-slate-400">Gemini and Groq stay separate. Keys are encrypted and shown only as masked identifiers with their current verification and availability state.</p></div></div></section>
+    <ProviderSelectionGrid
+      deepgramTest={deepgramTest}
+      localWhisperTest={localWhisperTest}
+    />
     <ProviderSection provider="Gemini" accent="cyan" icon={Bot} modelLines={[`Analysis model: ${geminiModel.data ?? "gemini-flash-latest"}`]} description="Manage the Gemini key used for the project’s existing analysis workflow." keys={geminiKeys.data ?? []} loading={geminiKeys.isLoading} adding={geminiAdd.isPending} testing={geminiTest.isPending} verifyingKeyIds={NO_PENDING_KEY_IDS} activating={geminiActivate.isPending} removing={geminiRemove.isPending} onAdd={input => geminiAdd.mutate(input)} onTest={keyId => geminiTest.mutate({ keyId })} onVerify={() => undefined} onActivate={keyId => geminiActivate.mutate({ keyId })} onRemove={keyId => geminiRemove.mutate({ keyId })} />
     <ProviderSection provider="Groq Cloud" accent="violet" icon={Zap} modelLines={[`Narration: ${groqModels.data?.transcription ?? "whisper-large-v3"}`, `Image analysis / pacing: ${groqModels.data?.vision ?? "qwen/qwen3.8-27b"}`]} description="Only keys that pass both real server-side model probes can be selected automatically. Stored but unverified keys remain encrypted and excluded." keys={groqKeys.data ?? []} loading={groqKeys.isLoading} adding={groqAdd.isPending} testing={groqTest.isPending} verifyingKeyIds={verifyingKeyIds} activating={groqActivate.isPending} removing={groqRemove.isPending} onAdd={input => groqAdd.mutate(input)} onTest={keyId => groqTest.mutate({ keyId })} onVerify={keyId => groqVerifyProject.mutate({ keyId })} onActivate={keyId => groqActivate.mutate({ keyId })} onRemove={keyId => groqRemove.mutate({ keyId })} />
   </div>;
+}
+
+function ProviderSelectionGrid({ deepgramTest, localWhisperTest }: {
+  deepgramTest: { isPending: boolean; mutate: (input: { apiKey?: string }) => void };
+  localWhisperTest: { isPending: boolean; mutate: () => void };
+}) {
+  const providerCatalog = trpc.project.providerCatalog.useQuery();
+  const transcriptionProviders = providerCatalog.data?.transcription ?? [];
+  const visionProviders = providerCatalog.data?.visionSync ?? [];
+  return <div className="grid gap-5 md:grid-cols-2">
+    <ProviderSelectionCard
+      title="Transcription provider"
+      accent="emerald"
+      icon={AudioLines}
+      description="Pick the engine that turns your narration into timestamped text. Your keys are managed in the sections below."
+      providers={transcriptionProviders.map(provider => ({ id: provider.id, label: provider.label, description: provider.description, enabled: provider.processingEnabled }))}
+      onSelectTestId="DEEPGRAM_NOVA2"
+      onTest={() => deepgramTest.mutate({ apiKey: "" })}
+      testing={deepgramTest.isPending}
+      onLocalTest={localWhisperTest.mutate}
+      localTesting={localWhisperTest.isPending}
+      defaultProviderId="GROQ_WHISPER"
+    />
+    <ProviderSelectionCard
+      title="Image &amp; sync provider"
+      accent="violet"
+      icon={Bot}
+      description="Pick the engine that analyses your images and syncs them to narration. Gemini and Groq both rotate keys automatically."
+      providers={visionProviders.map(provider => ({ id: provider.id, label: provider.label, description: provider.description, enabled: provider.processingEnabled }))}
+      defaultProviderId="GROQ"
+    />
+  </div>;
+}
+
+function ProviderSelectionCard({ title, accent, icon: Icon, description, providers, defaultProviderId, onSelectTestId, onTest, testing, onLocalTest, localTesting }: {
+  title: string; accent: "emerald" | "violet"; icon: typeof Bot;
+  description: string;
+  providers: { id: string; label: string; description: string; enabled: boolean }[];
+  defaultProviderId: string;
+  onSelectTestId?: string;
+  onTest?: () => void;
+  testing?: boolean;
+  onLocalTest?: () => void;
+  localTesting?: boolean;
+}) {
+  const [selectedId, setSelectedId] = useState(defaultProviderId);
+  const styles = accent === "emerald"
+    ? { icon: "bg-emerald-300/[0.09] text-emerald-200", button: "bg-emerald-300 text-slate-950 hover:bg-emerald-200", badge: "border-emerald-300/20 bg-emerald-300/[0.07] text-emerald-100", ring: "focus-visible:ring-emerald-300/50" }
+    : { icon: "bg-violet-300/[0.1] text-violet-200", button: "bg-violet-300 text-slate-950 hover:bg-violet-200", badge: "border-violet-300/20 bg-violet-300/[0.07] text-violet-100", ring: "focus-visible:ring-violet-300/50" };
+  const selected = providers.find(provider => provider.id === selectedId);
+  return <section className="overflow-hidden rounded-[1.5rem] border border-white/[0.07] bg-[#101827]">
+    <div className="flex gap-3 border-b border-white/[0.055] p-5"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${styles.icon}`}><Icon className="h-5 w-5" /></span><div><h2 className="font-semibold text-white">{title}</h2><p className="mt-1 text-xs leading-5 text-slate-500">{description}</p></div></div>
+    <div className="p-5 space-y-4">
+      <label className="block space-y-1.5"><span className="text-xs font-medium text-slate-300">Provider</span>
+        <select aria-label={title} value={selectedId} onChange={event => setSelectedId(event.target.value)} className="vs-field w-full px-3 py-2.5 text-sm text-slate-100">
+          {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.label}{provider.enabled ? "" : " (coming soon)"}</option>)}
+        </select>
+      </label>
+      {selected ? <div className={`rounded-xl border ${styles.badge} p-3 text-xs leading-5`}><p className="font-semibold">{selected.label}</p><p className="mt-1 text-slate-400">{selected.description}</p>{!selected.enabled ? <p className="mt-1 text-amber-200/80">This provider's processing path will be enabled in a future update. You can still manage its keys now.</p> : null}</div> : null}
+      {onSelectTestId === "DEEPGRAM_NOVA2" ? (
+        <div className="space-y-2">
+          <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+            <p className="text-xs font-semibold text-slate-200">Test Deepgram key</p>
+            <p className="mt-0.5 text-[11px] leading-4 text-slate-500">Verifies your DEEPGRAM_API_KEY configured on the server. No key stored in the browser.</p>
+            <Button size="sm" variant="outline" disabled={testing} onClick={onTest} className="mt-2.5 border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-100 hover:bg-emerald-300/[0.14] hover:text-emerald-50">{testing ? <><LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />Testing…</> : <><ShieldCheck className="mr-1.5 h-3.5 w-3.5" />Test connection</>}</Button>
+          </div>
+          <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+            <p className="text-xs font-semibold text-slate-200">Test local GPU server</p>
+            <p className="mt-0.5 text-[11px] leading-4 text-slate-500">Confirms your LOCAL_WHISPER_URL is reachable from the server.</p>
+            <Button size="sm" variant="outline" disabled={localTesting} onClick={onLocalTest} className="mt-2.5 border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-100 hover:bg-emerald-300/[0.14] hover:text-emerald-50">{localTesting ? <><LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />Testing…</> : <><Cpu className="mr-1.5 h-3.5 w-3.5" />Test local server</>}</Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  </section>;
 }
 
 function Hero({ geminiModel, groqModels }: { geminiModel?: string; groqModels?: { transcription: string; vision: string } }) { return <section className="vs-surface relative overflow-hidden rounded-[1.5rem] p-6 md:p-8"><div className="pointer-events-none absolute right-0 top-0 h-52 w-52 rounded-full bg-violet-400/[0.08] blur-3xl" /><div className="relative flex flex-col gap-6 md:flex-row md:items-end md:justify-between"><div><p className="vs-kicker">AI providers</p><h1 className="vs-page-title mt-2">AI providers, clearly managed.</h1><p className="vs-page-copy mt-3 max-w-2xl">Add, test, verify, and monitor your Gemini and Groq keys without exposing their values in the workspace.</p></div><div className="grid gap-2 sm:grid-cols-2"><ModelBadge icon={Bot} label="Gemini" text={geminiModel ?? "gemini-flash-latest"} /><ModelBadge icon={AudioLines} label="Groq" text={groqModels?.transcription ?? "whisper-large-v3"} /></div></div></section>; }
@@ -64,7 +151,7 @@ function ProviderSection({ provider, accent, icon: Icon, modelLines, description
   const save = () => { onAdd({ label: label.trim() || `${provider} key`, apiKey }); setLabel(""); setApiKey(""); setOpen(false); };
   return <section className="overflow-hidden rounded-[1.5rem] border border-white/[0.07] bg-[#101827]">
     <div className="flex flex-col gap-5 border-b border-white/[0.055] p-6 md:flex-row md:items-start md:justify-between"><div className="flex gap-3"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${styles.icon}`}><Icon className="h-5 w-5" /></span><div><h2 className="font-semibold text-white">{provider}</h2><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">{description}</p><div className="mt-3 flex flex-wrap gap-2">{modelLines.map(line => <Badge key={line} className="border-0 bg-white/[0.06] text-[10px] font-medium text-slate-300 hover:bg-white/[0.06]">{line}</Badge>)}</div></div></div><AddKeyDialog provider={provider} open={open} onOpenChange={setOpen} label={label} setLabel={setLabel} apiKey={apiKey} setApiKey={setApiKey} saving={adding} onSave={save} buttonClass={styles.button} ringClass={styles.ring} /></div>
-    {isGroqPool ? <div className="mx-5 mt-5 flex gap-3 rounded-xl border border-amber-200/10 bg-amber-200/[0.045] p-4"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-amber-100" /><div><p className="text-xs font-semibold text-amber-50">Project verification controls automatic rotation</p><p className="mt-1 max-w-3xl text-xs leading-5 text-amber-100/70">The existing Default Project key ending in <span className="font-mono text-amber-50">…{DEFAULT_PROJECT_AUDITED_GROQ_SUFFIX}</span> is audited. For every other stored key, <strong>Verify project</strong> runs real server-side Whisper and image-analysis/pacing probes. A full key is never sent to the browser.</p></div></div> : null}
+    {isGroqPool ? <div className="mx-5 mt-5 flex gap-3 rounded-xl border border-amber-200/10 bg-amber-200/[0.045] p-4"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-amber-100" /><div><p className="text-xs font-semibold text-amber-50">Project verification controls automatic rotation</p><p className="mt-1 max-w-3xl text-xs leading-5 text-amber-100/70">The existing Default Project key ending in <span className="font-mono text-amber-50">…{DEFAULT_PROJECT_AUDITED_GROQ_SUFFIX}</span> is audited. For every other stored key, <strong>Verify project</strong> runs real server-side Whisper and image-analysis/pacing probes. A full key is never sent to the browser.</p></div></div> : <div className="mx-5 mt-5 flex gap-3 rounded-xl border border-cyan-200/10 bg-cyan-200/[0.045] p-4"><Zap className="mt-0.5 h-4 w-4 shrink-0 text-cyan-100" /><div><p className="text-xs font-semibold text-cyan-50">All active Gemini keys rotate automatically</p><p className="mt-1 max-w-3xl text-xs leading-5 text-cyan-100/70">Every active Gemini key joins the rotation pool (round-robin, least-recently-used first). After each request that key waits ~4 seconds before it can be chosen again, keeping every key inside its 15-requests-per-minute limit. Add more keys to raise throughput without hitting limits.</p></div></div>}
     {loading ? <div className="h-32 animate-pulse bg-white/[0.018]" /> : keys.length ? <div>{keys.map(key => <KeyRow key={key.id} item={key} isGroqPool={isGroqPool} testing={testing} verifying={verifyingKeyIds.has(key.id)} activating={activating} removing={removing} onTest={onTest} onVerify={onVerify} onActivate={onActivate} onRemove={onRemove} />)}</div> : <div className="px-6 py-12 text-center"><KeyRound className="mx-auto h-7 w-7 text-slate-400" /><h3 className="mt-4 text-lg font-semibold text-white">No {provider} API keys configured</h3><p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">Add a key to test it through a minimal server-side request. An invalid or unavailable key is never stored as active.</p><Button onClick={() => setOpen(true)} className={`mt-5 ${styles.button}`}><Plus className="mr-2 h-4 w-4" />Add {provider} API key</Button></div>}
   </section>;
 }

@@ -169,6 +169,13 @@
       "when": 1792871128735,
       "tag": "0023_local_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1793300000000,
+      "tag": "0024_multi_provider",
+      "breakpoints": true
     }
   ]
 }

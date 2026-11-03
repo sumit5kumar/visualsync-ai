@@ -20,6 +20,7 @@ export type PersistedNarrationChunk = {
   byteSize: number;
   status: NarrationChunkStatus;
   attempts: number;
+  timingRecoveryVersion?: number;
   lastAttemptAtMs?: number;
   transcript?: { text: string; language?: string; segments: TimestampedNarrationSegment[] };
   provider?: { maskedKey: string; model: string; durationMs: number; httpStatus?: number; category: string };
@@ -51,15 +52,16 @@ function pcmBlockAlign(wavFmtBase64: string) {
   return fmt.length >= 14 ? fmt.readUInt16LE(12) : 1;
 }
 
-export function splitRepeatedlyFailingPcmWavRange(chunk: PersistedNarrationChunk, overlapMs: number): PersistedNarrationChunk[] | null {
+export function splitRepeatedlyFailingPcmWavRange(chunk: PersistedNarrationChunk, overlapMs: number, minimumContentMs = MIN_ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS): PersistedNarrationChunk[] | null {
   const sourceRange = chunk.sourceRange;
   if (!sourceRange?.wavFmtBase64) return null;
   const contentDurationMs = chunk.contentEndMs - chunk.contentStartMs;
-  if (contentDurationMs <= MIN_ADAPTIVE_PCM_WAV_RANGE_CONTENT_MS) return null;
+  if (contentDurationMs <= minimumContentMs) return null;
   const sourceDurationMs = chunk.endMs - chunk.startMs;
   if (sourceDurationMs <= 0 || chunk.byteSize <= 0) return null;
   const blockAlign = pcmBlockAlign(sourceRange.wavFmtBase64);
-  const bytesPerMs = chunk.byteSize / sourceDurationMs;
+  // byteSize may include a WAV header; source ranges contain only PCM payload.
+  const bytesPerMs = (sourceRange.endByteExclusive - sourceRange.startByte) / sourceDurationMs;
   const midpointContentMs = chunk.contentStartMs + Math.round(contentDurationMs / 2);
   const childRanges = [
     { startMs: chunk.startMs, endMs: midpointContentMs, contentStartMs: chunk.contentStartMs, contentEndMs: midpointContentMs },
@@ -68,7 +70,7 @@ export function splitRepeatedlyFailingPcmWavRange(chunk: PersistedNarrationChunk
   const children: PersistedNarrationChunk[] = [];
   for (const range of childRanges) {
     const startByte = sourceRange.startByte + alignToBlock((range.startMs - chunk.startMs) * bytesPerMs, blockAlign);
-    const endByteExclusive = sourceRange.startByte + alignToBlock((range.endMs - chunk.startMs) * bytesPerMs, blockAlign);
+    const endByteExclusive = range.endMs === chunk.endMs ? sourceRange.endByteExclusive : sourceRange.startByte + alignToBlock((range.endMs - chunk.startMs) * bytesPerMs, blockAlign);
     if (endByteExclusive <= startByte) return null;
     children.push({
       storageKey: chunk.storageKey,
@@ -85,7 +87,7 @@ export function splitRepeatedlyFailingPcmWavRange(chunk: PersistedNarrationChunk
   return children;
 }
 
-const normalizeText = (value: string) => value.trim().toLowerCase().replace(new RegExp("[^\\p{L}\\p{N}\\s]+", "gu"), "").replace(/\s+/g, " ");
+const normalizeText = (value: string) => value.trim().toLowerCase().replace(new RegExp("[^\\p{L}\\p{M}\\p{N}\\s]+", "gu"), "").replace(/\s+/g, " ");
 
 function textsOverlapOrMatch(leftRaw: string, rightRaw: string) {
   const left = normalizeText(leftRaw);
@@ -115,6 +117,9 @@ export function readNarrationTranscriptionState(value: unknown): NarrationTransc
 export function narrationTranscriptionSummary(value: unknown) {
   const state = readNarrationTranscriptionState(value);
   if (!state) return null;
+  // Single-shot transcription (e.g. Deepgram Nova-2) stores no chunks; the UI
+  // should treat this as "analyzed" rather than "0 of 0 chunks / 0 saved".
+  if (state.chunks.length === 0) return null;
   const completed = state.chunks.filter(chunk => chunk.status === "completed").length;
   const waiting = state.chunks.find(chunk => chunk.status === "waiting");
   return {
@@ -130,31 +135,38 @@ export function narrationTranscriptionSummary(value: unknown) {
 export function mergeChunkTranscripts(chunks: PersistedNarrationChunk[]) {
   const merged: TimestampedNarrationSegment[] = [];
   const ordered = chunks.slice().sort((left, right) => left.startMs - right.startMs);
-  for (let chunkIndex = 0; chunkIndex < ordered.length; chunkIndex += 1) {
-    const chunk = ordered[chunkIndex];
-    const hasOverlapWindow = chunkIndex > 0 && chunk.contentStartMs > chunk.startMs;
+  let tailChunk: PersistedNarrationChunk | undefined;
+  for (const chunk of ordered) {
+    // Only compare against the prior source chunk, never a sentence just added
+    // from this chunk. Keep its original coverage even if a replay extends it.
+    const previousChunkTail = merged.at(-1);
+    const previousChunkTailEnd = previousChunkTail?.end ?? 0;
+    const previousChunkTailText = previousChunkTail?.text ?? "";
     const contentBoundarySec = chunk.contentStartMs / 1000;
-    for (const segment of chunk.transcript?.segments ?? []) {
+    const overlapStartSec = Math.max(chunk.startMs, tailChunk?.startMs ?? chunk.startMs) / 1000;
+    const overlapEndSec = Math.min(chunk.contentStartMs, tailChunk?.endMs ?? chunk.startMs) / 1000;
+    for (const segment of usableTranscriptSegments(chunk.transcript?.segments)) {
       const absolute = { ...segment };
       const previous = merged.at(-1);
-      if (!previous) {
-        merged.push(absolute);
-        continue;
-      }
-      const overlaps = absolute.start * 1000 <= previous.end * 1000 + 250;
-      const previousText = normalizeText(previous.text);
-      const currentText = normalizeText(absolute.text);
-      if (overlaps && (previousText === currentText || previousText.includes(currentText) || textsOverlapOrMatch(previous.text, absolute.text))) {
-        if (currentText.length > previousText.length && currentText.includes(previousText)) {
-          previous.text = absolute.text;
-          if (absolute.words) previous.words = absolute.words;
-        } else if (!previous.words && absolute.words) {
-          previous.words = absolute.words;
+      const inPriorChunkOverlap = previous && previous === previousChunkTail
+        && overlapEndSec > overlapStartSec
+        && absolute.start < overlapEndSec && absolute.end > overlapStartSec
+        && absolute.start < previousChunkTailEnd;
+      if (inPriorChunkOverlap) {
+        const overlapsTail = absolute.end > previous.start;
+        if (overlapsTail && textsOverlapOrMatch(previousChunkTailText, absolute.text)) {
+          const previousText = normalizeText(previous.text);
+          const currentText = normalizeText(absolute.text);
+          if (currentText.length > previousText.length && currentText.includes(previousText)) {
+            previous.text = absolute.text;
+            if (absolute.words) previous.words = absolute.words;
+          } else if (!previous.words && absolute.words) {
+            previous.words = absolute.words;
+          }
+          previous.end = Math.max(previous.end, absolute.end);
+          tailChunk = chunk;
+          continue;
         }
-        previous.end = Math.max(previous.end, absolute.end);
-        continue;
-      }
-      if (hasOverlapWindow) {
         const midpointSec = (absolute.start + absolute.end) / 2;
         if (absolute.end <= contentBoundarySec + 0.15 || (midpointSec < contentBoundarySec - 0.1 && previous.end >= contentBoundarySec - 0.5)) {
           continue;
@@ -166,9 +178,35 @@ export function mergeChunkTranscripts(chunks: PersistedNarrationChunk[]) {
         }
       }
       merged.push(absolute);
+      tailChunk = chunk;
     }
   }
   return merged.sort((left, right) => left.start - right.start || left.end - right.end);
+}
+
+export function usableTranscriptSegments(value: unknown): TimestampedNarrationSegment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((segment): TimestampedNarrationSegment[] => {
+    if (!segment || typeof segment !== "object" || !Number.isFinite(segment.start) || segment.start < 0 || !Number.isFinite(segment.end) || segment.end <= segment.start) return [];
+    const words = Array.isArray(segment.words) ? segment.words.filter((word: NonNullable<TimestampedNarrationSegment["words"]>[number]) => word && typeof word.word === "string" && Number.isFinite(word.start) && Number.isFinite(word.end) && word.end >= word.start) : undefined;
+    // Whisper can provide valid timed speech with blank segment text. Preserve
+    // those words instead of silently deleting the entire spoken interval.
+    const text = typeof segment.text === "string" && segment.text.trim() ? segment.text : (words ?? []).map((word: { word: string }) => word.word).join(" ").trim();
+    return text ? [{ ...segment, text, ...(words ? { words } : {}) }] : [];
+  });
+}
+
+export function readPacingTranscriptSegments(value: unknown): TimestampedNarrationSegment[] {
+  // Repair old merged analyses locally, but never replace them with a partial cache.
+  const state = readNarrationTranscriptionState(value);
+  if (state?.sourcePrepared && state.chunks.length > 0 && state.chunks.every(chunk => chunk.status === "completed")) {
+    const chunks = state.chunks.map(chunk => ({
+      ...chunk,
+      transcript: { ...chunk.transcript, text: chunk.transcript?.text ?? "", segments: usableTranscriptSegments(chunk.transcript?.segments) },
+    }));
+    if (chunks.every(chunk => chunk.transcript.segments.length > 0)) return mergeChunkTranscripts(chunks);
+  }
+  return usableTranscriptSegments(value && typeof value === "object" ? (value as Record<string, unknown>).segments : undefined);
 }
 
 export function summarizeNarrationText(chunks: PersistedNarrationChunk[]) {
@@ -199,16 +237,45 @@ export function shiftSegmentTimestamps<T extends { start: number; end: number; w
 // through the dropped range.
 export const MAX_ALLOWED_INTERNAL_WORD_GAP_MS = 10_000;
 
-export function transcriptionWordGapQuality(segments: Array<{ start: number; end: number; words?: Array<{ word: string; start: number; end: number }> }>) {
+export function transcriptionWordGapQuality(segments: Array<{ start: number; end: number; words?: Array<{ word: string; start: number; end: number }> }>, range?: { startMs: number; endMs: number }) {
   const words = segments
     .flatMap(segment => (Array.isArray(segment.words) ? segment.words : []))
     .filter(word => Number.isFinite(word.start) && Number.isFinite(word.end) && word.end >= word.start)
     .sort((left, right) => left.start - right.start);
   let largestGapMs = 0;
+  let largestWordDurationMs = 0;
+  for (const word of words) largestWordDurationMs = Math.max(largestWordDurationMs, (word.end - word.start) * 1000);
   for (let index = 1; index < words.length; index += 1) {
     const gapMs = (words[index].start - words[index - 1].end) * 1000;
     if (Number.isFinite(gapMs) && gapMs > largestGapMs) largestGapMs = gapMs;
   }
-  return { largestGapMs, wordCount: words.length };
+  let outOfRangeMs = 0;
+  if (range && words.length) {
+    const firstMs = words[0].start * 1000;
+    const lastMs = Math.max(...words.map(word => word.end * 1000));
+    largestGapMs = Math.max(largestGapMs, firstMs - range.startMs, range.endMs - lastMs);
+    outOfRangeMs = Math.max(0, range.startMs - firstMs, lastMs - range.endMs);
+  }
+  // Suspicion triggers bounded audio re-checks, not invented timestamps. A real
+  // pause can also trigger this gate; retries/splitting remain strictly bounded.
+  const needsRecovery = largestGapMs > MAX_ALLOWED_INTERNAL_WORD_GAP_MS || largestWordDurationMs > 4_000 || outOfRangeMs > 1_500;
+  return { largestGapMs, largestWordDurationMs, outOfRangeMs, wordCount: words.length, needsRecovery };
+}
+
+/** Re-open only old suspect chunks; preserve healthy cached analysis and progress. */
+export function recoverUnreliableNarrationChunks(state: NarrationTranscriptionState): NarrationTranscriptionState {
+  let changed = false;
+  const chunks = state.chunks.flatMap(chunk => {
+    if (chunk.status !== "completed" || !chunk.transcript || chunk.timingRecoveryVersion === 1 || !transcriptionWordGapQuality(chunk.transcript.segments, chunk).needsRecovery) return [chunk];
+    changed = true;
+    const pending = { ...chunk, status: "pending" as const, attempts: 0, timingRecoveryVersion: 1, transcript: undefined, provider: undefined };
+    const splitBounded = (part: PersistedNarrationChunk): PersistedNarrationChunk[] => {
+      if (part.endMs - part.startMs <= 30_000) return [part];
+      const children = splitRepeatedlyFailingPcmWavRange(part, Math.max(4_000, state.chunkOverlapMs));
+      return children ? children.flatMap(child => splitBounded({ ...child, timingRecoveryVersion: 1 })) : [part];
+    };
+    return splitBounded(pending);
+  });
+  return changed ? { ...state, chunks, chunkOverlapMs: chunks.length > 1 ? Math.max(4_000, state.chunkOverlapMs) : state.chunkOverlapMs, lastError: undefined } : state;
 }
 
